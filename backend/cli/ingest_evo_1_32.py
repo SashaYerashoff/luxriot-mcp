@@ -286,6 +286,18 @@ def _normalize(vec: list[float]) -> array:
 
 def _prepare_embedding_text(text: str, max_chars: int) -> str:
     t = (text or "").replace("\x00", " ").strip()
+    t = (
+        t.replace("\u00a0", " ")
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\u2026", "...")
+    )
+    # LM Studio embedding models can crash on some unicode punctuation; keep embeddings ASCII-safe.
+    t = t.encode("ascii", "ignore").decode("ascii")
     if max_chars > 0 and len(t) > max_chars:
         t = t[:max_chars]
     return t
