@@ -1,0 +1,33 @@
+# luxriot-mcp
+
+Docs-grounded Luxriot EVO assistant (Evo 1.32).
+
+## Quickstart
+
+1) Ingest docs (writes `datastore/evo_1_32/`):
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r backend/requirements.txt
+python3 backend/cli/ingest_evo_1_32.py --docs-dir docs --out-dir datastore/evo_1_32
+```
+
+2) Run backend (FastAPI):
+
+```bash
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+3) Open `frontend-mock.html` in your browser (it calls `http://localhost:8000`).
+
+## Environment variables
+
+- `LMSTUDIO_BASE_URL` (default `http://localhost:1234`)
+- `LMSTUDIO_MODEL` (optional; auto-detected if unset)
+- `LUXRIOT_DOCS_VERSION` (default `evo_1_32`)
+- `LUXRIOT_APP_DB_PATH` (default `backend/data/app.sqlite`)
+
+## MCP server
+
+See `mcp-server/README.md` and `mcp-server/mcp.sample.json`.

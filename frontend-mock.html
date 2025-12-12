@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>MCP Interface Mock — Admin + Redactor</title>
+  <style>
+    :root{
+      --bg:#0e0f11;
+      --panel:#16181c;
+      --panel2:#14161a;
+      --border:#262a31;
+      --text:#d6d9df;
+      --muted:#8a9099;
+      --accent:#3fa37c;
+      --danger:#d85c5c;
+      --ok:#69d17a;
+      --warn:#d8b15c;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;height:100vh;overflow:hidden;background:var(--bg);color:var(--text);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    }
+    .app{
+      position:relative;height:100%;padding:24px;border:1px solid var(--border);border-radius:16px;
+    }
+
+    /* Header */
+    .header{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--muted);}
+    .logo{display:flex;gap:10px;align-items:center}
+    .logo-dot{width:14px;height:14px;background:var(--accent);border-radius:4px}
+    .brand{font-weight:700;font-size:22px;color:var(--text);letter-spacing:.5px;font-style:italic}
+    .header-right{display:flex;align-items:center;gap:14px;}
+
+    /* Center state */
+    .center{
+      position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      pointer-events:none;text-align:center;color:var(--muted);font-size:18px;
+    }
+
+    /* Input */
+    .input-wrap{
+      position:absolute;left:50%;bottom:28px;transform:translateX(-50%);
+      width:min(980px, 86%);display:flex;align-items:flex-end;gap:16px;
+    }
+    .input-area{
+      flex:1;background:var(--panel);border:1px solid var(--border);border-radius:16px;
+      padding:18px;min-height:92px;color:var(--text);
+    }
+    .send{
+      background:rgba(63,163,124,.35);border:1px solid rgba(63,163,124,.45);
+      color:var(--text);border-radius:24px;padding:12px 20px;cursor:pointer;
+    }
+
+    /* Floating actions */
+    .actions-left{position:absolute;left:28px;bottom:34px;display:flex;gap:14px;align-items:center;}
+    .actions-right{position:absolute;right:28px;bottom:54px;display:flex;flex-direction:column;gap:12px;align-items:center;}
+    .action{
+      width:46px;height:46px;border-radius:50%;background:var(--panel);border:1px solid var(--border);
+      display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
+    }
+
+    /* Small pop panels (history) */
+    .mini-panel{
+      position:absolute;left:0;bottom:58px;width:260px;background:var(--panel);
+      border:1px solid var(--border);border-radius:14px;padding:14px;display:none;
+      font-size:13px;color:var(--muted);
+    }
+    .mini-panel.visible{display:block}
+    .mini-panel .title{font-size:13px;color:var(--text);margin-bottom:10px;opacity:.9;}
+    .mini-item{padding:8px 0;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .mini-item:last-child{border-bottom:none}
+
+    /* Overlay */
+    .overlay{position:absolute;inset:0;background:rgba(0,0,0,.0);display:none;}
+    .overlay.visible{display:block}
+
+    /* Modal panels shared */
+    .modal{
+      position:absolute;left:50%;bottom:142px;transform:translateX(-50%);
+      width:min(980px, 86%);
+      background:linear-gradient(180deg, rgba(22,24,28,.92), rgba(20,22,26,.92));
+      border:1px solid var(--border);border-radius:18px;padding:18px 18px 16px;
+      box-shadow:0 20px 60px rgba(0,0,0,.45);
+      display:none;backdrop-filter: blur(8px);
+    }
+    .modal.visible{display:block}
+    .modal-header{font-size:18px;color:var(--text);opacity:.92;margin-bottom:14px;}
+
+    .btn{
+      border-radius:26px;padding:10px 18px;cursor:pointer;font-size:12px;letter-spacing:.4px;
+      border:1px solid rgba(63,163,124,.45);background:rgba(63,163,124,.25);color:var(--text);
+    }
+    .btn.ghost{background:rgba(63,163,124,.15);border-color:rgba(63,163,124,.30);}
+    .btn.primary{background:rgba(63,163,124,.40);border-color:rgba(63,163,124,.55);}
+    .btn.danger{background:rgba(216,92,92,.18);border-color:rgba(216,92,92,.35);}
+    .btn.small{padding:8px 12px;border-radius:18px;font-size:11px;}
+
+    /* Admin panel */
+    .admin-grid{
+      display:grid;grid-template-columns:1fr 1fr;gap:22px;font-size:13px;color:var(--muted);
+      line-height:1.8;padding:4px 6px 10px;
+    }
+    .row{padding:4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .slash{color:rgba(214,217,223,.75)}
+    .kbd{color:rgba(214,217,223,.85)}
+    .admin-actions{display:flex;justify-content:flex-end;gap:14px;margin-top:8px;padding-right:6px;}
+
+    /* Redactor panel */
+    .redactor-grid{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap:18px;
+      align-items:start;
+    }
+    .card{
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:rgba(22,24,28,.55);
+      padding:14px;
+    }
+    .card h3{
+      margin:0 0 10px 0;
+      font-size:13px;
+      color:var(--text);
+      opacity:.9;
+      font-weight:600;
+      letter-spacing:.2px;
+    }
+    label{font-size:12px;color:var(--muted);display:block;margin:10px 0 6px;}
+    input[type="text"], textarea, select{
+      width:100%;
+      background:rgba(16,17,19,.65);
+      border:1px solid var(--border);
+      border-radius:10px;
+      color:var(--text);
+      padding:10px 10px;
+      outline:none;
+      font-size:12px;
+    }
+    textarea{min-height:90px;resize:vertical;}
+    .inline{
+      display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    }
+    .pill{
+      display:inline-flex;gap:8px;align-items:center;
+      border:1px solid var(--border);border-radius:999px;padding:6px 10px;
+      background:rgba(16,17,19,.45);
+      font-size:12px;color:var(--muted);
+      user-select:none;
+    }
+    .pill input{accent-color: var(--accent);}
+    .meter{
+      display:flex;gap:10px;align-items:center;
+    }
+    input[type="range"]{width:100%;}
+    .tiny{font-size:11px;color:var(--muted);opacity:.95;}
+    .hr{height:1px;background:var(--border);margin:12px 0;}
+    .right-col-controls{
+      display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;
+    }
+    .list{
+      max-height:360px;overflow:auto;padding-right:6px;
+    }
+    .item{
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      margin-bottom:10px;
+      background:rgba(16,17,19,.35);
+      cursor:pointer;
+    }
+    .item .top{
+      display:flex;justify-content:space-between;gap:10px;align-items:center;
+      font-size:12px;
+    }
+    .badge{
+      padding:4px 8px;border-radius:999px;border:1px solid var(--border);
+      font-size:11px;color:var(--muted);
+    }
+    .score{
+      color:var(--text);
+      border-color:rgba(63,163,124,.35);
+      background:rgba(63,163,124,.10);
+    }
+    .tagline{margin-top:6px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .muted{color:var(--muted)}
+    .stack{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px;}
+
+    /* User settings panel */
+    .user-settings{
+      position:absolute;top:56px;right:24px;width:280px;background:var(--panel);
+      border:1px solid var(--border);border-radius:14px;padding:14px;font-size:13px;color:var(--muted);
+      display:none;
+    }
+    .user-settings.visible{display:block}
+    .user-settings .title{color:var(--text);margin-bottom:10px;opacity:.9}
+    .user-settings .row2{padding:6px 0;border-bottom:1px solid var(--border)}
+    .user-settings .row2:last-child{border-bottom:none}
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div class="logo">
+      <div class="logo-dot"></div>
+      <div class="brand">Luxriot</div>
+    </div>
+
+    <div class="header-right">
+      <div id="userToggle" style="cursor:pointer">Logged as Admin</div>
+      <div id="topToolToggle" class="action" title="Admin tools">🧰</div>
+    </div>
+  </div>
+
+  <div class="center">
+    Hi Sasha, I am ready to assist and learn.
+  </div>
+
+  <!-- Left bottom actions -->
+  <div class="actions-left">
+    <div class="action" id="historyBtn" title="History">🕘
+      <div id="historyPanel" class="mini-panel">
+        <div class="title">Chat history:</div>
+        <div class="mini-item"><span class="slash">/</span> About That</div>
+        <div class="mini-item"><span class="slash">/</span> About Something Else</div>
+        <div class="mini-item"><span class="slash">/</span> How to how when nothin…</div>
+      </div>
+    </div>
+
+    <div class="action" id="toolsBtn" title="Tools">🛠</div>
+
+    <!-- NEW: Redactor panel toggle -->
+    <div class="action" id="redactorBtn" title="Redactor / Annotations">✎</div>
+  </div>
+
+  <div class="actions-right">
+    <div class="action" title="Voice / Attach">🎙+</div>
+  </div>
+
+  <div class="input-wrap">
+    <div class="input-area" id="userInput" contenteditable="true" aria-label="User input">User input</div>
+    <button class="send" id="sendBtn">SEND</button>
+  </div>
+
+  <div id="overlay" class="overlay"></div>
+
+  <!-- Admin tools panel -->
+  <div id="adminPanel" class="modal" role="dialog" aria-label="Administrator tools">
+    <div class="modal-header">Administrator tools:</div>
+
+    <div class="admin-grid">
+      <div>
+        <div class="row"><span class="slash">/</span> AI server IP: <span class="kbd">192.168.1.104:1234</span></div>
+        <div class="row"><span class="slash">/</span> Index/update documents: <span class="kbd">path/to/manual.md</span></div>
+        <div class="row"><span class="slash">/</span> Model ID: <span class="kbd">Qwen/qwen3-vl-8b-instruct</span></div>
+        <div class="row"><span class="slash">/</span> System prompt: <span class="kbd">path/to/prompt.md</span></div>
+        <div class="row"><span class="slash">/</span> Temperature: <span class="kbd">0.2</span> &nbsp;|&nbsp; Top K: <span class="kbd">50</span> &nbsp;|&nbsp; Top P: <span class="kbd">0.85</span></div>
+      </div>
+      <div>
+        <div class="row"><span class="slash">/</span> Log connection: <span class="kbd">y/n</span></div>
+        <div class="row"><span class="slash">/</span> MCP Search Internet: <span class="kbd">y/n</span> &nbsp;|&nbsp; MCP Luxriot docs: <span class="kbd">y/n</span></div>
+        <div class="row"><span class="slash">/</span> Etc…</div>
+      </div>
+    </div>
+
+    <div class="admin-actions">
+      <button class="btn ghost" id="defaultsBtn">DEFAULTS</button>
+      <button class="btn" id="applyBtn">APPLY</button>
+      <button class="btn primary" id="adminOkBtn">OK</button>
+    </div>
+  </div>
+
+  <!-- NEW: Redactor panel -->
+  <div id="redactorPanel" class="modal" role="dialog" aria-label="Redactor panel">
+    <div class="modal-header">Redactor panel:</div>
+
+    <div class="redactor-grid">
+      <!-- Left: annotation form -->
+      <div class="card">
+        <h3>Annotate last answer</h3>
+
+        <div class="tiny muted" id="activeTarget">
+          Target: <span class="kbd">last_assistant_message</span>
+        </div>
+
+        <label>Score (0–10)</label>
+        <select id="score">
+          <option value="10">10</option><option value="9">9</option><option value="8">8</option>
+          <option value="7" selected>7</option><option value="6">6</option><option value="5">5</option>
+          <option value="4">4</option><option value="3">3</option><option value="2">2</option>
+          <option value="1">1</option><option value="0">0</option>
+        </select>
+
+        <label>Tags</label>
+        <div class="inline" id="tags">
+          <span class="pill"><input type="checkbox" value="correct"> correct</span>
+          <span class="pill"><input type="checkbox" value="partially_correct" checked> partially_correct</span>
+          <span class="pill"><input type="checkbox" value="wrong"> wrong</span>
+          <span class="pill"><input type="checkbox" value="hallucination"> hallucination</span>
+          <span class="pill"><input type="checkbox" value="needs_citations"> needs_citations</span>
+          <span class="pill"><input type="checkbox" value="noncompliant"> noncompliant</span>
+          <span class="pill"><input type="checkbox" value="style_issue"> style_issue</span>
+          <span class="pill"><input type="checkbox" value="unsafe"> unsafe</span>
+          <span class="pill"><input type="checkbox" value="too_long"> too_long</span>
+          <span class="pill"><input type="checkbox" value="too_short"> too_short</span>
+        </div>
+
+        <div class="hr"></div>
+
+        <label>What’s right (keep)</label>
+        <textarea id="right" placeholder="Short bullets: what is correct/useful and should remain."></textarea>
+
+        <label>What’s wrong (fix)</label>
+        <textarea id="wrong" placeholder="Short bullets: what is incorrect/missing/misleading."></textarea>
+
+        <label>Golden fix (optional)</label>
+        <textarea id="golden" placeholder="Corrected answer (or corrected fragments). High-value training signal."></textarea>
+
+        <label>Reviewer confidence</label>
+        <div class="meter">
+          <input id="confidence" type="range" min="0" max="100" value="80">
+          <div class="tiny"><span id="confVal">0.80</span></div>
+        </div>
+
+        <div class="inline" style="margin-top:10px;justify-content:space-between;">
+          <span class="pill">
+            <input id="includeContext" type="checkbox" checked>
+            include full context on export
+          </span>
+          <button class="btn primary" id="saveAnnotationBtn">SAVE ANNOTATION</button>
+        </div>
+
+        <div class="tiny" id="saveHint" style="margin-top:10px;opacity:.9;"></div>
+      </div>
+
+      <!-- Right: triage + export -->
+      <div class="card">
+        <h3>Triage & export</h3>
+
+        <div class="right-col-controls">
+          <div class="inline">
+            <label style="margin:0;">Filter tag</label>
+            <select id="filterTag" style="width:180px;">
+              <option value="">(any)</option>
+              <option value="correct">correct</option>
+              <option value="partially_correct">partially_correct</option>
+              <option value="wrong">wrong</option>
+              <option value="hallucination">hallucination</option>
+              <option value="unsafe">unsafe</option>
+              <option value="needs_citations">needs_citations</option>
+              <option value="noncompliant">noncompliant</option>
+              <option value="style_issue">style_issue</option>
+              <option value="too_long">too_long</option>
+              <option value="too_short">too_short</option>
+            </select>
+          </div>
+
+          <div class="inline">
+            <label style="margin:0;">Sort</label>
+            <select id="sortBy" style="width:160px;">
+              <option value="newest" selected>newest</option>
+              <option value="oldest">oldest</option>
+              <option value="score_low">score (low)</option>
+              <option value="score_high">score (high)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="list" id="annoList"></div>
+
+        <div class="stack">
+          <button class="btn ghost small" id="exportJsonlBtn">EXPORT JSONL</button>
+          <button class="btn ghost small" id="exportCsvBtn">EXPORT CSV</button>
+          <button class="btn danger small" id="clearBtn">CLEAR LIST</button>
+          <button class="btn primary small" id="redactorOkBtn">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User settings panel -->
+  <div id="userSettings" class="user-settings">
+    <div class="title">User Settings</div>
+    <div class="row2"><span class="slash">/</span> Organization: YourMom</div>
+    <div class="row2"><span class="slash">/</span> Mailto: admin@god.com</div>
+    <div class="row2"><span class="slash">/</span> Password: *******</div>
+    <div class="row2"><span class="slash">/</span> Avatar: portrait.jpg</div>
+  </div>
+
+</div>
+
+<script>
+  // ---------- Mock "conversation" state (just enough for annotations) ----------
+  const session = {
+    session_id: "sess_mock",
+    model: { id: "Qwen/qwen3-vl-8b-instruct", temp: 0.2, top_k: 50, top_p: 0.85 },
+    tool_context: { mcp_internet: false, mcp_luxriot_docs: true }
+  };
+
+  // In a real app, this would come from actual message objects
+  let lastUserMessage = "User input";
+  let lastAssistantMessage = "Hi Sasha, I am ready to assist and learn.";
+
+  const annotations = []; // in-memory only
+
+  // ---------- UI handles ----------
+  const historyPanel = document.getElementById('historyPanel');
+  const overlay = document.getElementById('overlay');
+
+  const adminPanel = document.getElementById('adminPanel');
+  const redactorPanel = document.getElementById('redactorPanel');
+
+  const toolsBtn = document.getElementById('toolsBtn');
+  const topToolToggle = document.getElementById('topToolToggle');
+  const redactorBtn = document.getElementById('redactorBtn');
+  const historyBtn = document.getElementById('historyBtn');
+
+  const userToggle = document.getElementById('userToggle');
+  const userSettings = document.getElementById('userSettings');
+
+  // Redactor fields
+  const scoreEl = document.getElementById('score');
+  const rightEl = document.getElementById('right');
+  const wrongEl = document.getElementById('wrong');
+  const goldenEl = document.getElementById('golden');
+  const confidenceEl = document.getElementById('confidence');
+  const confValEl = document.getElementById('confVal');
+  const includeContextEl = document.getElementById('includeContext');
+
+  const saveBtn = document.getElementById('saveAnnotationBtn');
+  const saveHint = document.getElementById('saveHint');
+
+  const annoList = document.getElementById('annoList');
+  const filterTag = document.getElementById('filterTag');
+  const sortBy = document.getElementById('sortBy');
+
+  // Mock send behavior (updates last messages)
+  const userInput = document.getElementById('userInput');
+  document.getElementById('sendBtn').addEventListener('click', () => {
+    const text = userInput.innerText.trim() || "…";
+    lastUserMessage = text;
+    // mock assistant reply changes slightly (so redactor feels attached to something)
+    lastAssistantMessage = "Mock assistant answer: " + text.slice(0, 120);
+    saveHint.textContent = "Updated last answer target.";
+  });
+
+  // ---------- Modal control ----------
+  function closeAllModals() {
+    historyPanel.classList.remove('visible');
+    adminPanel.classList.remove('visible');
+    redactorPanel.classList.remove('visible');
+    overlay.classList.remove('visible');
+  }
+  function openModal(which) {
+    historyPanel.classList.remove('visible');
+    adminPanel.classList.remove('visible');
+    redactorPanel.classList.remove('visible');
+
+    which.classList.add('visible');
+    overlay.classList.add('visible');
+  }
+
+  historyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = !historyPanel.classList.contains('visible');
+    closeAllModals();
+    if (willOpen) historyPanel.classList.add('visible');
+  });
+
+  toolsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (adminPanel.classList.contains('visible')) closeAllModals();
+    else openModal(adminPanel);
+  });
+  topToolToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (adminPanel.classList.contains('visible')) closeAllModals();
+    else openModal(adminPanel);
+  });
+
+  redactorBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (redactorPanel.classList.contains('visible')) closeAllModals();
+    else {
+      openModal(redactorPanel);
+      renderList();
+      saveHint.textContent = "";
+    }
+  });
+
+  overlay.addEventListener('click', () => closeAllModals());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllModals(); });
+
+  // user settings (not modal)
+  userToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    userSettings.classList.toggle('visible');
+  });
+
+  // Admin buttons (mock)
+  document.getElementById('adminOkBtn').addEventListener('click', closeAllModals);
+  document.getElementById('applyBtn').addEventListener('click', () => pulse(adminPanel));
+  document.getElementById('defaultsBtn').addEventListener('click', () => pulse(adminPanel));
+
+  // Redactor OK
+  document.getElementById('redactorOkBtn').addEventListener('click', closeAllModals);
+
+  function pulse(el){
+    el.style.transform = 'translateX(-50%) scale(0.995)';
+    setTimeout(() => el.style.transform = 'translateX(-50%) scale(1)', 120);
+  }
+
+  // ---------- Redactor logic ----------
+  confidenceEl.addEventListener('input', () => {
+    confValEl.textContent = (confidenceEl.value/100).toFixed(2);
+  });
+
+  function getSelectedTags() {
+    return Array.from(document.querySelectorAll('#tags input[type="checkbox"]:checked'))
+      .map(x => x.value);
+  }
+
+  function makeId() {
+    const t = new Date().toISOString();
+    const n = String(annotations.length + 1).padStart(3,'0');
+    return `msg_${t}_${n}`;
+  }
+
+  function resetFormLight() {
+    rightEl.value = "";
+    wrongEl.value = "";
+    goldenEl.value = "";
+    // keep score/tags/confidence as-is (faster for batch labeling)
+  }
+
+  saveBtn.addEventListener('click', () => {
+    const item = {
+      id: makeId(),
+      ts: new Date().toISOString(),
+      session_id: session.session_id,
+      model: { ...session.model },
+      input: {
+        user: lastUserMessage,
+        tool_context: { ...session.tool_context },
+        attachments: []
+      },
+      output: { assistant: lastAssistantMessage },
+      label: {
+        score: Number(scoreEl.value),
+        tags: getSelectedTags(),
+        right: rightEl.value.trim(),
+        wrong: wrongEl.value.trim(),
+        golden_fix: goldenEl.value.trim(),
+        reviewer_confidence: Number(confidenceEl.value)/100
+      }
+    };
+
+    annotations.push(item);
+    saveHint.textContent = `Saved annotation #${annotations.length}`;
+    renderList();
+    resetFormLight();
+  });
+
+  filterTag.addEventListener('change', renderList);
+  sortBy.addEventListener('change', renderList);
+
+  function renderList() {
+    let items = [...annotations];
+
+    const ft = filterTag.value;
+    if (ft) items = items.filter(a => (a.label.tags || []).includes(ft));
+
+    switch (sortBy.value) {
+      case "oldest": items.sort((a,b) => a.ts.localeCompare(b.ts)); break;
+      case "score_low": items.sort((a,b) => a.label.score - b.label.score); break;
+      case "score_high": items.sort((a,b) => b.label.score - a.label.score); break;
+      default: items.sort((a,b) => b.ts.localeCompare(a.ts));
+    }
+
+    if (items.length === 0) {
+      annoList.innerHTML = `<div class="tiny muted">No annotations yet. Save one and the pile will begin.</div>`;
+      return;
+    }
+
+    annoList.innerHTML = items.map(a => {
+      const tagStr = (a.label.tags || []).slice(0,3).join(", ");
+      const more = (a.label.tags || []).length > 3 ? ` +${(a.label.tags||[]).length-3}` : "";
+      return `
+        <div class="item" data-id="${a.id}">
+          <div class="top">
+            <span class="badge score">score: ${a.label.score}</span>
+            <span class="badge">${new Date(a.ts).toLocaleString()}</span>
+          </div>
+          <div class="tagline">tags: ${tagStr}${more}</div>
+          <div class="tagline">golden_fix: ${a.label.golden_fix ? "yes" : "no"}</div>
+        </div>
+      `;
+    }).join("");
+
+    // click to load into form for editing (simple: populate fields)
+    document.querySelectorAll('.item').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-id');
+        const a = annotations.find(x => x.id === id);
+        if (!a) return;
+
+        scoreEl.value = String(a.label.score);
+        // set tags
+        document.querySelectorAll('#tags input[type="checkbox"]').forEach(cb => {
+          cb.checked = (a.label.tags || []).includes(cb.value);
+        });
+        rightEl.value = a.label.right || "";
+        wrongEl.value = a.label.wrong || "";
+        goldenEl.value = a.label.golden_fix || "";
+        confidenceEl.value = Math.round((a.label.reviewer_confidence || 0) * 100);
+        confValEl.textContent = (confidenceEl.value/100).toFixed(2);
+        saveHint.textContent = `Loaded ${id} into form (save again to create a new entry).`;
+      });
+    });
+  }
+
+  // ---------- Export ----------
+  function downloadText(filename, text) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function toExportObjects() {
+    const includeContext = includeContextEl.checked;
+
+    return annotations.map(a => {
+      if (includeContext) return a;
+      // strip to essentials
+      return {
+        id: a.id,
+        ts: a.ts,
+        model: a.model,
+        input: { user: a.input.user },
+        output: a.output,
+        label: a.label
+      };
+    });
+  }
+
+  document.getElementById('exportJsonlBtn').addEventListener('click', () => {
+    const objs = toExportObjects();
+    const jsonl = objs.map(o => JSON.stringify(o)).join("\n") + "\n";
+    downloadText(`annotations_${new Date().toISOString().slice(0,10)}.jsonl`, jsonl);
+  });
+
+  function csvEscape(v) {
+    const s = String(v ?? "");
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
+    return s;
+  }
+
+  document.getElementById('exportCsvBtn').addEventListener('click', () => {
+    const objs = toExportObjects();
+    const header = [
+      "id","ts","model_id","temp","top_k","top_p",
+      "user","assistant","score","tags","right","wrong","golden_fix","reviewer_confidence"
+    ];
+    const rows = objs.map(o => ([
+      o.id,
+      o.ts,
+      o.model?.id ?? "",
+      o.model?.temp ?? "",
+      o.model?.top_k ?? "",
+      o.model?.top_p ?? "",
+      o.input?.user ?? "",
+      o.output?.assistant ?? "",
+      o.label?.score ?? "",
+      (o.label?.tags ?? []).join("|"),
+      o.label?.right ?? "",
+      o.label?.wrong ?? "",
+      o.label?.golden_fix ?? "",
+      o.label?.reviewer_confidence ?? ""
+    ]).map(csvEscape).join(","));
+    const csv = header.join(",") + "\n" + rows.join("\n") + "\n";
+    downloadText(`annotations_${new Date().toISOString().slice(0,10)}.csv`, csv);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    annotations.length = 0;
+    renderList();
+    saveHint.textContent = "Cleared annotation list.";
+  });
+
+  // Init
+  renderList();
+</script>
+</body>
+</html>
+

@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+backend/data/*.sqlite
+backend/data/*.sqlite-journal
+
+node_modules/
+dist/
+
+datastore/
+docs/
+
+.DS_Store
+*.log

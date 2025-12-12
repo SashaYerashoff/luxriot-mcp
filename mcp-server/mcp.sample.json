@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "luxriot-mcp": {
+      "command": "node",
+      "args": ["./mcp-server/dist/index.js"],
+      "env": {
+        "LUXRIOT_BACKEND_URL": "http://localhost:8000"
+      }
+    }
+  }
+}
+
