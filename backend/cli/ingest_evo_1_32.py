@@ -7,6 +7,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import unicodedata
 from collections import Counter
 from array import array
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from markdownify import markdownify as md
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_EMBED_H3_RE = re.compile(r"(?m)^([ \t]*)###(\s+)")
+_CONTROL_RE = re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def log(msg: str) -> None:
@@ -285,10 +288,12 @@ def _normalize(vec: list[float]) -> array:
 
 
 def _prepare_embedding_text(text: str, max_chars: int) -> str:
-    t = (text or "").replace("\x00", " ").strip()
+    t = (text or "").replace("\x00", " ")
+    t = unicodedata.normalize("NFKC", t)
+    t = t.replace("\u00a0", " ")
+    t = t.replace("\\*", "*")
     t = (
-        t.replace("\u00a0", " ")
-        .replace("\u2019", "'")
+        t.replace("\u2019", "'")
         .replace("\u2018", "'")
         .replace("\u201c", '"')
         .replace("\u201d", '"')
@@ -296,11 +301,151 @@ def _prepare_embedding_text(text: str, max_chars: int) -> str:
         .replace("\u2014", "-")
         .replace("\u2026", "...")
     )
-    # LM Studio embedding models can crash on some unicode punctuation; keep embeddings ASCII-safe.
-    t = t.encode("ascii", "ignore").decode("ascii")
+    # Work around an LM Studio embeddings crash triggered by some markdown H3 headings ("### ").
+    # Downgrade to H2 markers instead of stripping (keeps structure stable).
+    t = _EMBED_H3_RE.sub(r"\1##\2", t)
+    t = _markdown_tables_to_text(t)
+    t = t.replace("**", "")
+    t = t.replace("*", "")
+    t = _CONTROL_RE.sub(" ", t)
+    t = t.strip()
     if max_chars > 0 and len(t) > max_chars:
         t = t[:max_chars]
     return t
+
+
+def _markdown_tables_to_text(text: str) -> str:
+    lines: list[str] = []
+    for line in (text or "").splitlines():
+        if "|" not in line:
+            lines.append(line)
+            continue
+        stripped = line.strip().strip("|").strip()
+        if not stripped:
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        # Table separator row: only dashes/colons.
+        if cells and all((not c) or (set(c) <= set("-:")) for c in cells):
+            continue
+        cleaned = []
+        for c in cells:
+            c = c.strip()
+            if not c:
+                continue
+            c = c.replace("**", "")
+            c = re.sub(r"\s+", " ", c).strip()
+            if c:
+                cleaned.append(c)
+        if cleaned:
+            lines.append(" - ".join(cleaned))
+    return "\n".join(lines)
+
+
+def _prepare_embedding_variants(text: str, max_chars: int) -> list[tuple[str, str]]:
+    base = _prepare_embedding_text(text, max_chars)
+    # Keep variants deterministic and only used on failures.
+    variants: list[tuple[str, str]] = [("base", base)]
+
+    ascii_safe = base.encode("ascii", "ignore").decode("ascii")
+    if ascii_safe != base:
+        variants.append(("ascii_safe", ascii_safe))
+
+    collapsed_ws = " ".join(base.split())
+    if collapsed_ws and collapsed_ws != base:
+        variants.append(("collapsed_ws", collapsed_ws))
+
+    for n in (512, 480, 456, 448, 416, 400, 384, 352, 320, 288, 256):
+        if len(base) > n:
+            variants.append((f"truncate_{n}", base[:n]))
+
+    # Drop very short standalone rows (common table artifacts).
+    non_short_lines = [ln for ln in base.splitlines() if len(ln.strip()) >= 12]
+    if non_short_lines:
+        variants.append(("drop_short_lines", "\n".join(non_short_lines)))
+
+    # Last resort: bag-of-words string (stable, punctuation-free).
+    words = re.findall(r"[A-Za-z0-9]+", base)
+    seen: set[str] = set()
+    bag: list[str] = []
+    for w in words:
+        lw = w.lower()
+        if lw in seen:
+            continue
+        seen.add(lw)
+        bag.append(w)
+        if len(" ".join(bag)) >= 420:
+            break
+    if bag:
+        variants.append(("bag_of_words", " ".join(bag)))
+
+    return variants
+
+
+def _embed_texts_resilient(
+    base_url: str,
+    model_id: str,
+    chunk_ids: list[str],
+    raw_texts: list[str],
+    max_chars: int,
+) -> list[list[float]]:
+    prepared = [_prepare_embedding_text(t, max_chars) for t in raw_texts]
+    try:
+        return _embed_texts(base_url, model_id, prepared)
+    except Exception as e:
+        log(f"Embedding batch failed ({len(prepared)} items); trying fallbacks: {e}")
+
+    # Try a few batch-wide fallbacks first to avoid per-chunk slowdown.
+    def bag_of_words(s: str) -> str:
+        words = re.findall(r"[A-Za-z0-9]+", s)
+        seen: set[str] = set()
+        bag: list[str] = []
+        for w in words:
+            lw = w.lower()
+            if lw in seen:
+                continue
+            seen.add(lw)
+            bag.append(w)
+            if len(" ".join(bag)) >= 420:
+                break
+        return " ".join(bag)
+
+    batch_fallbacks: list[tuple[str, list[str]]] = []
+    for n in (512, 448, 384, 320, 256):
+        batch_fallbacks.append((f"truncate_{n}", [t[:n] for t in prepared]))
+    batch_fallbacks.append(("collapsed_ws", [" ".join(t.split()) for t in prepared]))
+    batch_fallbacks.append(("bag_of_words", [bag_of_words(t) for t in prepared]))
+
+    for name, texts in batch_fallbacks:
+        try:
+            vectors = _embed_texts(base_url, model_id, texts)
+            log(f"Embedding batch recovered using variant={name}")
+            return vectors
+        except Exception:
+            continue
+
+    out: list[list[float]] = []
+    for cid, raw, prepared_text in zip(chunk_ids, raw_texts, prepared):
+        try:
+            out.append(_embed_texts(base_url, model_id, [prepared_text])[0])
+            continue
+        except Exception as e:
+            last_err: Exception = e
+
+        for variant_name, variant_text in _prepare_embedding_variants(raw, max_chars):
+            try:
+                out.append(_embed_texts(base_url, model_id, [variant_text])[0])
+                log(f"Embedding recovered for {cid} using variant={variant_name}")
+                break
+            except Exception as e:
+                last_err = e
+        else:
+            snippet = prepared_text[:260].replace("\n", " ")
+            raise RuntimeError(
+                f"Embedding failed for chunk_id={cid} after retries. "
+                f"Last error: {last_err}. Prepared snippet: {snippet}"
+            ) from last_err
+
+    return out
 
 
 def main() -> int:
@@ -500,11 +645,17 @@ def main() -> int:
                 for i in range(0, len(chunk_id_text), emb_batch):
                     batch = chunk_id_text[i : i + emb_batch]
                     ids = [x[0] for x in batch]
-                    texts = [_prepare_embedding_text(x[1], embedding_max_chars) for x in batch]
+                    raw_texts = [x[1] for x in batch]
                     try:
-                        vectors = _embed_texts(lmstudio_base_url, embedding_model_id, texts)
+                        vectors = _embed_texts_resilient(
+                            lmstudio_base_url,
+                            embedding_model_id,
+                            chunk_ids=ids,
+                            raw_texts=raw_texts,
+                            max_chars=embedding_max_chars,
+                        )
                     except Exception as e:
-                        max_len = max((len(t) for t in texts), default=0)
+                        max_len = max((len(t) for t in raw_texts), default=0)
                         raise RuntimeError(
                             f"Embedding request failed at batch {i//emb_batch + 1} (max_chars={max_len}): {e}"
                         ) from e

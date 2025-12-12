@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import unicodedata
 from typing import Any
 
 import httpx
@@ -18,6 +20,56 @@ class LMStudioError(RuntimeError):
 _model_cache_lock = asyncio.Lock()
 _cached_model_id: str | None = None
 
+_EMBED_H3_RE = re.compile(r"(?m)^([ \t]*)###(\s+)")
+_CONTROL_RE = re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _markdown_tables_to_text(text: str) -> str:
+    lines: list[str] = []
+    for line in (text or "").splitlines():
+        if "|" not in line:
+            lines.append(line)
+            continue
+        stripped = line.strip().strip("|").strip()
+        if not stripped:
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and all((not c) or (set(c) <= set("-:")) for c in cells):
+            continue
+        cleaned = []
+        for c in cells:
+            c = c.strip()
+            if not c:
+                continue
+            c = c.replace("**", "")
+            c = re.sub(r"\s+", " ", c).strip()
+            if c:
+                cleaned.append(c)
+        if cleaned:
+            lines.append(" - ".join(cleaned))
+    return "\n".join(lines)
+
+
+def _prepare_embedding_text(text: str, max_chars: int = 4000) -> str:
+    t = (text or "").replace("\x00", " ")
+    t = unicodedata.normalize("NFKC", t).replace("\u00a0", " ").replace("\\*", "*")
+    t = (
+        t.replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\u2026", "...")
+    )
+    # Match ingester workaround: downgrade markdown H3 headings ("### ") to H2 to avoid LM Studio embedding errors.
+    t = _EMBED_H3_RE.sub(r"\1##\2", t)
+    t = _markdown_tables_to_text(t).replace("**", "").replace("*", "")
+    t = _CONTROL_RE.sub(" ", t).strip()
+    if max_chars > 0 and len(t) > max_chars:
+        t = t[:max_chars]
+    return t
+
 
 async def _detect_model_id(client: httpx.AsyncClient, base_url: str) -> str:
     resp = await client.get(f"{base_url}/v1/models")
@@ -26,10 +78,15 @@ async def _detect_model_id(client: httpx.AsyncClient, base_url: str) -> str:
     models = data.get("data") or []
     if not models:
         raise LMStudioError("LM Studio returned no models; load a model in LM Studio.")
-    model_id = models[0].get("id")
-    if not model_id:
-        raise LMStudioError("LM Studio models list missing 'id'.")
-    return str(model_id)
+    for m in models:
+        model_id = str(m.get("id") or "").strip()
+        if not model_id:
+            continue
+        low = model_id.lower()
+        if "embedding" in low or low.startswith("text-embedding"):
+            continue
+        return model_id
+    raise LMStudioError("No chat/LLM model found in LM Studio /v1/models. Load a non-embedding model, or set LMSTUDIO_MODEL.")
 
 
 async def get_model_id(base_url: str = LMSTUDIO_BASE_URL) -> str:
@@ -91,7 +148,8 @@ async def embeddings(
 ) -> list[list[float]]:
     if not texts:
         return []
-    payload = {"model": model, "input": texts}
+    prepared = [_prepare_embedding_text(t) for t in texts]
+    payload = {"model": model, "input": prepared}
     async with httpx.AsyncClient(timeout=timeout_s) as client:
         try:
             resp = await client.post(f"{base_url}/v1/embeddings", json=payload)
