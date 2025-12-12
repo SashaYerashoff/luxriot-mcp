@@ -109,6 +109,23 @@
     .kbd{color:rgba(214,217,223,.85)}
     .admin-actions{display:flex;justify-content:flex-end;gap:14px;margin-top:8px;padding-right:6px;}
 
+    /* Admin modal viewport + internal scroll */
+    #adminPanel{
+      max-height:calc(100vh - 220px);
+      overflow:hidden;
+    }
+    #adminPanel.visible{
+      display:flex;
+      flex-direction:column;
+    }
+    #adminPanel .admin-grid{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding-right:12px;
+    }
+    #adminPanel .admin-actions{flex:0 0 auto;}
+
     /* Redactor panel */
     .redactor-grid{
       display:grid;
@@ -238,6 +255,21 @@
     .err-details{margin-top:10px;}
     .err-details summary{cursor:pointer;color:var(--danger);font-size:12px;}
     .err-details pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:rgba(0,0,0,.25);padding:10px;border-radius:12px;border:1px solid var(--border);}
+
+    /* In-panel scrolling */
+    .mini-panel{max-height:320px;overflow:auto;}
+
+    /* Custom scrollbars (match chat history look) */
+    .app{scrollbar-width:thin;scrollbar-color:rgba(214,217,223,.28) rgba(255,255,255,.06);}
+    .app ::-webkit-scrollbar{width:10px;height:10px;}
+    .app ::-webkit-scrollbar-track{background:rgba(255,255,255,.06);border-radius:999px;}
+    .app ::-webkit-scrollbar-thumb{
+      background:rgba(214,217,223,.24);
+      border-radius:999px;
+      border:2px solid rgba(0,0,0,0);
+      background-clip:padding-box;
+    }
+    .app ::-webkit-scrollbar-thumb:hover{background:rgba(214,217,223,.34);}
   </style>
 </head>
 <body>
