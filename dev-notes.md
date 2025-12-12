@@ -1,7 +1,20 @@
-# Luxriot MCP – Development Plan (Evo 1.32 docs foundation)
+# Luxriot MCP – Development Notes (Evo 1.32 docs foundation)
 
 Date: 2025-12-12  
-Goal of this sprint: **working end-to-end grounding on the latest Luxriot Evo 1.32 documentation** (6 guides), with **citations + relevant screenshots** surfaced to the user and available to the model.
+Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 documentation** (6 guides), with **citations + relevant screenshots** surfaced to the user and available to the model.
+
+## Current status (repo reality)
+- **Backend (FastAPI)**: implemented and working (`/health`, `/docs/search`, `/chat`, sessions/messages, assets).
+- **Ingestion CLI**: implemented (`backend/cli/ingest_evo_1_32.py`) → builds `datastore/evo_1_32/`.
+- **Frontend**: wired (`frontend-mock.html`) to backend APIs; renders answers, citations, screenshots; shows raw errors.
+- **MCP server**: implemented (`mcp-server/`) exposing `luxriot_docs_query`.
+- **Prompt transparency**: **no hardcoded prompts in service code**. System prompt is stored in **settings** and editable via Admin Tools panel.
+
+## Prompt transparency contract
+- Prompts are **data**, not code:
+  - Defaults live in `backend/prompts/system_prompt.md` (and are seeded into SQLite settings).
+  - Current values are stored in SQLite `settings` table and editable via `GET/POST /admin/settings`.
+- Backend must not ship “hidden” system prompts or hidden guard-strings in code. If something is missing/misconfigured, return an explicit error.
 
 ---
 
@@ -54,30 +67,28 @@ Goal of this sprint: **working end-to-end grounding on the latest Luxriot Evo 1.
 ```
 luxriot-mcp/
   frontend-mock.html
-  docs/                         # input: Help+Manual export(s) for Evo 1.32
-    evo_1_32/
-      guide1/
-      guide2/
-      ...
+  docs/                         # input: Help+Manual export(s) for Evo 1.32 (6 guide folders)
   datastore/
     evo_1_32/
       pages.jsonl               # per-page metadata (title, headings, images, source path)
-      md/                       # normalized markdown pages
+      pages/                    # normalized markdown pages
       assets/                   # copied/normalized images
-      index/                    # BM25 (and later embeddings)
+      index.sqlite              # BM25 (and later embeddings)
   backend/
-    app.py
     requirements.txt
-    src/
-      ingest/
-      search/
-      chat/
-      storage/
+    default_settings.json
+    prompts/
+      system_prompt.md
+    app/
+      main.py
+      app_db.py
+      settings.py
+    cli/
+      ingest_evo_1_32.py
   mcp-server/
     package.json
     src/
-      server.ts
-      tools/
+      index.ts
   README.md
   dev-notes.md                  # (this file, or similar)
 ```
@@ -100,9 +111,8 @@ Docs store:
 ## APIs (minimal set)
 ### Health / config
 - `GET /health`
-- `GET /admin/settings`
-- `POST /admin/settings`
-- `GET /admin/lmstudio/status` *(pings model endpoint)*
+- `GET /admin/settings` *(includes defaults + current + effective)*
+- `POST /admin/settings` *(updates settings; applies immediately)*
 
 ### Docs
 - `POST /docs/ingest` *(optional; CLI is preferred)*
@@ -119,6 +129,7 @@ Docs store:
 
 ### Assets
 - `GET /assets/{doc_version}/{...path}`
+- `GET /rawdocs/{doc_version}/{...path}` *(serves original HTML for clickable citations; next: markdown viewer)*
 
 ---
 
@@ -150,11 +161,11 @@ Image selection policy:
 ---
 
 ## MCP in LM Studio (how we’ll integrate)
-LM Studio supports MCP servers and can be configured via `mcp.json` (Cursor-style notation). citeturn0search0
+LM Studio supports MCP servers and can be configured via `mcp.json` (Cursor-style notation).
 
 Plan:
 - MCP server implemented in Node.js.
-- Add it to LM Studio via `mcp.json` so LM Studio can call `luxriot_docs_query` and inject the returned context into the model run. citeturn0search0turn0search3
+- Add it to LM Studio via `mcp.json` so LM Studio can call `luxriot_docs_query` and inject the returned context into the model run.
 
 ---
 
@@ -165,7 +176,9 @@ Plan:
 4. **Chat endpoint**: retrieval → LM Studio call → answer + citations + images.
 5. **UI wiring**: connect mock to `/chat`, show citations + thumbnails.
 6. **MCP server**: implement `luxriot_docs_query` tool calling `/docs/search`.
-7. **LM Studio config**: register server in `mcp.json`, test tool invocation. citeturn0search0
+7. **LM Studio config**: register server in `mcp.json`, test tool invocation.
+8. **(Next)** Embeddings + hybrid retrieval (RRF/MMR) with transparent settings.
+9. **(Next)** Replace raw HTML citations with a mkdocs-like Markdown viewer route.
 
 ---
 
