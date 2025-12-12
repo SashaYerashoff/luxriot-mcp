@@ -117,44 +117,50 @@ class SearchEngine:
         k1 = 1.5
         b = 0.75
 
-        # Collect postings for each unique term.
         unique_terms = list(dict.fromkeys(query_terms))
-        scores: dict[str, float] = {}
+
+        # Gather postings for each term so we only hit SQLite once per term.
+        postings_by_term: dict[str, list[tuple[str, int]]] = {}
         candidate_chunk_ids: set[str] = set()
+        idf_by_term: dict[str, float] = {}
 
         for term in unique_terms:
             df_row = conn.execute("SELECT df FROM terms WHERE term = ?", (term,)).fetchone()
             if not df_row:
                 continue
             df = int(df_row["df"])
+            idf_by_term[term] = math.log((n_chunks - df + 0.5) / (df + 0.5) + 1.0)
 
-            # idf variant (BM25+ style shift to avoid negative idf)
-            idf = math.log((n_chunks - df + 0.5) / (df + 0.5) + 1.0)
-
-            for post in conn.execute("SELECT chunk_id, tf FROM postings WHERE term = ?", (term,)).fetchall():
-                chunk_id = post["chunk_id"]
+            posts = conn.execute("SELECT chunk_id, tf FROM postings WHERE term = ?", (term,)).fetchall()
+            if not posts:
+                continue
+            lst: list[tuple[str, int]] = []
+            for post in posts:
+                chunk_id = str(post["chunk_id"])
                 tf = int(post["tf"])
                 candidate_chunk_ids.add(chunk_id)
-                scores.setdefault(chunk_id, 0.0)
-                scores[chunk_id] += idf * tf  # length-normalization applied later
+                lst.append((chunk_id, tf))
+            postings_by_term[term] = lst
 
         if not candidate_chunk_ids:
             return []
 
-        # Fetch lengths for normalization.
         chunk_rows = self._fetch_chunk_rows(list(candidate_chunk_ids))
-
-        final_scores: dict[str, float] = {}
-        for chunk_id, base in scores.items():
-            row = chunk_rows.get(chunk_id)
-            if not row:
+        scores: dict[str, float] = {}
+        for term, posts in postings_by_term.items():
+            idf = idf_by_term.get(term)
+            if idf is None:
                 continue
-            dl = max(row.length, 1)
-            norm = (k1 * (1 - b + b * (dl / max(avgdl, 1e-9))))
-            # Apply a cheap approximation of BM25 (term-weighted tf sum already in base)
-            final_scores[chunk_id] = base * ((k1 + 1) / (1 + norm))
+            for chunk_id, tf in posts:
+                row = chunk_rows.get(chunk_id)
+                if not row:
+                    continue
+                dl = max(row.length, 1)
+                denom = tf + k1 * (1.0 - b + b * (dl / max(avgdl, 1e-9)))
+                score = idf * (tf * (k1 + 1.0) / denom)
+                scores[chunk_id] = scores.get(chunk_id, 0.0) + score
 
-        top = sorted(final_scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
+        top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
         results: list[dict[str, Any]] = []
         for chunk_id, score in top:
             row = chunk_rows.get(chunk_id)
@@ -174,4 +180,3 @@ class SearchEngine:
                 }
             )
         return results
-
