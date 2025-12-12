@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import shutil
 import sqlite3
 import sys
 from collections import Counter
+from array import array
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from bs4 import BeautifulSoup
+import httpx
 from markdownify import markdownify as md
 
 
@@ -226,10 +229,56 @@ def init_index(db_path: Path) -> sqlite3.Connection:
         );
 
         CREATE INDEX IF NOT EXISTS idx_postings_term ON postings(term);
+
+        CREATE TABLE IF NOT EXISTS embeddings (
+          chunk_id TEXT PRIMARY KEY,
+          dim INTEGER NOT NULL,
+          vector BLOB NOT NULL
+        );
         """
     )
     conn.commit()
     return conn
+
+
+def _detect_embedding_model_id(base_url: str) -> str:
+    resp = httpx.get(f"{base_url}/v1/models", timeout=10.0)
+    resp.raise_for_status()
+    data = resp.json()
+    models = data.get("data") or []
+    for m in models:
+        mid = str(m.get("id") or "")
+        if not mid:
+            continue
+        low = mid.lower()
+        if "embedding" in low or low.startswith("text-embedding"):
+            return mid
+    raise RuntimeError("No embedding model found in LM Studio /v1/models. Load an embedding model in LM Studio.")
+
+
+def _embed_texts(base_url: str, model_id: str, texts: list[str]) -> list[list[float]]:
+    payload = {"model": model_id, "input": texts}
+    resp = httpx.post(f"{base_url}/v1/embeddings", json=payload, timeout=60.0)
+    resp.raise_for_status()
+    data = resp.json()
+    items = data.get("data") or []
+    if len(items) != len(texts):
+        raise RuntimeError(f"Embedding response size mismatch: got {len(items)} embeddings for {len(texts)} inputs.")
+    # items are typically sorted by index
+    items = sorted(items, key=lambda x: int(x.get("index", 0)))
+    out: list[list[float]] = []
+    for it in items:
+        emb = it.get("embedding")
+        if not isinstance(emb, list) or not emb:
+            raise RuntimeError("Embedding response missing 'embedding' list.")
+        out.append([float(x) for x in emb])
+    return out
+
+
+def _normalize(vec: list[float]) -> array:
+    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+    a = array("f", (float(x / norm) for x in vec))
+    return a
 
 
 def main() -> int:
@@ -237,12 +286,18 @@ def main() -> int:
     ap.add_argument("--docs-dir", type=Path, default=Path("docs"), help="Input docs directory (HTML export root)")
     ap.add_argument("--out-dir", type=Path, default=Path("datastore/evo_1_32"), help="Output datastore directory")
     ap.add_argument("--version", type=str, default="evo_1_32", help="Version id used in /assets/{version}/ URLs")
+    ap.add_argument("--lmstudio-base-url", type=str, default="http://localhost:1234", help="LM Studio base URL")
+    ap.add_argument("--embedding-model", type=str, default="", help="Embedding model id (defaults to first embedding model from /v1/models)")
+    ap.add_argument("--no-embeddings", action="store_true", help="Skip computing embeddings")
     ap.add_argument("--clean", action="store_true", help="Delete existing out-dir before ingesting")
     args = ap.parse_args()
 
     docs_dir: Path = args.docs_dir
     out_dir: Path = args.out_dir
     version: str = args.version
+    lmstudio_base_url: str = str(args.lmstudio_base_url).rstrip("/")
+    embedding_model: str = str(args.embedding_model).strip()
+    compute_embeddings: bool = not bool(args.no_embeddings)
 
     if not docs_dir.exists():
         log(f"ERROR: docs dir not found: {docs_dir}")
@@ -278,6 +333,7 @@ def main() -> int:
     df_counter: Counter[str] = Counter()
     postings_rows: list[tuple[str, str, int]] = []
     chunk_rows: list[tuple[str, str, str, str, str, str, str | None, str, int]] = []
+    chunk_id_text: list[tuple[str, str]] = []
 
     total_tokens = 0
     n_chunks = 0
@@ -343,6 +399,7 @@ def main() -> int:
                 dl = len(tokens)
                 if dl == 0:
                     continue
+                chunk_id_text.append((chunk_id, text))
                 n_chunks += 1
                 total_tokens += dl
 
@@ -405,6 +462,48 @@ def main() -> int:
                 postings_rows[i : i + batch_size],
             )
 
+        embedding_model_id = None
+        embedding_dim = None
+        if compute_embeddings:
+            try:
+                embedding_model_id = embedding_model or _detect_embedding_model_id(lmstudio_base_url)
+            except Exception as e:
+                log(f"ERROR: embeddings enabled but cannot detect embedding model: {e}")
+                return 2
+
+            log(f"Computing embeddings via {lmstudio_base_url} model={embedding_model_id} ...")
+            conn.execute("DELETE FROM embeddings;")
+
+            emb_batch = 32
+            rows: list[tuple[str, int, bytes]] = []
+            for i in range(0, len(chunk_id_text), emb_batch):
+                batch = chunk_id_text[i : i + emb_batch]
+                ids = [x[0] for x in batch]
+                texts = [x[1] for x in batch]
+                try:
+                    vectors = _embed_texts(lmstudio_base_url, embedding_model_id, texts)
+                except Exception as e:
+                    log(f"ERROR: embedding request failed at batch {i//emb_batch + 1}: {e}")
+                    return 2
+
+                if embedding_dim is None:
+                    embedding_dim = len(vectors[0])
+                for v in vectors:
+                    if embedding_dim != len(v):
+                        log("ERROR: embedding dimension mismatch across batches")
+                        return 2
+
+                for cid, vec in zip(ids, vectors):
+                    a = _normalize(vec)
+                    rows.append((cid, int(embedding_dim), a.tobytes()))
+
+                if len(rows) >= 2000:
+                    conn.executemany("INSERT INTO embeddings(chunk_id, dim, vector) VALUES (?,?,?)", rows)
+                    rows.clear()
+
+            if rows:
+                conn.executemany("INSERT INTO embeddings(chunk_id, dim, vector) VALUES (?,?,?)", rows)
+
         conn.executemany(
             "INSERT INTO meta(key, value) VALUES (?,?)",
             [
@@ -412,6 +511,9 @@ def main() -> int:
                 ("created_at", utc_now()),
                 ("n_chunks", str(n_chunks)),
                 ("avgdl", f"{avgdl:.6f}"),
+                ("embeddings_enabled", "1" if compute_embeddings else "0"),
+                ("embedding_model_id", str(embedding_model_id or "")),
+                ("embedding_dim", str(int(embedding_dim or 0))),
             ],
         )
 
@@ -422,4 +524,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
