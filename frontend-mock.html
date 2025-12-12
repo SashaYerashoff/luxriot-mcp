@@ -198,6 +198,44 @@
     .user-settings .title{color:var(--text);margin-bottom:10px;opacity:.9}
     .user-settings .row2{padding:6px 0;border-bottom:1px solid var(--border)}
     .user-settings .row2:last-child{border-bottom:none}
+
+    /* Chat thread */
+    .thread{
+      position:absolute;
+      left:50%;
+      top:72px;
+      transform:translateX(-50%);
+      width:min(980px, 86%);
+      bottom:140px;
+      overflow:auto;
+      padding:12px 6px 18px;
+    }
+    .msg{
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:12px 14px;
+      margin:10px 0;
+      background:rgba(22,24,28,.85);
+    }
+    .msg.user{
+      background:rgba(63,163,124,.12);
+      border-color:rgba(63,163,124,.25);
+    }
+    .msg .meta{font-size:12px;color:var(--muted);margin-bottom:8px;}
+    .msg .content{white-space:pre-wrap;line-height:1.35;}
+    .citations{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+    .citations a{color:var(--accent);text-decoration:none;font-size:12px;}
+    .citations a:hover{text-decoration:underline;}
+    .thumb-grid{margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;}
+    .thumb{
+      width:180px;border:1px solid var(--border);border-radius:12px;overflow:hidden;
+      background:#0b0c0e;
+    }
+    .thumb img{display:block;width:100%;height:auto;}
+    .thumb .cap{font-size:11px;padding:6px 8px;color:var(--muted);border-top:1px solid var(--border);}
+    .err-details{margin-top:10px;}
+    .err-details summary{cursor:pointer;color:var(--danger);font-size:12px;}
+    .err-details pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:rgba(0,0,0,.25);padding:10px;border-radius:12px;border:1px solid var(--border);}
   </style>
 </head>
 <body>
@@ -215,7 +253,8 @@
     </div>
   </div>
 
-  <div class="center">
+  <div id="thread" class="thread"></div>
+  <div id="emptyState" class="center">
     Hi Sasha, I am ready to assist and learn.
   </div>
 
@@ -224,9 +263,7 @@
     <div class="action" id="historyBtn" title="History">🕘
       <div id="historyPanel" class="mini-panel">
         <div class="title">Chat history:</div>
-        <div class="mini-item"><span class="slash">/</span> About That</div>
-        <div class="mini-item"><span class="slash">/</span> About Something Else</div>
-        <div class="mini-item"><span class="slash">/</span> How to how when nothin…</div>
+        <div id="historyList"></div>
       </div>
     </div>
 
@@ -395,14 +432,16 @@
 </div>
 
 <script>
-  // ---------- Mock "conversation" state (just enough for annotations) ----------
+  // ---------- Backend wiring ----------
+  const apiBase = (new URLSearchParams(location.search).get('api') || 'http://localhost:8000').replace(/\/$/, '');
+
+  // "conversation" state (also used by the redactor UI)
   const session = {
-    session_id: "sess_mock",
-    model: { id: "Qwen/qwen3-vl-8b-instruct", temp: 0.2, top_k: 50, top_p: 0.85 },
+    session_id: null,
+    model: { id: "LM Studio", temp: 0.2, top_k: 50, top_p: 0.85 },
     tool_context: { mcp_internet: false, mcp_luxriot_docs: true }
   };
 
-  // In a real app, this would come from actual message objects
   let lastUserMessage = "User input";
   let lastAssistantMessage = "Hi Sasha, I am ready to assist and learn.";
 
@@ -410,7 +449,11 @@
 
   // ---------- UI handles ----------
   const historyPanel = document.getElementById('historyPanel');
+  const historyList = document.getElementById('historyList');
   const overlay = document.getElementById('overlay');
+
+  const thread = document.getElementById('thread');
+  const emptyState = document.getElementById('emptyState');
 
   const adminPanel = document.getElementById('adminPanel');
   const redactorPanel = document.getElementById('redactorPanel');
@@ -439,14 +482,196 @@
   const filterTag = document.getElementById('filterTag');
   const sortBy = document.getElementById('sortBy');
 
-  // Mock send behavior (updates last messages)
   const userInput = document.getElementById('userInput');
-  document.getElementById('sendBtn').addEventListener('click', () => {
-    const text = userInput.innerText.trim() || "…";
+  const sendBtn = document.getElementById('sendBtn');
+
+  function setEmptyStateVisible(visible) {
+    emptyState.style.display = visible ? 'flex' : 'none';
+  }
+
+  function appendMessage({ role, content, citations = null, images = null, errorText = null }) {
+    const wrap = document.createElement('div');
+    wrap.className = `msg ${role === 'user' ? 'user' : 'assistant'}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = role === 'user' ? 'You' : 'Assistant';
+    wrap.appendChild(meta);
+
+    const body = document.createElement('div');
+    body.className = 'content';
+    body.textContent = content || '';
+    wrap.appendChild(body);
+
+    if (Array.isArray(citations) && citations.length) {
+      const c = document.createElement('div');
+      c.className = 'citations';
+      const seen = new Set();
+      citations.forEach((x) => {
+        const key = `${x.doc_id}/${x.page_id}/${x.anchor || ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const a = document.createElement('a');
+        const href = apiBase + x.source_path + (x.anchor ? `#${encodeURIComponent(x.anchor)}` : '');
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noreferrer';
+        a.textContent = `${x.title} (${x.doc_id}/${x.page_id})`;
+        c.appendChild(a);
+      });
+      wrap.appendChild(c);
+    }
+
+    if (Array.isArray(images) && images.length) {
+      const g = document.createElement('div');
+      g.className = 'thumb-grid';
+      images.forEach((x) => {
+        const card = document.createElement('a');
+        card.className = 'thumb';
+        card.href = apiBase + x.url;
+        card.target = '_blank';
+        card.rel = 'noreferrer';
+
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.src = apiBase + x.url;
+        img.alt = x.near_heading || `${x.doc_id}/${x.page_id}`;
+        card.appendChild(img);
+
+        const cap = document.createElement('div');
+        cap.className = 'cap';
+        cap.textContent = x.near_heading ? x.near_heading : `${x.doc_id}/${x.page_id}`;
+        card.appendChild(cap);
+
+        g.appendChild(card);
+      });
+      wrap.appendChild(g);
+    }
+
+    if (errorText) {
+      const details = document.createElement('details');
+      details.className = 'err-details';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Show raw error';
+      const pre = document.createElement('pre');
+      pre.textContent = errorText;
+      details.appendChild(summary);
+      details.appendChild(pre);
+      wrap.appendChild(details);
+    }
+
+    thread.appendChild(wrap);
+    thread.scrollTop = thread.scrollHeight;
+    setEmptyStateVisible(false);
+  }
+
+  async function apiJson(path, { method = 'GET', body = undefined } = {}) {
+    const opts = { method, headers: {} };
+    if (body !== undefined) {
+      opts.headers['content-type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const resp = await fetch(apiBase + path, opts);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      const err = new Error(`HTTP ${resp.status}`);
+      err.status = resp.status;
+      err.raw = text;
+      throw err;
+    }
+    return await resp.json();
+  }
+
+  async function refreshSessions() {
+    historyList.innerHTML = `<div class="mini-item muted"><span class="slash">/</span> Loading…</div>`;
+    try {
+      const data = await apiJson('/sessions');
+      const sessions = data.sessions || [];
+      historyList.innerHTML = '';
+
+      const newItem = document.createElement('div');
+      newItem.className = 'mini-item';
+      newItem.innerHTML = `<span class="slash">/</span> New chat`;
+      newItem.addEventListener('click', () => {
+        session.session_id = null;
+        thread.innerHTML = '';
+        setEmptyStateVisible(true);
+        historyPanel.classList.remove('visible');
+      });
+      historyList.appendChild(newItem);
+
+      sessions.slice(0, 20).forEach((s) => {
+        const item = document.createElement('div');
+        item.className = 'mini-item';
+        const slash = document.createElement('span');
+        slash.className = 'slash';
+        slash.textContent = '/';
+        item.appendChild(slash);
+        item.appendChild(document.createTextNode(` ${s.title || s.session_id}`));
+        item.addEventListener('click', async () => {
+          await loadSession(s.session_id);
+          historyPanel.classList.remove('visible');
+        });
+        historyList.appendChild(item);
+      });
+    } catch (e) {
+      historyList.innerHTML = '';
+      const item = document.createElement('div');
+      item.className = 'mini-item';
+      item.innerHTML = `<span class="slash">/</span> Failed to load sessions`;
+      historyList.appendChild(item);
+    }
+  }
+
+  async function loadSession(sessionId) {
+    const data = await apiJson(`/sessions/${encodeURIComponent(sessionId)}/messages`);
+    session.session_id = sessionId;
+    thread.innerHTML = '';
+    setEmptyStateVisible(true);
+    const msgs = data.messages || [];
+    msgs.forEach((m) => {
+      appendMessage({ role: m.role, content: m.content });
+      if (m.role === 'user') lastUserMessage = m.content;
+      if (m.role === 'assistant') lastAssistantMessage = m.content;
+    });
+    if (msgs.length) setEmptyStateVisible(false);
+  }
+
+  async function sendMessage() {
+    const text = userInput.innerText.trim();
+    if (!text) return;
+
+    userInput.innerText = '';
     lastUserMessage = text;
-    // mock assistant reply changes slightly (so redactor feels attached to something)
-    lastAssistantMessage = "Mock assistant answer: " + text.slice(0, 120);
-    saveHint.textContent = "Updated last answer target.";
+    appendMessage({ role: 'user', content: text });
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = '…';
+
+    try {
+      const payload = { message: text, k: 8 };
+      if (session.session_id) payload.session_id = session.session_id;
+      const data = await apiJson('/chat', { method: 'POST', body: payload });
+      session.session_id = data.session_id;
+      lastAssistantMessage = data.answer || '';
+      saveHint.textContent = "Updated last answer target.";
+      appendMessage({ role: 'assistant', content: data.answer || '', citations: data.citations || [], images: data.images || [] });
+      refreshSessions();
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      appendMessage({ role: 'assistant', content: 'Request failed.', errorText: raw });
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'SEND';
+    }
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   });
 
   // ---------- Modal control ----------
@@ -469,7 +694,10 @@
     e.stopPropagation();
     const willOpen = !historyPanel.classList.contains('visible');
     closeAllModals();
-    if (willOpen) historyPanel.classList.add('visible');
+    if (willOpen) {
+      historyPanel.classList.add('visible');
+      refreshSessions();
+    }
   });
 
   toolsBtn.addEventListener('click', (e) => {
@@ -702,4 +930,3 @@
 </script>
 </body>
 </html>
-
