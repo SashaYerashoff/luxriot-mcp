@@ -82,3 +82,38 @@ async def chat_completion(
         except Exception as e:
             raise LMStudioError(f"Unexpected LM Studio response shape: {data}") from e
 
+
+async def embeddings(
+    texts: list[str],
+    model: str,
+    base_url: str = LMSTUDIO_BASE_URL,
+    timeout_s: float = 60.0,
+) -> list[list[float]]:
+    if not texts:
+        return []
+    payload = {"model": model, "input": texts}
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
+        try:
+            resp = await client.post(f"{base_url}/v1/embeddings", json=payload)
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            detail = None
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    detail = e.response.text
+                except Exception:
+                    detail = None
+            raise LMStudioError(f"LM Studio embeddings request failed: {e} {detail or ''}".strip()) from e
+
+        data = resp.json()
+        items = data.get("data") or []
+        if len(items) != len(texts):
+            raise LMStudioError(f"Embedding response size mismatch: got {len(items)} embeddings for {len(texts)} inputs.")
+        items = sorted(items, key=lambda x: int(x.get("index", 0)))
+        out: list[list[float]] = []
+        for it in items:
+            emb = it.get("embedding")
+            if not isinstance(emb, list) or not emb:
+                raise LMStudioError("Embedding response missing 'embedding' list.")
+            out.append([float(x) for x in emb])
+        return out

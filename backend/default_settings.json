@@ -10,6 +10,18 @@
     "k_default": 8,
     "max_citations": 8,
     "max_images": 6,
+    "doc_priority_boost": 0.05,
+    "dedupe": {
+      "max_per_page": 3,
+      "max_per_doc": 12
+    },
+    "hybrid": {
+      "rrf_k": 60,
+      "bm25_weight": 1.0,
+      "embedding_weight": 1.0,
+      "bm25_candidates": 120,
+      "embedding_candidates": 120
+    },
     "doc_priority": [
       "luxriot-evo-global-administration-guide",
       "luxriot-evo-monitor",
@@ -20,4 +32,3 @@
     ]
   }
 }
-

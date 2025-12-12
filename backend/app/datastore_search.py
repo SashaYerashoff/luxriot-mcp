@@ -4,12 +4,15 @@ import json
 import math
 import re
 import sqlite3
+from array import array
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .config import DATASTORE_DIR, DEFAULT_VERSION
 from .logging_utils import get_logger
+from .lmstudio import LMStudioError, embeddings as lm_embeddings
 
 log = get_logger(__name__)
 
@@ -40,6 +43,9 @@ class SearchEngine:
         self.index_path = datastore_dir / version / "index.sqlite"
         self._conn: sqlite3.Connection | None = None
         self._meta: dict[str, Any] | None = None
+        self._embedding_vectors: dict[str, array] | None = None
+        self._embedding_dim: int | None = None
+        self._embedding_model_id: str | None = None
 
     def is_ready(self) -> bool:
         return self.index_path.exists()
@@ -77,6 +83,62 @@ class SearchEngine:
             raise RuntimeError(f"Invalid meta in index: {e}") from e
         return n_chunks, avgdl
 
+    def embeddings_ready(self) -> bool:
+        try:
+            meta = self._load_meta()
+            enabled = str(meta.get("embeddings_enabled", "0"))
+            dim = int(meta.get("embedding_dim", "0") or 0)
+            model_id = str(meta.get("embedding_model_id", "") or "")
+        except Exception:
+            return False
+
+        if enabled != "1" or dim <= 0 or not model_id:
+            return False
+
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='embeddings' LIMIT 1"
+        ).fetchone()
+        return bool(row)
+
+    def _load_embeddings(self) -> None:
+        if self._embedding_vectors is not None:
+            return
+        if not self.embeddings_ready():
+            raise RuntimeError(
+                "Embeddings are not available for this datastore. Re-run ingestion without --no-embeddings."
+            )
+
+        meta = self._load_meta()
+        model_id = str(meta.get("embedding_model_id", "") or "")
+        dim = int(meta.get("embedding_dim", "0") or 0)
+        if not model_id or dim <= 0:
+            raise RuntimeError("Embedding metadata missing in index; re-run ingestion.")
+
+        conn = self._connect()
+        rows = conn.execute("SELECT chunk_id, dim, vector FROM embeddings").fetchall()
+        if not rows:
+            raise RuntimeError("Embeddings table is empty; re-run ingestion.")
+
+        vectors: dict[str, array] = {}
+        for r in rows:
+            cid = str(r["chunk_id"])
+            rdim = int(r["dim"])
+            if rdim != dim:
+                raise RuntimeError("Embedding dimension mismatch in DB.")
+            buf = r["vector"]
+            if not isinstance(buf, (bytes, bytearray, memoryview)):
+                raise RuntimeError("Invalid embedding vector type in DB.")
+            a = array("f")
+            a.frombytes(bytes(buf))
+            if len(a) != dim:
+                raise RuntimeError("Embedding vector length mismatch in DB.")
+            vectors[cid] = a
+
+        self._embedding_vectors = vectors
+        self._embedding_dim = dim
+        self._embedding_model_id = model_id
+
     def _fetch_chunk_rows(self, chunk_ids: list[str]) -> dict[str, ChunkRow]:
         if not chunk_ids:
             return {}
@@ -105,10 +167,10 @@ class SearchEngine:
             )
         return out
 
-    def search(self, query: str, k: int = 8) -> list[dict[str, Any]]:
+    def _bm25_rank(self, query: str, k: int) -> tuple[list[tuple[str, float]], dict[str, ChunkRow]]:
         query_terms = tokenize(query)
         if not query_terms:
-            return []
+            return ([], {})
 
         conn = self._connect()
         n_chunks, avgdl = self._get_stat_floats()
@@ -161,22 +223,205 @@ class SearchEngine:
                 scores[chunk_id] = scores.get(chunk_id, 0.0) + score
 
         top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
-        results: list[dict[str, Any]] = []
-        for chunk_id, score in top:
-            row = chunk_rows.get(chunk_id)
+        return top, chunk_rows
+
+    async def _embedding_rank(self, query: str, k: int) -> list[tuple[str, float]]:
+        self._load_embeddings()
+        assert self._embedding_vectors is not None
+        assert self._embedding_dim is not None
+        assert self._embedding_model_id is not None
+
+        try:
+            q_vec = (await lm_embeddings([query], model=self._embedding_model_id))[0]
+        except LMStudioError as e:
+            raise RuntimeError(str(e)) from e
+
+        norm = math.sqrt(sum(x * x for x in q_vec)) or 1.0
+        q = array("f", (float(x / norm) for x in q_vec))
+        if len(q) != self._embedding_dim:
+            raise RuntimeError("Query embedding dimension mismatch; check embedding model and datastore.")
+
+        scores: list[tuple[str, float]] = []
+        dim = self._embedding_dim
+        for cid, v in self._embedding_vectors.items():
+            s = 0.0
+            for i in range(dim):
+                s += q[i] * v[i]
+            scores.append((cid, float(s)))
+
+        scores.sort(key=lambda kv: kv[1], reverse=True)
+        return scores[:k]
+
+    def _doc_priority_multiplier(self, doc_id: str, priority: list[str], boost: float, prio_map: dict[str, int]) -> float:
+        if boost <= 0.0:
+            return 1.0
+        idx = prio_map.get(doc_id)
+        if idx is None:
+            return 1.0
+        if len(priority) <= 1:
+            rank_factor = 1.0
+        else:
+            rank_factor = 1.0 - (idx / (len(priority) - 1))
+        return 1.0 + boost * rank_factor
+
+    def _apply_dedupe(
+        self,
+        ranked: list[tuple[str, float]],
+        chunk_rows: dict[str, ChunkRow],
+        k: int,
+        max_per_page: int,
+        max_per_doc: int,
+    ) -> list[tuple[str, float]]:
+        if max_per_page <= 0 and max_per_doc <= 0:
+            return ranked[:k]
+        page_counts: Counter[tuple[str, str]] = Counter()
+        doc_counts: Counter[str] = Counter()
+        out: list[tuple[str, float]] = []
+        for cid, score in ranked:
+            row = chunk_rows.get(cid)
             if not row:
                 continue
-            results.append(
+            page_key = (row.doc_id, row.page_id)
+            if max_per_page > 0 and page_counts[page_key] >= max_per_page:
+                continue
+            if max_per_doc > 0 and doc_counts[row.doc_id] >= max_per_doc:
+                continue
+            page_counts[page_key] += 1
+            doc_counts[row.doc_id] += 1
+            out.append((cid, score))
+            if len(out) >= k:
+                break
+        return out
+
+    async def search(
+        self,
+        query: str,
+        k: int = 8,
+        mode: str = "bm25",
+        *,
+        bm25_candidates: int | None = None,
+        embedding_candidates: int | None = None,
+        rrf_k: int = 60,
+        bm25_weight: float = 1.0,
+        embedding_weight: float = 1.0,
+        doc_priority: list[str] | None = None,
+        doc_priority_boost: float = 0.0,
+        max_per_page: int = 0,
+        max_per_doc: int = 0,
+    ) -> list[dict[str, Any]]:
+        mode = (mode or "bm25").lower().strip()
+        if mode not in ("bm25", "embedding", "hybrid"):
+            raise ValueError(f"Unknown retrieval mode: {mode}")
+
+        doc_priority = doc_priority or []
+        prio_map = {d: i for i, d in enumerate(doc_priority)}
+
+        if mode == "bm25":
+            top, chunk_rows = self._bm25_rank(query, k)
+            adjusted = []
+            for cid, score in top:
+                row = chunk_rows.get(cid)
+                if not row:
+                    continue
+                score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                adjusted.append((cid, score))
+            adjusted.sort(key=lambda kv: kv[1], reverse=True)
+            selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
+            return [
                 {
-                    "chunk_id": chunk_id,
-                    "doc_id": row.doc_id,
-                    "page_id": row.page_id,
-                    "heading_path": row.heading_path,
-                    "text": row.text,
+                    "chunk_id": cid,
+                    "doc_id": chunk_rows[cid].doc_id,
+                    "page_id": chunk_rows[cid].page_id,
+                    "heading_path": chunk_rows[cid].heading_path,
+                    "text": chunk_rows[cid].text,
                     "score": float(score),
-                    "source_path": row.source_path,
-                    "anchor": row.anchor,
-                    "images": row.images,
+                    "source_path": chunk_rows[cid].source_path,
+                    "anchor": chunk_rows[cid].anchor,
+                    "images": chunk_rows[cid].images,
                 }
+                for cid, score in selected
+                if cid in chunk_rows
+            ]
+
+        if mode == "embedding":
+            if not self.embeddings_ready():
+                raise RuntimeError(
+                    "Embeddings mode requested but embeddings are not available. Re-run ingestion to build embeddings."
+                )
+            top = await self._embedding_rank(query, k=max(k, 1))
+            chunk_ids = [cid for cid, _ in top]
+            chunk_rows = self._fetch_chunk_rows(chunk_ids)
+            adjusted = []
+            for cid, score in top:
+                row = chunk_rows.get(cid)
+                if not row:
+                    continue
+                score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                adjusted.append((cid, score))
+            adjusted.sort(key=lambda kv: kv[1], reverse=True)
+            selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
+            return [
+                {
+                    "chunk_id": cid,
+                    "doc_id": chunk_rows[cid].doc_id,
+                    "page_id": chunk_rows[cid].page_id,
+                    "heading_path": chunk_rows[cid].heading_path,
+                    "text": chunk_rows[cid].text,
+                    "score": float(score),
+                    "source_path": chunk_rows[cid].source_path,
+                    "anchor": chunk_rows[cid].anchor,
+                    "images": chunk_rows[cid].images,
+                }
+                for cid, score in selected
+                if cid in chunk_rows
+            ]
+
+        # hybrid
+        if not self.embeddings_ready():
+            raise RuntimeError(
+                "Hybrid mode requested but embeddings are not available. Re-run ingestion to build embeddings."
             )
-        return results
+
+        bm25_candidates = int(bm25_candidates or max(50, k))
+        embedding_candidates = int(embedding_candidates or max(50, k))
+
+        bm25_top, _bm25_rows = self._bm25_rank(query, bm25_candidates)
+        emb_top = await self._embedding_rank(query, embedding_candidates)
+
+        bm25_rank = {cid: i + 1 for i, (cid, _) in enumerate(bm25_top)}
+        emb_rank = {cid: i + 1 for i, (cid, _) in enumerate(emb_top)}
+
+        candidate_ids = set(bm25_rank.keys()) | set(emb_rank.keys())
+        chunk_rows = self._fetch_chunk_rows(list(candidate_ids))
+
+        combined: list[tuple[str, float]] = []
+        for cid in candidate_ids:
+            score = 0.0
+            r_b = bm25_rank.get(cid)
+            r_e = emb_rank.get(cid)
+            if r_b is not None:
+                score += float(bm25_weight) / float(rrf_k + r_b)
+            if r_e is not None:
+                score += float(embedding_weight) / float(rrf_k + r_e)
+            row = chunk_rows.get(cid)
+            if row:
+                score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+            combined.append((cid, score))
+
+        combined.sort(key=lambda kv: kv[1], reverse=True)
+        selected = self._apply_dedupe(combined, chunk_rows, k, max_per_page, max_per_doc)
+        return [
+            {
+                "chunk_id": cid,
+                "doc_id": chunk_rows[cid].doc_id,
+                "page_id": chunk_rows[cid].page_id,
+                "heading_path": chunk_rows[cid].heading_path,
+                "text": chunk_rows[cid].text,
+                "score": float(score),
+                "source_path": chunk_rows[cid].source_path,
+                "anchor": chunk_rows[cid].anchor,
+                "images": chunk_rows[cid].images,
+            }
+            for cid, score in selected
+            if cid in chunk_rows
+        ]

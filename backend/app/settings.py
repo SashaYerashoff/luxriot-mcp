@@ -69,6 +69,29 @@ def ensure_defaults() -> None:
         if key not in settings and key in defaults:
             to_set[key] = defaults[key]
 
+    def merge_missing(dst: Any, src: Any) -> tuple[Any, bool]:
+        if not isinstance(dst, dict) or not isinstance(src, dict):
+            return dst, False
+        changed = False
+        out = dict(dst)
+        for k, v in src.items():
+            if k not in out:
+                out[k] = v
+                changed = True
+            else:
+                merged, did = merge_missing(out[k], v)
+                if did:
+                    out[k] = merged
+                    changed = True
+        return out, changed
+
+    # Backfill newly added nested defaults without overwriting user values.
+    for key in ("llm", "retrieval"):
+        if key in settings and key in defaults:
+            merged, changed = merge_missing(settings.get(key), defaults.get(key))
+            if changed:
+                to_set[key] = merged
+
     if to_set:
         log.info("Seeding default settings keys: %s", ", ".join(sorted(to_set.keys())))
         app_db.set_settings(to_set)
@@ -77,4 +100,3 @@ def ensure_defaults() -> None:
 def update_settings(new_values: dict[str, Any]) -> dict[str, Any]:
     app_db.set_settings(new_values)
     return get_settings_bundle()
-

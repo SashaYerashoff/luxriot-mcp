@@ -58,10 +58,18 @@ def _startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    try:
+        effective = get_settings_bundle()["effective"]
+        retrieval = effective.get("retrieval") if isinstance(effective.get("retrieval"), dict) else {}
+        retrieval_mode = str(retrieval.get("mode", "bm25"))
+    except Exception:
+        retrieval_mode = "unknown"
     return {
         "status": "ok",
         "docs_version": DEFAULT_VERSION,
         "datastore_ready": search_engine.is_ready(),
+        "embeddings_ready": search_engine.embeddings_ready() if search_engine.is_ready() else False,
+        "retrieval_mode": retrieval_mode,
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
     }
 
@@ -161,7 +169,7 @@ def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageR
 
 
 @app.post("/docs/search", response_model=SearchResponse)
-def docs_search(req: SearchRequest) -> SearchResponse:
+async def docs_search(req: SearchRequest) -> SearchResponse:
     if not search_engine.is_ready():
         log.error("Search index missing; run ingestion CLI to create datastore/%s/index.sqlite", DEFAULT_VERSION)
         raise HTTPException(
@@ -174,7 +182,38 @@ def docs_search(req: SearchRequest) -> SearchResponse:
     max_citations = int(retrieval.get("max_citations", 8))
     max_images = int(retrieval.get("max_images", 6))
 
-    results = search_engine.search(req.query, k=req.k)
+    mode = str(retrieval.get("mode", "bm25"))
+    doc_priority = retrieval.get("doc_priority") if isinstance(retrieval.get("doc_priority"), list) else []
+    doc_priority_boost = float(retrieval.get("doc_priority_boost", 0.0) or 0.0)
+    dedupe = retrieval.get("dedupe") if isinstance(retrieval.get("dedupe"), dict) else {}
+    max_per_page = int(dedupe.get("max_per_page", 0) or 0)
+    max_per_doc = int(dedupe.get("max_per_doc", 0) or 0)
+    hybrid = retrieval.get("hybrid") if isinstance(retrieval.get("hybrid"), dict) else {}
+    bm25_candidates = int(hybrid.get("bm25_candidates", 0) or 0) or None
+    embedding_candidates = int(hybrid.get("embedding_candidates", 0) or 0) or None
+    rrf_k = int(hybrid.get("rrf_k", 60) or 60)
+    bm25_weight = float(hybrid.get("bm25_weight", 1.0) or 1.0)
+    embedding_weight = float(hybrid.get("embedding_weight", 1.0) or 1.0)
+
+    try:
+        results = await search_engine.search(
+            req.query,
+            k=req.k,
+            mode=mode,
+            bm25_candidates=bm25_candidates,
+            embedding_candidates=embedding_candidates,
+            rrf_k=rrf_k,
+            bm25_weight=bm25_weight,
+            embedding_weight=embedding_weight,
+            doc_priority=[str(x) for x in doc_priority],
+            doc_priority_boost=doc_priority_boost,
+            max_per_page=max_per_page,
+            max_per_doc=max_per_doc,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     chunks = [
         {
             "doc_id": r["doc_id"],
@@ -233,7 +272,37 @@ async def chat(req: ChatRequest) -> ChatResponse:
     history = app_db.list_messages(session_id, limit=20)
     app_db.insert_message(session_id=session_id, role="user", content=req.message)
 
-    retrieval = search_engine.search(req.message, k=req.k)
+    doc_priority_list = [str(x) for x in doc_priority] if isinstance(doc_priority, list) else []
+    doc_priority_boost = float(retrieval_cfg.get("doc_priority_boost", 0.0) or 0.0)
+    dedupe = retrieval_cfg.get("dedupe") if isinstance(retrieval_cfg.get("dedupe"), dict) else {}
+    max_per_page = int(dedupe.get("max_per_page", 0) or 0)
+    max_per_doc = int(dedupe.get("max_per_doc", 0) or 0)
+    hybrid = retrieval_cfg.get("hybrid") if isinstance(retrieval_cfg.get("hybrid"), dict) else {}
+    bm25_candidates = int(hybrid.get("bm25_candidates", 0) or 0) or None
+    embedding_candidates = int(hybrid.get("embedding_candidates", 0) or 0) or None
+    rrf_k = int(hybrid.get("rrf_k", 60) or 60)
+    bm25_weight = float(hybrid.get("bm25_weight", 1.0) or 1.0)
+    embedding_weight = float(hybrid.get("embedding_weight", 1.0) or 1.0)
+
+    try:
+        retrieval = await search_engine.search(
+            req.message,
+            k=req.k,
+            mode=retrieval_mode,
+            bm25_candidates=bm25_candidates,
+            embedding_candidates=embedding_candidates,
+            rrf_k=rrf_k,
+            bm25_weight=bm25_weight,
+            embedding_weight=embedding_weight,
+            doc_priority=doc_priority_list,
+            doc_priority_boost=doc_priority_boost,
+            max_per_page=max_per_page,
+            max_per_doc=max_per_doc,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     max_citations = int(retrieval_cfg.get("max_citations", 8))
     max_images = int(retrieval_cfg.get("max_images", 6))
     citations = _build_citations(retrieval, DEFAULT_VERSION, max_citations=max_citations)
