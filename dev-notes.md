@@ -5,10 +5,11 @@ Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 document
 
 ## Current status (repo reality)
 - **Backend (FastAPI)**: implemented and working (`/health`, `/docs/search`, `/chat`, sessions/messages, assets).
-- **Ingestion CLI**: implemented (`backend/cli/ingest_evo_1_32.py`) → builds `datastore/evo_1_32/`.
+- **Ingestion CLI**: implemented (`backend/cli/ingest_evo_1_32.py`) → builds `datastore/evo_1_32/` incl. **embeddings**.
 - **Frontend**: wired (`frontend-mock.html`) to backend APIs; renders answers, citations, screenshots; shows raw errors.
 - **MCP server**: implemented (`mcp-server/`) exposing `luxriot_docs_query`.
 - **Prompt transparency**: **no hardcoded prompts in service code**. System prompt is stored in **settings** and editable via Admin Tools panel.
+- **Retrieval**: BM25 + embeddings + **hybrid (RRF)** implemented and controllable via settings/UI.
 
 ## Prompt transparency contract
 - Prompts are **data**, not code:
@@ -149,7 +150,11 @@ Image preservation rule:
 
 ## Retrieval strategy (Day-1)
 - BM25 keyword index is enough to ship and is robust for product terms.
-- Later add embeddings and do hybrid scoring.
+- Embeddings + hybrid scoring (RRF) are implemented for better recall.
+
+Notes:
+- LM Studio `/v1/embeddings` can return intermittent `400 {"error":"Model has unloaded or crashed.."}` for some doc strings.
+- The ingester uses deterministic text normalization (H3/table markdown cleanup) plus bounded truncation / bag-of-words fallback to ensure ingestion completes; it logs when fallbacks are used.
 
 Image selection policy:
 - cap per answer (3–6)
@@ -177,8 +182,9 @@ Plan:
 5. **UI wiring**: connect mock to `/chat`, show citations + thumbnails.
 6. **MCP server**: implement `luxriot_docs_query` tool calling `/docs/search`.
 7. **LM Studio config**: register server in `mcp.json`, test tool invocation.
-8. **(Next)** Embeddings + hybrid retrieval (RRF/MMR) with transparent settings.
-9. **(Next)** Replace raw HTML citations with a mkdocs-like Markdown viewer route.
+8. **Done** Embeddings + hybrid retrieval (RRF) with transparent settings.
+9. **Next** Consider MMR/diversification + snippet shaping for higher answer consistency.
+10. **Next** Replace raw HTML citations with a mkdocs-like Markdown viewer route.
 
 ---
 
