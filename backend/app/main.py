@@ -13,7 +13,11 @@ from .config import DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL
 from .datastore_search import SearchEngine
 from .lmstudio import LMStudioError, chat_completion
 from .logging_utils import get_logger
+from .prompting import PromptTemplateError, render_template
+from .settings import SettingsError, ensure_defaults, get_settings_bundle, update_settings
 from .schemas import (
+    AdminSettingsResponse,
+    AdminSettingsUpdateRequest,
     ChatRequest,
     ChatResponse,
     Citation,
@@ -49,6 +53,7 @@ def _safe_resolve(base: Path, unsafe_path: str) -> Path:
 @app.on_event("startup")
 def _startup() -> None:
     app_db.init_db()
+    ensure_defaults()
 
 
 @app.get("/health")
@@ -59,6 +64,24 @@ def health() -> dict[str, Any]:
         "datastore_ready": search_engine.is_ready(),
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
     }
+
+
+@app.get("/admin/settings", response_model=AdminSettingsResponse)
+def admin_get_settings() -> dict[str, Any]:
+    try:
+        return get_settings_bundle()
+    except SettingsError as e:
+        log.exception("Settings error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/admin/settings", response_model=AdminSettingsResponse)
+def admin_update_settings(req: AdminSettingsUpdateRequest) -> dict[str, Any]:
+    try:
+        return update_settings(req.settings)
+    except SettingsError as e:
+        log.exception("Settings error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/assets/{version}/{path:path}")
@@ -85,7 +108,7 @@ def rawdocs(version: str, path: str) -> FileResponse:
     return FileResponse(str(file_path))
 
 
-def _build_citations(results: list[dict[str, Any]], version: str) -> list[Citation]:
+def _build_citations(results: list[dict[str, Any]], version: str, max_citations: int) -> list[Citation]:
     seen: set[tuple[str, str]] = set()
     citations: list[Citation] = []
     for r in results:
@@ -104,12 +127,12 @@ def _build_citations(results: list[dict[str, Any]], version: str) -> list[Citati
                 source_path=f"/rawdocs/{version}/{source_rel}",
             )
         )
-        if len(citations) >= 8:
+        if len(citations) >= max_citations:
             break
     return citations
 
 
-def _build_images(results: list[dict[str, Any]]) -> list[ImageResult]:
+def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageResult]:
     urls: list[ImageResult] = []
     seen: set[str] = set()
     for r in results:
@@ -126,7 +149,7 @@ def _build_images(results: list[dict[str, Any]]) -> list[ImageResult]:
                     near_heading=near,
                 )
             )
-            if len(urls) >= 6:
+            if len(urls) >= max_images:
                 return urls
     return urls
 
@@ -140,6 +163,11 @@ def docs_search(req: SearchRequest) -> SearchResponse:
             detail=f"Search index not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
         )
 
+    settings = get_settings_bundle()["effective"]
+    retrieval = settings.get("retrieval") if isinstance(settings.get("retrieval"), dict) else {}
+    max_citations = int(retrieval.get("max_citations", 8))
+    max_images = int(retrieval.get("max_images", 6))
+
     results = search_engine.search(req.query, k=req.k)
     chunks = [
         {
@@ -151,8 +179,8 @@ def docs_search(req: SearchRequest) -> SearchResponse:
         }
         for r in results
     ]
-    citations = _build_citations(results, DEFAULT_VERSION)
-    images = _build_images(results)
+    citations = _build_citations(results, DEFAULT_VERSION, max_citations=max_citations)
+    images = _build_images(results, max_images=max_images)
     return SearchResponse(chunks=chunks, citations=citations, images=images)
 
 
@@ -175,12 +203,35 @@ async def chat(req: ChatRequest) -> ChatResponse:
         session = app_db.create_session(title=req.message[:60])
         session_id = session["session_id"]
 
+    settings = get_settings_bundle()["effective"]
+    required_placeholders = settings.get("required_placeholders")
+    if not isinstance(required_placeholders, list):
+        required_placeholders = ["context"]
+
+    template = settings.get("system_prompt_template")
+    if not isinstance(template, str) or not template.strip():
+        raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
+
+    retrieval_cfg = settings.get("retrieval") if isinstance(settings.get("retrieval"), dict) else {}
+    retrieval_mode = str(retrieval_cfg.get("mode", "bm25"))
+    doc_priority = retrieval_cfg.get("doc_priority")
+    if isinstance(doc_priority, list):
+        doc_priority_str = ", ".join(str(x) for x in doc_priority)
+    else:
+        doc_priority_str = ""
+
+    llm_cfg = settings.get("llm") if isinstance(settings.get("llm"), dict) else {}
+    temperature = float(llm_cfg.get("temperature", 0.2))
+    max_tokens = int(llm_cfg.get("max_tokens", 800))
+
     history = app_db.list_messages(session_id, limit=20)
     app_db.insert_message(session_id=session_id, role="user", content=req.message)
 
     retrieval = search_engine.search(req.message, k=req.k)
-    citations = _build_citations(retrieval, DEFAULT_VERSION)
-    images = _build_images(retrieval)
+    max_citations = int(retrieval_cfg.get("max_citations", 8))
+    max_images = int(retrieval_cfg.get("max_images", 6))
+    citations = _build_citations(retrieval, DEFAULT_VERSION, max_citations=max_citations)
+    images = _build_images(retrieval, max_images=max_images)
 
     context_blocks = []
     for i, r in enumerate(retrieval, start=1):
@@ -188,21 +239,31 @@ async def chat(req: ChatRequest) -> ChatResponse:
         source = f"{r['doc_id']}/{r['page_id']}"
         context_blocks.append(f"[{i}] {source} | {hp}\n{r['text']}")
 
-    system_prompt = (
-        "You are a Luxriot EVO 1.32 assistant. Answer ONLY using the provided documentation context.\n"
-        "If the context does not contain the answer, say you cannot find it in the docs and ask for clarification.\n"
-        "Be concise and practical. When you rely on a context item, cite it using bracketed numbers like [1] or [1][3].\n"
-    )
-    context_prompt = "DOCUMENTATION CONTEXT:\n\n" + ("\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)")
+    context_text = "\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)"
 
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt + "\n" + context_prompt}]
+    try:
+        system_prompt = render_template(
+            template,
+            variables={
+                "docs_version": DEFAULT_VERSION,
+                "retrieval_mode": retrieval_mode,
+                "retrieval_k": str(req.k),
+                "doc_priority": doc_priority_str,
+                "context": context_text,
+            },
+            required_placeholders=[str(x) for x in required_placeholders],
+        )
+    except PromptTemplateError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     for m in history[-10:]:
         if m["role"] in ("user", "assistant"):
             messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": req.message})
 
     try:
-        answer = await chat_completion(messages=messages)
+        answer = await chat_completion(messages=messages, temperature=temperature, max_tokens=max_tokens)
     except LMStudioError as e:
         log.exception("LM Studio error")
         raise HTTPException(status_code=502, detail=str(e)) from e

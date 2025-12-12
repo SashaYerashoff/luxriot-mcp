@@ -83,3 +83,12 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Any | None = None
 
+
+class AdminSettingsUpdateRequest(BaseModel):
+    settings: dict[str, Any]
+
+
+class AdminSettingsResponse(BaseModel):
+    defaults: dict[str, Any]
+    settings: dict[str, Any]
+    effective: dict[str, Any]

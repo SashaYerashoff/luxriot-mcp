@@ -1,0 +1,23 @@
+{
+  "required_placeholders": ["context"],
+  "system_prompt_template_file": "backend/prompts/system_prompt.md",
+  "llm": {
+    "temperature": 0.2,
+    "max_tokens": 800
+  },
+  "retrieval": {
+    "mode": "bm25",
+    "k_default": 8,
+    "max_citations": 8,
+    "max_images": 6,
+    "doc_priority": [
+      "luxriot-evo-global-administration-guide",
+      "luxriot-evo-monitor",
+      "luxriot-evo-standalone",
+      "luxriot-evo-global-installation-guide",
+      "luxriot-evo-s-installation-guide",
+      "luxriot-evo-monitor-http-api"
+    ]
+  }
+}
+

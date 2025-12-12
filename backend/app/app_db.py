@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import json
 
 from .config import APP_DB_PATH
 from .logging_utils import get_logger
@@ -44,6 +45,13 @@ def init_db() -> None:
               content TEXT NOT NULL,
               created_at TEXT NOT NULL,
               FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+              key TEXT PRIMARY KEY,
+              value_json TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_session_created
@@ -144,3 +152,67 @@ def list_messages(session_id: str, limit: int = 200) -> list[dict[str, Any]]:
         conn.close()
     return [dict(r) for r in rows]
 
+
+def get_setting(key: str) -> Any | None:
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT value_json FROM settings WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row["value_json"])
+        except Exception:
+            return row["value_json"]
+    finally:
+        conn.close()
+
+
+def list_settings() -> dict[str, Any]:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT key, value_json FROM settings ORDER BY key ASC").fetchall()
+    finally:
+        conn.close()
+    out: dict[str, Any] = {}
+    for r in rows:
+        try:
+            out[r["key"]] = json.loads(r["value_json"])
+        except Exception:
+            out[r["key"]] = r["value_json"]
+    return out
+
+
+def set_setting(key: str, value: Any) -> None:
+    now = _utc_now()
+    value_json = json.dumps(value, ensure_ascii=False)
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO settings(key, value_json, created_at, updated_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
+            """,
+            (key, value_json, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_settings(values: dict[str, Any]) -> None:
+    now = _utc_now()
+    rows = [(k, json.dumps(v, ensure_ascii=False), now, now) for k, v in values.items()]
+    conn = _connect()
+    try:
+        conn.executemany(
+            """
+            INSERT INTO settings(key, value_json, created_at, updated_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
