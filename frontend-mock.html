@@ -102,7 +102,9 @@
       display:grid;grid-template-columns:1fr 1fr;gap:22px;font-size:13px;color:var(--muted);
       line-height:1.8;padding:4px 6px 10px;
     }
-    .row{padding:4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .admin-grid .span2{grid-column:1 / -1;}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;}
+    .row{padding:4px 0;white-space:normal;overflow:hidden;text-overflow:ellipsis;}
     .slash{color:rgba(214,217,223,.75)}
     .kbd{color:rgba(214,217,223,.85)}
     .admin-actions{display:flex;justify-content:flex-end;gap:14px;margin-top:8px;padding-right:6px;}
@@ -284,31 +286,80 @@
 
   <div id="overlay" class="overlay"></div>
 
-  <!-- Admin tools panel -->
-  <div id="adminPanel" class="modal" role="dialog" aria-label="Administrator tools">
-    <div class="modal-header">Administrator tools:</div>
-
-    <div class="admin-grid">
-      <div>
-        <div class="row"><span class="slash">/</span> AI server IP: <span class="kbd">192.168.1.104:1234</span></div>
-        <div class="row"><span class="slash">/</span> Index/update documents: <span class="kbd">path/to/manual.md</span></div>
-        <div class="row"><span class="slash">/</span> Model ID: <span class="kbd">Qwen/qwen3-vl-8b-instruct</span></div>
-        <div class="row"><span class="slash">/</span> System prompt: <span class="kbd">path/to/prompt.md</span></div>
-        <div class="row"><span class="slash">/</span> Temperature: <span class="kbd">0.2</span> &nbsp;|&nbsp; Top K: <span class="kbd">50</span> &nbsp;|&nbsp; Top P: <span class="kbd">0.85</span></div>
-      </div>
-      <div>
-        <div class="row"><span class="slash">/</span> Log connection: <span class="kbd">y/n</span></div>
-        <div class="row"><span class="slash">/</span> MCP Search Internet: <span class="kbd">y/n</span> &nbsp;|&nbsp; MCP Luxriot docs: <span class="kbd">y/n</span></div>
-        <div class="row"><span class="slash">/</span> Etc…</div>
-      </div>
-    </div>
-
-    <div class="admin-actions">
-      <button class="btn ghost" id="defaultsBtn">DEFAULTS</button>
-      <button class="btn" id="applyBtn">APPLY</button>
-      <button class="btn primary" id="adminOkBtn">OK</button>
-    </div>
-  </div>
+	  <!-- Admin tools panel -->
+	  <div id="adminPanel" class="modal" role="dialog" aria-label="Administrator tools">
+	    <div class="modal-header">Administrator tools:</div>
+	
+	    <div class="admin-grid">
+	      <div class="card">
+	        <h3>Runtime</h3>
+	        <div class="row"><span class="slash">/</span> API base: <span class="kbd" id="adminApiBase">—</span></div>
+	        <div class="row"><span class="slash">/</span> Docs version: <span class="kbd" id="adminDocsVersion">—</span></div>
+	        <div class="row"><span class="slash">/</span> Datastore ready: <span class="kbd" id="adminDatastoreReady">—</span></div>
+	        <div class="row"><span class="slash">/</span> LM Studio: <span class="kbd" id="adminLmstudioUrl">—</span></div>
+	      </div>
+	
+	      <div class="card">
+	        <h3>Retrieval</h3>
+	        <label>Mode</label>
+	        <select id="adminRetrievalMode">
+	          <option value="bm25">bm25</option>
+	        </select>
+	        <label>Default k</label>
+	        <input id="adminRetrievalK" type="number" min="1" max="25" value="8"/>
+	        <div class="inline">
+	          <div style="flex:1;">
+	            <label>Max citations</label>
+	            <input id="adminMaxCitations" type="number" min="1" max="25" value="8"/>
+	          </div>
+	          <div style="flex:1;">
+	            <label>Max images</label>
+	            <input id="adminMaxImages" type="number" min="0" max="12" value="6"/>
+	          </div>
+	        </div>
+	        <label>Doc priority (one per line)</label>
+	        <textarea id="adminDocPriority" class="mono" style="height:120px;" placeholder="luxriot-evo-global-administration-guide&#10;luxriot-evo-monitor&#10;..."></textarea>
+	      </div>
+	
+	      <div class="card span2">
+	        <h3>System prompt (transparent)</h3>
+	        <div class="tiny muted">
+	          Required placeholder: <span class="kbd">{{context}}</span> (context is inserted at runtime)
+	        </div>
+	        <label>Prompt template</label>
+	        <textarea id="adminSystemPrompt" class="mono" style="height:220px;"></textarea>
+	
+	        <details class="err-details" style="margin-top:10px;">
+	          <summary>Show rendered preview (without doc context)</summary>
+	          <pre id="adminPromptPreview"></pre>
+	        </details>
+	
+	        <div class="tiny muted" id="adminSaveHint" style="margin-top:8px;"></div>
+	      </div>
+	
+	      <div class="card">
+	        <h3>LLM</h3>
+	        <label>Temperature</label>
+	        <input id="adminTemperature" type="number" step="0.01" min="0" max="2" value="0.2"/>
+	        <label>Max tokens</label>
+	        <input id="adminMaxTokens" type="number" min="64" max="4096" value="800"/>
+	      </div>
+	
+	      <div class="card">
+	        <h3>Notes</h3>
+	        <div class="tiny muted">
+	          - No prompts are hardcoded in service code.<br/>
+	          - This template is stored in backend settings and used for every `/chat` call.
+	        </div>
+	      </div>
+	    </div>
+	
+	    <div class="admin-actions">
+	      <button class="btn ghost" id="defaultsBtn">DEFAULTS</button>
+	      <button class="btn" id="applyBtn">APPLY</button>
+	      <button class="btn primary" id="adminOkBtn">OK</button>
+	    </div>
+	  </div>
 
   <!-- NEW: Redactor panel -->
   <div id="redactorPanel" class="modal" role="dialog" aria-label="Redactor panel">
@@ -482,8 +533,170 @@
   const filterTag = document.getElementById('filterTag');
   const sortBy = document.getElementById('sortBy');
 
-  const userInput = document.getElementById('userInput');
-  const sendBtn = document.getElementById('sendBtn');
+	  const userInput = document.getElementById('userInput');
+	  const sendBtn = document.getElementById('sendBtn');
+
+	  // ---------- Admin settings UI ----------
+	  const adminApiBaseEl = document.getElementById('adminApiBase');
+	  const adminDocsVersionEl = document.getElementById('adminDocsVersion');
+	  const adminDatastoreReadyEl = document.getElementById('adminDatastoreReady');
+	  const adminLmstudioUrlEl = document.getElementById('adminLmstudioUrl');
+
+	  const adminSystemPromptEl = document.getElementById('adminSystemPrompt');
+	  const adminPromptPreviewEl = document.getElementById('adminPromptPreview');
+	  const adminSaveHintEl = document.getElementById('adminSaveHint');
+
+	  const adminRetrievalModeEl = document.getElementById('adminRetrievalMode');
+	  const adminRetrievalKEl = document.getElementById('adminRetrievalK');
+	  const adminMaxCitationsEl = document.getElementById('adminMaxCitations');
+	  const adminMaxImagesEl = document.getElementById('adminMaxImages');
+	  const adminDocPriorityEl = document.getElementById('adminDocPriority');
+
+	  const adminTemperatureEl = document.getElementById('adminTemperature');
+	  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
+
+	  let adminBundle = null; // {defaults, settings, effective}
+	  let chatKDefault = 8;
+
+	  function _linesToList(text) {
+	    return String(text || '')
+	      .split('\n')
+	      .map((x) => x.trim())
+	      .filter((x) => x.length);
+	  }
+
+	  function _renderPreview(template) {
+	    const retrievalMode = adminRetrievalModeEl.value || 'bm25';
+	    const retrievalK = adminRetrievalKEl.value || String(chatKDefault);
+	    const docPriority = _linesToList(adminDocPriorityEl.value).join(', ');
+	    const vars = {
+	      docs_version: adminDocsVersionEl.textContent || '(unknown)',
+	      retrieval_mode: retrievalMode,
+	      retrieval_k: retrievalK,
+	      doc_priority: docPriority,
+	      context: '(documentation context inserted at runtime)'
+	    };
+	    let out = String(template || '');
+	    Object.entries(vars).forEach(([k, v]) => {
+	      out = out.split(`{{${k}}}`).join(String(v));
+	    });
+	    return out;
+	  }
+
+	  function _syncPromptPreview() {
+	    if (!adminPromptPreviewEl) return;
+	    adminPromptPreviewEl.textContent = _renderPreview(adminSystemPromptEl.value);
+	  }
+
+	  adminSystemPromptEl.addEventListener('input', _syncPromptPreview);
+	  adminRetrievalModeEl.addEventListener('change', _syncPromptPreview);
+	  adminRetrievalKEl.addEventListener('input', _syncPromptPreview);
+	  adminDocPriorityEl.addEventListener('input', _syncPromptPreview);
+
+	  async function loadAdminPanel() {
+	    adminSaveHintEl.textContent = '';
+	    adminApiBaseEl.textContent = apiBase;
+
+	    let health = null;
+	    try {
+	      health = await apiJson('/health');
+	      adminDocsVersionEl.textContent = health.docs_version ?? '—';
+	      adminDatastoreReadyEl.textContent = String(health.datastore_ready ?? '—');
+	      adminLmstudioUrlEl.textContent = health.lmstudio_base_url ?? '—';
+	    } catch (e) {
+	      adminDocsVersionEl.textContent = '—';
+	      adminDatastoreReadyEl.textContent = '—';
+	      adminLmstudioUrlEl.textContent = '—';
+	    }
+
+	    adminBundle = await apiJson('/admin/settings');
+	    const effective = adminBundle.effective || {};
+	    const retrieval = effective.retrieval || {};
+	    const llm = effective.llm || {};
+
+	    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
+	    adminRetrievalKEl.value = retrieval.k_default ?? 8;
+	    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
+	    adminMaxImagesEl.value = retrieval.max_images ?? 6;
+	    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
+
+	    adminTemperatureEl.value = llm.temperature ?? 0.2;
+	    adminMaxTokensEl.value = llm.max_tokens ?? 800;
+
+	    adminSystemPromptEl.value = effective.system_prompt_template || '';
+
+	    chatKDefault = Number(retrieval.k_default ?? 8);
+	    _syncPromptPreview();
+	  }
+
+	  function applyDefaultsToForm() {
+	    if (!adminBundle?.defaults) return;
+	    const d = adminBundle.defaults;
+	    const retrieval = d.retrieval || {};
+	    const llm = d.llm || {};
+
+	    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
+	    adminRetrievalKEl.value = retrieval.k_default ?? 8;
+	    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
+	    adminMaxImagesEl.value = retrieval.max_images ?? 6;
+	    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
+
+	    adminTemperatureEl.value = llm.temperature ?? 0.2;
+	    adminMaxTokensEl.value = llm.max_tokens ?? 800;
+
+	    adminSystemPromptEl.value = d.system_prompt_template || '';
+	    adminSaveHintEl.textContent = 'Loaded defaults (not yet applied).';
+	    _syncPromptPreview();
+	  }
+
+	  async function applyAdminSettings() {
+	    adminSaveHintEl.textContent = '';
+	    const tmpl = adminSystemPromptEl.value || '';
+	    if (!tmpl.includes('{{context}}')) {
+	      adminSaveHintEl.textContent = 'Error: prompt template must include {{context}}.';
+	      return;
+	    }
+
+	    const retrieval = {
+	      mode: adminRetrievalModeEl.value || 'bm25',
+	      k_default: Number(adminRetrievalKEl.value || 8),
+	      max_citations: Number(adminMaxCitationsEl.value || 8),
+	      max_images: Number(adminMaxImagesEl.value || 6),
+	      doc_priority: _linesToList(adminDocPriorityEl.value)
+	    };
+	    const llm = {
+	      temperature: Number(adminTemperatureEl.value || 0.2),
+	      max_tokens: Number(adminMaxTokensEl.value || 800)
+	    };
+	    const payload = {
+	      settings: {
+	        system_prompt_template: tmpl,
+	        retrieval,
+	        llm
+	      }
+	    };
+
+	    try {
+	      adminBundle = await apiJson('/admin/settings', { method: 'POST', body: payload });
+	      const effective = adminBundle.effective || {};
+	      chatKDefault = Number(effective?.retrieval?.k_default ?? retrieval.k_default ?? 8);
+	      adminSaveHintEl.textContent = 'Saved. New settings apply immediately.';
+	    } catch (e) {
+	      adminSaveHintEl.textContent = `Save failed: ${e?.raw ? String(e.raw) : String(e)}`;
+	    }
+	  }
+
+	  // Load initial settings (so chat uses server defaults)
+	  (async () => {
+	    try {
+	      const b = await apiJson('/admin/settings');
+	      adminBundle = b;
+	      const k = b?.effective?.retrieval?.k_default;
+	      if (typeof k === 'number') chatKDefault = k;
+	    } catch (e) {
+	      // Backend may be down; keep defaults.
+	    }
+	  })();
 
   function setEmptyStateVisible(visible) {
     emptyState.style.display = visible ? 'flex' : 'none';
@@ -648,10 +861,11 @@
     sendBtn.disabled = true;
     sendBtn.textContent = '…';
 
-    try {
-      const payload = { message: text, k: 8 };
-      if (session.session_id) payload.session_id = session.session_id;
-      const data = await apiJson('/chat', { method: 'POST', body: payload });
+	    try {
+	      const k = Math.max(1, Math.min(25, Number(chatKDefault || 8)));
+	      const payload = { message: text, k };
+	      if (session.session_id) payload.session_id = session.session_id;
+	      const data = await apiJson('/chat', { method: 'POST', body: payload });
       session.session_id = data.session_id;
       lastAssistantMessage = data.answer || '';
       saveHint.textContent = "Updated last answer target.";
@@ -700,16 +914,26 @@
     }
   });
 
-  toolsBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (adminPanel.classList.contains('visible')) closeAllModals();
-    else openModal(adminPanel);
-  });
-  topToolToggle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (adminPanel.classList.contains('visible')) closeAllModals();
-    else openModal(adminPanel);
-  });
+	  toolsBtn.addEventListener('click', (e) => {
+	    e.stopPropagation();
+	    if (adminPanel.classList.contains('visible')) closeAllModals();
+	    else {
+	      openModal(adminPanel);
+	      loadAdminPanel().catch((err) => {
+	        adminSaveHintEl.textContent = `Failed to load settings: ${err?.raw ? String(err.raw) : String(err)}`;
+	      });
+	    }
+	  });
+	  topToolToggle.addEventListener('click', (e) => {
+	    e.stopPropagation();
+	    if (adminPanel.classList.contains('visible')) closeAllModals();
+	    else {
+	      openModal(adminPanel);
+	      loadAdminPanel().catch((err) => {
+	        adminSaveHintEl.textContent = `Failed to load settings: ${err?.raw ? String(err.raw) : String(err)}`;
+	      });
+	    }
+	  });
 
   redactorBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -730,10 +954,16 @@
     userSettings.classList.toggle('visible');
   });
 
-  // Admin buttons (mock)
-  document.getElementById('adminOkBtn').addEventListener('click', closeAllModals);
-  document.getElementById('applyBtn').addEventListener('click', () => pulse(adminPanel));
-  document.getElementById('defaultsBtn').addEventListener('click', () => pulse(adminPanel));
+	  // Admin buttons (mock)
+	  document.getElementById('adminOkBtn').addEventListener('click', closeAllModals);
+	  document.getElementById('applyBtn').addEventListener('click', () => {
+	    applyAdminSettings();
+	    pulse(adminPanel);
+	  });
+	  document.getElementById('defaultsBtn').addEventListener('click', () => {
+	    applyDefaultsToForm();
+	    pulse(adminPanel);
+	  });
 
   // Redactor OK
   document.getElementById('redactorOkBtn').addEventListener('click', closeAllModals);
