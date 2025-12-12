@@ -331,27 +331,73 @@
 	        <div class="row"><span class="slash">/</span> LM Studio: <span class="kbd" id="adminLmstudioUrl">—</span></div>
 	      </div>
 	
-	      <div class="card">
-	        <h3>Retrieval</h3>
-	        <label>Mode</label>
-	        <select id="adminRetrievalMode">
-	          <option value="bm25">bm25</option>
-	        </select>
-	        <label>Default k</label>
-	        <input id="adminRetrievalK" type="number" min="1" max="25" value="8"/>
-	        <div class="inline">
-	          <div style="flex:1;">
+		      <div class="card">
+		        <h3>Retrieval</h3>
+		        <label>Mode</label>
+		        <select id="adminRetrievalMode">
+		          <option value="bm25">bm25</option>
+		          <option value="embedding">embedding</option>
+		          <option value="hybrid">hybrid</option>
+		        </select>
+		        <label>Default k</label>
+		        <input id="adminRetrievalK" type="number" min="1" max="25" value="8"/>
+		        <div class="inline">
+		          <div style="flex:1;">
 	            <label>Max citations</label>
 	            <input id="adminMaxCitations" type="number" min="1" max="25" value="8"/>
 	          </div>
 	          <div style="flex:1;">
 	            <label>Max images</label>
-	            <input id="adminMaxImages" type="number" min="0" max="12" value="6"/>
-	          </div>
-	        </div>
-	        <label>Doc priority (one per line)</label>
-	        <textarea id="adminDocPriority" class="mono" style="height:120px;" placeholder="luxriot-evo-global-administration-guide&#10;luxriot-evo-monitor&#10;..."></textarea>
-	      </div>
+		            <input id="adminMaxImages" type="number" min="0" max="12" value="6"/>
+		          </div>
+		        </div>
+		        <label>Doc priority boost (soft)</label>
+		        <input id="adminDocPriorityBoost" type="number" step="0.01" min="0" max="1" value="0.05"/>
+		        <label>Doc priority (one per line)</label>
+		        <textarea id="adminDocPriority" class="mono" style="height:120px;" placeholder="luxriot-evo-global-administration-guide&#10;luxriot-evo-monitor&#10;..."></textarea>
+		
+		        <details style="margin-top:10px;">
+		          <summary class="tiny muted">Advanced retrieval settings</summary>
+		          <div class="inline" style="margin-top:10px;">
+		            <div style="flex:1;">
+		              <label>Max per page</label>
+		              <input id="adminMaxPerPage" type="number" min="0" max="20" value="3"/>
+		            </div>
+		            <div style="flex:1;">
+		              <label>Max per doc</label>
+		              <input id="adminMaxPerDoc" type="number" min="0" max="50" value="12"/>
+		            </div>
+		          </div>
+		
+		          <div class="hr"></div>
+		
+		          <div class="tiny muted">Hybrid scoring (RRF)</div>
+		          <div class="inline" style="margin-top:8px;">
+		            <div style="flex:1;">
+		              <label>RRF k</label>
+		              <input id="adminRrfK" type="number" min="1" max="200" value="60"/>
+		            </div>
+		            <div style="flex:1;">
+		              <label>BM25 weight</label>
+		              <input id="adminBm25Weight" type="number" step="0.1" min="0" max="5" value="1.0"/>
+		            </div>
+		            <div style="flex:1;">
+		              <label>Emb weight</label>
+		              <input id="adminEmbWeight" type="number" step="0.1" min="0" max="5" value="1.0"/>
+		            </div>
+		          </div>
+		          <div class="inline">
+		            <div style="flex:1;">
+		              <label>BM25 candidates</label>
+		              <input id="adminBm25Candidates" type="number" min="10" max="500" value="120"/>
+		            </div>
+		            <div style="flex:1;">
+		              <label>Emb candidates</label>
+		              <input id="adminEmbCandidates" type="number" min="10" max="500" value="120"/>
+		            </div>
+		          </div>
+		        </details>
+		      </div>
 	
 	      <div class="card span2">
 	        <h3>System prompt (transparent)</h3>
@@ -578,11 +624,19 @@
 	  const adminPromptPreviewEl = document.getElementById('adminPromptPreview');
 	  const adminSaveHintEl = document.getElementById('adminSaveHint');
 
-	  const adminRetrievalModeEl = document.getElementById('adminRetrievalMode');
-	  const adminRetrievalKEl = document.getElementById('adminRetrievalK');
-	  const adminMaxCitationsEl = document.getElementById('adminMaxCitations');
-	  const adminMaxImagesEl = document.getElementById('adminMaxImages');
-	  const adminDocPriorityEl = document.getElementById('adminDocPriority');
+		  const adminRetrievalModeEl = document.getElementById('adminRetrievalMode');
+		  const adminRetrievalKEl = document.getElementById('adminRetrievalK');
+		  const adminMaxCitationsEl = document.getElementById('adminMaxCitations');
+		  const adminMaxImagesEl = document.getElementById('adminMaxImages');
+		  const adminDocPriorityBoostEl = document.getElementById('adminDocPriorityBoost');
+		  const adminDocPriorityEl = document.getElementById('adminDocPriority');
+		  const adminMaxPerPageEl = document.getElementById('adminMaxPerPage');
+		  const adminMaxPerDocEl = document.getElementById('adminMaxPerDoc');
+		  const adminRrfKEl = document.getElementById('adminRrfK');
+		  const adminBm25WeightEl = document.getElementById('adminBm25Weight');
+		  const adminEmbWeightEl = document.getElementById('adminEmbWeight');
+		  const adminBm25CandidatesEl = document.getElementById('adminBm25Candidates');
+		  const adminEmbCandidatesEl = document.getElementById('adminEmbCandidates');
 
 	  const adminTemperatureEl = document.getElementById('adminTemperature');
 	  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
@@ -646,11 +700,19 @@
 	    const retrieval = effective.retrieval || {};
 	    const llm = effective.llm || {};
 
-	    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
-	    adminRetrievalKEl.value = retrieval.k_default ?? 8;
-	    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
-	    adminMaxImagesEl.value = retrieval.max_images ?? 6;
-	    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
+		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
+		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
+		    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
+		    adminMaxImagesEl.value = retrieval.max_images ?? 6;
+		    adminDocPriorityBoostEl.value = retrieval.doc_priority_boost ?? 0.05;
+		    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
+		    adminMaxPerPageEl.value = retrieval?.dedupe?.max_per_page ?? 3;
+		    adminMaxPerDocEl.value = retrieval?.dedupe?.max_per_doc ?? 12;
+		    adminRrfKEl.value = retrieval?.hybrid?.rrf_k ?? 60;
+		    adminBm25WeightEl.value = retrieval?.hybrid?.bm25_weight ?? 1.0;
+		    adminEmbWeightEl.value = retrieval?.hybrid?.embedding_weight ?? 1.0;
+		    adminBm25CandidatesEl.value = retrieval?.hybrid?.bm25_candidates ?? 120;
+		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
 
 	    adminTemperatureEl.value = llm.temperature ?? 0.2;
 	    adminMaxTokensEl.value = llm.max_tokens ?? 800;
@@ -667,11 +729,19 @@
 	    const retrieval = d.retrieval || {};
 	    const llm = d.llm || {};
 
-	    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
-	    adminRetrievalKEl.value = retrieval.k_default ?? 8;
-	    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
-	    adminMaxImagesEl.value = retrieval.max_images ?? 6;
-	    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
+		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
+		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
+		    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
+		    adminMaxImagesEl.value = retrieval.max_images ?? 6;
+		    adminDocPriorityBoostEl.value = retrieval.doc_priority_boost ?? 0.05;
+		    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
+		    adminMaxPerPageEl.value = retrieval?.dedupe?.max_per_page ?? 3;
+		    adminMaxPerDocEl.value = retrieval?.dedupe?.max_per_doc ?? 12;
+		    adminRrfKEl.value = retrieval?.hybrid?.rrf_k ?? 60;
+		    adminBm25WeightEl.value = retrieval?.hybrid?.bm25_weight ?? 1.0;
+		    adminEmbWeightEl.value = retrieval?.hybrid?.embedding_weight ?? 1.0;
+		    adminBm25CandidatesEl.value = retrieval?.hybrid?.bm25_candidates ?? 120;
+		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
 
 	    adminTemperatureEl.value = llm.temperature ?? 0.2;
 	    adminMaxTokensEl.value = llm.max_tokens ?? 800;
@@ -689,13 +759,25 @@
 	      return;
 	    }
 
-	    const retrieval = {
-	      mode: adminRetrievalModeEl.value || 'bm25',
-	      k_default: Number(adminRetrievalKEl.value || 8),
-	      max_citations: Number(adminMaxCitationsEl.value || 8),
-	      max_images: Number(adminMaxImagesEl.value || 6),
-	      doc_priority: _linesToList(adminDocPriorityEl.value)
-	    };
+		    const retrieval = {
+		      mode: adminRetrievalModeEl.value || 'bm25',
+		      k_default: Number(adminRetrievalKEl.value || 8),
+		      max_citations: Number(adminMaxCitationsEl.value || 8),
+		      max_images: Number(adminMaxImagesEl.value || 6),
+		      doc_priority_boost: Number(adminDocPriorityBoostEl.value || 0),
+		      dedupe: {
+		        max_per_page: Number(adminMaxPerPageEl.value || 0),
+		        max_per_doc: Number(adminMaxPerDocEl.value || 0)
+		      },
+		      hybrid: {
+		        rrf_k: Number(adminRrfKEl.value || 60),
+		        bm25_weight: Number(adminBm25WeightEl.value || 1.0),
+		        embedding_weight: Number(adminEmbWeightEl.value || 1.0),
+		        bm25_candidates: Number(adminBm25CandidatesEl.value || 120),
+		        embedding_candidates: Number(adminEmbCandidatesEl.value || 120)
+		      },
+		      doc_priority: _linesToList(adminDocPriorityEl.value)
+		    };
 	    const llm = {
 	      temperature: Number(adminTemperatureEl.value || 0.2),
 	      max_tokens: Number(adminMaxTokensEl.value || 800)
