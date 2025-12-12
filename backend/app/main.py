@@ -175,6 +175,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         session = app_db.create_session(title=req.message[:60])
         session_id = session["session_id"]
 
+    history = app_db.list_messages(session_id, limit=20)
     app_db.insert_message(session_id=session_id, role="user", content=req.message)
 
     retrieval = search_engine.search(req.message, k=req.k)
@@ -190,11 +191,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
     system_prompt = (
         "You are a Luxriot EVO 1.32 assistant. Answer ONLY using the provided documentation context.\n"
         "If the context does not contain the answer, say you cannot find it in the docs and ask for clarification.\n"
-        "Be concise and practical. When you rely on a context item, cite it using [#] markers.\n"
+        "Be concise and practical. When you rely on a context item, cite it using bracketed numbers like [1] or [1][3].\n"
     )
     context_prompt = "DOCUMENTATION CONTEXT:\n\n" + ("\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)")
 
-    history = app_db.list_messages(session_id, limit=20)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt + "\n" + context_prompt}]
     for m in history[-10:]:
         if m["role"] in ("user", "assistant"):
@@ -228,4 +228,3 @@ def sessions_messages(session_id: str) -> MessagesResponse:
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     return MessagesResponse(messages=app_db.list_messages(session_id, limit=500))
-
