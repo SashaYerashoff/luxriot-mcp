@@ -78,6 +78,12 @@ def admin_get_settings() -> dict[str, Any]:
 @app.post("/admin/settings", response_model=AdminSettingsResponse)
 def admin_update_settings(req: AdminSettingsUpdateRequest) -> dict[str, Any]:
     try:
+        if "system_prompt_template" in req.settings:
+            tmpl = req.settings.get("system_prompt_template")
+            if not isinstance(tmpl, str) or not tmpl.strip():
+                raise HTTPException(status_code=400, detail="system_prompt_template must be a non-empty string")
+            if "{{context}}" not in tmpl:
+                raise HTTPException(status_code=400, detail="system_prompt_template must include required placeholder {{context}}")
         return update_settings(req.settings)
     except SettingsError as e:
         log.exception("Settings error")
