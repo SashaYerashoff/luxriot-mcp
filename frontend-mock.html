@@ -1017,15 +1017,30 @@
 	    const picks = images.slice(0, Math.max(0, Math.min(6, Number(maxInline) || 0)));
 	    if (picks.length === 0) return { md, inlined: false };
 
-	    const lines = ['---', '', '### Screenshots'];
+	    const imgLines = [];
 	    picks.forEach((img) => {
 	      const capRaw = img?.near_heading ? String(img.near_heading) : `${img?.doc_id || ''}/${img?.page_id || ''}`;
 	      const cap = capRaw.replace(/\]/g, '').slice(0, 120);
 	      const url = img?.url ? String(img.url) : '';
 	      if (!url) return;
-	      lines.push('', `![${cap}](${url})`);
+	      imgLines.push(`![${cap}](${url})`);
 	    });
-	    return { md: md + '\n\n' + lines.join('\n') + '\n', inlined: true };
+	    if (!imgLines.length) return { md, inlined: false };
+
+	    const out = md.split('\n');
+	    const stepsRe = /^#{2,6}\s+steps\b/i;
+	    let inserted = false;
+	    for (let i = 0; i < out.length; i++) {
+	      if (stepsRe.test(out[i])) {
+	        out.splice(i + 1, 0, '', '*Screenshots from docs:*', '', ...imgLines, '');
+	        inserted = true;
+	        break;
+	      }
+	    }
+	    if (!inserted) {
+	      out.push('', '---', '', '### Screenshots', '', ...imgLines, '');
+	    }
+	    return { md: out.join('\n'), inlined: true };
 	  }
 
 	  function appendMessage({ role, content, citations = null, images = null, errorText = null }) {
