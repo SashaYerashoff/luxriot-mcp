@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +35,7 @@ from .schemas import (
     SearchResponse,
     SessionCreateRequest,
     SessionsResponse,
+    WebSource,
 )
 
 log = get_logger(__name__)
@@ -450,6 +452,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     web_search_k = int(web_cfg.get("search_k", 5) or 5)
 
     web_context_blocks: list[str] = []
+    web_sources: list[WebSource] = []
     if web_enabled:
         urls = extract_urls(req.message, max_urls=web_max_urls)
         search_q = parse_search_query(req.message)
@@ -462,16 +465,30 @@ async def chat(req: ChatRequest) -> ChatResponse:
                 if isinstance(res, Exception):
                     detail = str(res).strip() or repr(res)
                     web_context_blocks.append(f"[W{len(web_context_blocks)+1}] ERROR fetching {u}: {detail}")
+                    web_sources.append(WebSource(kind="fetch", url=u, error=detail))
                     continue
                 title = f" | {res.title}" if getattr(res, "title", None) else ""
                 web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {res.final_url}{title}\n{res.text}")
+                web_sources.append(
+                    WebSource(
+                        kind="fetch",
+                        url=u,
+                        final_url=str(res.final_url),
+                        title=getattr(res, "title", None),
+                        status=int(getattr(res, "status", 0) or 0) or None,
+                        truncated=bool(getattr(res, "truncated", False)),
+                    )
+                )
         elif search_q:
+            ddg_query_url = "https://html.duckduckgo.com/html/?q=" + quote_plus(search_q)
             try:
                 found = await duckduckgo_search(
                     search_q, k=web_search_k, timeout_s=web_timeout_s, max_bytes=web_max_bytes
                 )
             except WebToolError as e:
-                web_context_blocks.append(f"[W{len(web_context_blocks)+1}] ERROR web search: {e}")
+                err = str(e)
+                web_context_blocks.append(f"[W{len(web_context_blocks)+1}] ERROR web search: {err}")
+                web_sources.append(WebSource(kind="search", url=ddg_query_url, error=err))
                 found = []
             if found:
                 for r in found:
@@ -483,6 +500,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
                     title_part = f" | {title}" if title else ""
                     snippet_part = f"\n{snippet}" if snippet else ""
                     web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {url}{title_part}{snippet_part}")
+                    web_sources.append(WebSource(kind="search", url=url, title=title or None, snippet=snippet or None))
     max_citations = int(retrieval_cfg.get("max_citations", 8))
     max_images = int(retrieval_cfg.get("max_images", 6))
     citations = _build_citations(retrieval, DEFAULT_VERSION, max_citations=max_citations)
@@ -535,7 +553,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
     app_db.insert_message(session_id=session_id, role="assistant", content=answer)
-    return ChatResponse(answer=answer, citations=citations, images=images, session_id=session_id)
+    return ChatResponse(answer=answer, citations=citations, images=images, web_sources=web_sources, session_id=session_id)
 
 
 @app.get("/sessions", response_model=SessionsResponse)

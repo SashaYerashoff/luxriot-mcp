@@ -468,6 +468,12 @@
 	    .citations{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
 	    .citations a{color:var(--accent);text-decoration:none;font-size:12px;}
 	    .citations a:hover{text-decoration:underline;}
+	    .web-sources{margin-top:10px;display:flex;flex-direction:column;gap:6px;}
+	    .web-sources .title{font-size:12px;color:var(--muted);opacity:.95;}
+	    .web-sources a{color:var(--accent);text-decoration:none;font-size:12px;}
+	    .web-sources a:hover{text-decoration:underline;}
+	    .web-sources .snippet{font-size:11px;color:var(--muted);opacity:.95;line-height:1.35;}
+	    .web-sources .error{font-size:11px;color:var(--danger);white-space:pre-wrap;}
     .thumb-grid{margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;}
     .thumb{
       width:180px;border:1px solid var(--border);border-radius:12px;overflow:hidden;
@@ -1542,7 +1548,7 @@
 	    return { md: out.join('\n'), inlined: true };
 	  }
 
-	  function appendMessage({ role, content, citations = null, images = null, errorText = null }) {
+	  function appendMessage({ role, content, citations = null, images = null, web_sources = null, errorText = null }) {
 	    const wrap = document.createElement('div');
 	    wrap.className = `msg ${role === 'user' ? 'user' : 'assistant'}`;
 
@@ -1565,6 +1571,46 @@
 	      body.textContent = content || '';
 	    }
 	    wrap.appendChild(body);
+
+    if (Array.isArray(web_sources) && web_sources.length) {
+      const w = document.createElement('div');
+      w.className = 'web-sources';
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = 'Web sources:';
+      w.appendChild(title);
+
+      web_sources.forEach((src) => {
+        const href = String(src?.final_url || src?.url || '').trim();
+        const label = String(src?.title || href || '').trim();
+
+        if (href) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.target = '_blank';
+          a.rel = 'noreferrer';
+          a.textContent = label || href;
+          w.appendChild(a);
+        }
+
+        const snippet = String(src?.snippet || '').trim();
+        if (snippet) {
+          const s = document.createElement('div');
+          s.className = 'snippet';
+          s.textContent = snippet;
+          w.appendChild(s);
+        }
+
+        const err = String(src?.error || '').trim();
+        if (err) {
+          const e = document.createElement('div');
+          e.className = 'error';
+          e.textContent = err;
+          w.appendChild(e);
+        }
+      });
+      wrap.appendChild(w);
+    }
 
     if (wrap.dataset.hasDocCite === '1' && Array.isArray(citations) && citations.length) {
       const c = document.createElement('div');
@@ -2306,7 +2352,7 @@
 	      session.session_id = data.session_id;
 	      lastAssistantMessage = data.answer || '';
 	      saveHint.textContent = "Updated last answer target.";
-	      appendMessage({ role: 'assistant', content: data.answer || '', citations: data.citations || [], images: data.images || [] });
+	      appendMessage({ role: 'assistant', content: data.answer || '', citations: data.citations || [], images: data.images || [], web_sources: data.web_sources || [] });
 	      refreshSessions();
 	    } catch (e) {
 	      pending.remove();

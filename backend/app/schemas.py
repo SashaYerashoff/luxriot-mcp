@@ -47,10 +47,22 @@ class ChatRequest(BaseModel):
     k: int = Field(default=8, ge=1, le=25)
 
 
+class WebSource(BaseModel):
+    kind: Literal["fetch", "search"]
+    url: str
+    title: str | None = None
+    snippet: str | None = None
+    status: int | None = None
+    final_url: str | None = None
+    truncated: bool | None = None
+    error: str | None = None
+
+
 class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
     images: list[ImageResult]
+    web_sources: list[WebSource] = Field(default_factory=list)
     session_id: str
 
 

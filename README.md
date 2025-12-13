@@ -33,6 +33,7 @@ In `Administrator tools → Web`, enable web tools, then:
 
 - Paste a URL in chat (e.g. `fetch https://www.luxriot.com/`) to fetch+summarize it.
 - Use `search: <query>` / `web: <query>` to include DuckDuckGo HTML search results in context.
+- The UI shows a “Web sources” section under answers when web context is used.
 
 ## Environment variables
 
