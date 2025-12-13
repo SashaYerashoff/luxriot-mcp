@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from . import app_db
 from .config import DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL
 from .datastore_search import SearchEngine
+from .docs_store import DocsStore
 from .lmstudio import LMStudioError, chat_completion
 from .logging_utils import get_logger
 from .prompting import PromptTemplateError, render_template
@@ -21,8 +22,12 @@ from .schemas import (
     ChatRequest,
     ChatResponse,
     Citation,
+    DocCatalogDetailResponse,
+    DocPageResponse,
+    DocsCatalogResponse,
     ImageResult,
     MessagesResponse,
+    PageImage,
     SearchRequest,
     SearchResponse,
     SessionCreateRequest,
@@ -41,6 +46,7 @@ app.add_middleware(
 )
 
 search_engine = SearchEngine(version=DEFAULT_VERSION, datastore_dir=DATASTORE_DIR)
+docs_store = DocsStore(version=DEFAULT_VERSION, datastore_dir=DATASTORE_DIR)
 
 
 def _safe_resolve(base: Path, unsafe_path: str) -> Path:
@@ -120,6 +126,79 @@ def rawdocs(version: str, path: str) -> FileResponse:
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Doc file not found")
     return FileResponse(str(file_path))
+
+
+@app.get("/docs/catalog", response_model=DocsCatalogResponse)
+def docs_catalog() -> DocsCatalogResponse:
+    if not docs_store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+        )
+    try:
+        return DocsCatalogResponse(docs=docs_store.list_docs())
+    except Exception as e:
+        log.exception("Docs catalog error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/docs/catalog/{doc_id}", response_model=DocCatalogDetailResponse)
+def docs_catalog_doc(doc_id: str) -> dict[str, Any]:
+    if not docs_store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+        )
+    try:
+        return docs_store.list_pages(doc_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Doc not found") from e
+    except Exception as e:
+        log.exception("Docs catalog doc error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/docs/page/{doc_id}/{page_id}", response_model=DocPageResponse)
+def docs_page(doc_id: str, page_id: str) -> DocPageResponse:
+    if not docs_store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+        )
+    try:
+        page = docs_store.get_page(doc_id, page_id)
+        md_text = docs_store.read_markdown(page)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Page not found") from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        log.exception("Docs page error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    images: list[PageImage] = []
+    for img in page.images:
+        if not isinstance(img, dict):
+            continue
+        url = str(img.get("url") or "").strip()
+        if not url:
+            continue
+        original = str(img.get("original") or "").strip()
+        alt = str(img.get("alt") or "").strip() or None
+        images.append(PageImage(original=original, url=url, alt=alt))
+
+    return DocPageResponse(
+        version=DEFAULT_VERSION,
+        doc_id=page.doc_id,
+        doc_title=page.doc_title,
+        page_id=page.page_id,
+        page_title=page.page_title,
+        heading_path=page.heading_path,
+        anchor=page.anchor,
+        source_path=page.source_path,
+        markdown=md_text,
+        images=images,
+    )
 
 
 def _build_citations(results: list[dict[str, Any]], version: str, max_citations: int) -> list[Citation]:

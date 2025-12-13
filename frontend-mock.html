@@ -126,6 +126,105 @@
     }
     #adminPanel .admin-actions{flex:0 0 auto;}
 
+    /* Docs reader modal viewport + internal scroll */
+    #docsPanel{
+      max-height:calc(100vh - 220px);
+      overflow:hidden;
+    }
+    #docsPanel.visible{
+      display:flex;
+      flex-direction:column;
+    }
+    .docs-grid{
+      display:grid;
+      grid-template-columns: 320px 1fr;
+      gap:18px;
+      flex:1;
+      min-height:0;
+      padding:4px 6px 10px;
+    }
+    .docs-nav{
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+    .docs-list{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding-right:6px;
+      margin-top:8px;
+    }
+    .docs-item{
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px 10px;
+      margin-bottom:10px;
+      background:rgba(16,17,19,.35);
+      cursor:pointer;
+      user-select:none;
+    }
+    .docs-item:hover{border-color:rgba(214,217,223,.25);}
+    .docs-item.active{
+      border-color:rgba(63,163,124,.45);
+      background:rgba(63,163,124,.12);
+    }
+    .docs-item .top{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      font-size:12px;
+      color:var(--text);
+      opacity:.94;
+    }
+    .docs-item .sub{
+      margin-top:6px;
+      font-size:11px;
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .docs-content{
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+    .docs-toolbar{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:center;
+      margin-bottom:10px;
+    }
+    .docsPage{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding-right:10px;
+      line-height:1.45;
+      color:var(--text);
+    }
+    .docsPage p{margin:0 0 10px;}
+    .docsPage p:last-child{margin-bottom:0;}
+    .docsPage h1,.docsPage h2,.docsPage h3{margin:10px 0 8px;line-height:1.25;}
+    .docsPage h1{font-size:18px;}
+    .docsPage h2{font-size:16px;}
+    .docsPage h3{font-size:14px;}
+    .docsPage ul,.docsPage ol{margin:6px 0 10px 20px;padding:0;}
+    .docsPage li{margin:4px 0;}
+    .docsPage code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;background:rgba(255,255,255,.06);padding:2px 5px;border-radius:8px;border:1px solid var(--border);}
+    .docsPage pre{margin:10px 0;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:rgba(0,0,0,.25);overflow:auto;}
+    .docsPage pre code{display:block;padding:0;border:none;background:transparent;}
+    .docsPage a{color:var(--accent);text-decoration:none;}
+    .docsPage a:hover{text-decoration:underline;}
+    .docsPage hr{border:none;border-top:1px solid var(--border);margin:12px 0;}
+    .docsPage img{max-width:100%;height:auto;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
+    .docsPage table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+    .docsPage th,.docsPage td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;}
+    .docsPage th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
+
     /* Redactor panel */
     .redactor-grid{
       display:grid;
@@ -257,7 +356,10 @@
 	    .msg .content a{color:var(--accent);text-decoration:none;}
 	    .msg .content a:hover{text-decoration:underline;}
 	    .msg .content hr{border:none;border-top:1px solid var(--border);margin:12px 0;}
-	    .msg .content img{max-width:100%;height:auto;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
+    .msg .content img{max-width:100%;height:auto;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
+	    .msg .content table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+	    .msg .content th,.msg .content td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;}
+	    .msg .content th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
 	    .msg .content .cite{color:var(--muted);font-size:12px;padding:0 2px;}
 	    .msg.pending{opacity:.95;}
 	    .msg.pending .activity{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;}
@@ -329,6 +431,9 @@
     </div>
 
     <div class="action" id="toolsBtn" title="Tools">🛠</div>
+
+    <!-- NEW: Docs reader -->
+    <div class="action" id="docsBtn" title="Documentation reader">📚</div>
 
     <!-- NEW: Redactor panel toggle -->
     <div class="action" id="redactorBtn" title="Redactor / Annotations">✎</div>
@@ -580,6 +685,38 @@
     </div>
   </div>
 
+  <!-- NEW: Docs reader panel -->
+  <div id="docsPanel" class="modal" role="dialog" aria-label="Documentation reader">
+    <div class="modal-header">Documentation:</div>
+
+    <div class="docs-grid">
+      <div class="card docs-nav">
+        <h3>Guides</h3>
+        <label>Guide</label>
+        <select id="docsGuideSelect"></select>
+
+        <label>Pages</label>
+        <div class="docs-list" id="docsPageList"></div>
+
+        <div class="tiny muted" id="docsStatus" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="card docs-content">
+        <div class="docs-toolbar">
+          <div class="tiny muted" id="docsBreadcrumb">Select a page…</div>
+          <div class="inline" style="justify-content:flex-end;">
+            <button class="btn ghost small" id="docsOpenRawBtn" disabled>OPEN RAW</button>
+          </div>
+        </div>
+        <div id="docsPage" class="docsPage"></div>
+      </div>
+    </div>
+
+    <div class="admin-actions">
+      <button class="btn primary" id="docsOkBtn">OK</button>
+    </div>
+  </div>
+
   <!-- User settings panel -->
   <div id="userSettings" class="user-settings">
     <div class="title">User Settings</div>
@@ -617,9 +754,11 @@
 
   const adminPanel = document.getElementById('adminPanel');
   const redactorPanel = document.getElementById('redactorPanel');
+  const docsPanel = document.getElementById('docsPanel');
 
   const toolsBtn = document.getElementById('toolsBtn');
   const topToolToggle = document.getElementById('topToolToggle');
+  const docsBtn = document.getElementById('docsBtn');
   const redactorBtn = document.getElementById('redactorBtn');
   const historyBtn = document.getElementById('historyBtn');
 
@@ -672,7 +811,16 @@
 		  const adminModelIdEl = document.getElementById('adminModelId');
 		  const adminTimeoutSEl = document.getElementById('adminTimeoutS');
 		  const adminTemperatureEl = document.getElementById('adminTemperature');
-		  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
+	  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
+
+    // ---------- Docs reader UI ----------
+    const docsGuideSelectEl = document.getElementById('docsGuideSelect');
+    const docsPageListEl = document.getElementById('docsPageList');
+    const docsPageEl = document.getElementById('docsPage');
+    const docsBreadcrumbEl = document.getElementById('docsBreadcrumb');
+    const docsStatusEl = document.getElementById('docsStatus');
+    const docsOpenRawBtn = document.getElementById('docsOpenRawBtn');
+    const docsOkBtn = document.getElementById('docsOkBtn');
 
 	  let adminBundle = null; // {defaults, settings, effective}
 	  let chatKDefault = 8;
@@ -928,6 +1076,23 @@
 	    let paraBuf = [];
 	    let listTag = null; // 'ul' | 'ol' | null
 
+	    function splitTableRow(row) {
+	      let s = String(row || '').trim();
+	      if (s.startsWith('|')) s = s.slice(1);
+	      if (s.endsWith('|')) s = s.slice(0, -1);
+	      return s.split('|').map((c) => c.trim());
+	    }
+
+	    function isTableSeparator(row) {
+	      const cells = splitTableRow(row);
+	      if (!cells.length) return false;
+	      return cells.every((c) => {
+	        const t = String(c || '').trim();
+	        if (!t) return true;
+	        return /^:?-+:?$/.test(t);
+	      });
+	    }
+
 	    function flushParagraph() {
 	      if (!paraBuf.length) return;
 	      html += `<p>${mdInline(paraBuf.join('\n'))}</p>`;
@@ -940,7 +1105,8 @@
 	      listTag = null;
 	    }
 
-	    for (const line of lines) {
+	    for (let i = 0; i < lines.length; i++) {
+	      const line = lines[i];
 	      const fence = line.match(/^\s*```/);
 	      if (fence) {
 	        flushParagraph();
@@ -964,6 +1130,36 @@
 	        flushParagraph();
 	        closeList();
 	        html += '<hr>';
+	        continue;
+	      }
+
+	      if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+	        flushParagraph();
+	        closeList();
+
+	        const headCells = splitTableRow(line);
+	        const bodyRows = [];
+	        let j = i + 2;
+	        while (j < lines.length) {
+	          const rowLine = lines[j];
+	          if (/^\s*$/.test(rowLine)) break;
+	          if (!rowLine.includes('|')) break;
+	          bodyRows.push(splitTableRow(rowLine));
+	          j++;
+	        }
+
+	        html += '<table><thead><tr>';
+	        html += headCells.map((c) => `<th>${mdInline(c)}</th>`).join('');
+	        html += '</tr></thead>';
+	        if (bodyRows.length) {
+	          html += '<tbody>';
+	          html += bodyRows
+	            .map((r) => `<tr>${r.map((c) => `<td>${mdInline(c)}</td>`).join('')}</tr>`)
+	            .join('');
+	          html += '</tbody>';
+	        }
+	        html += '</table>';
+	        i = j - 1;
 	        continue;
 	      }
 
@@ -1072,11 +1268,12 @@
         if (seen.has(key)) return;
         seen.add(key);
         const a = document.createElement('a');
-        const href = apiBase + x.source_path + (x.anchor ? `#${encodeURIComponent(x.anchor)}` : '');
-        a.href = href;
-        a.target = '_blank';
-        a.rel = 'noreferrer';
+        a.href = docsHashFor(x.doc_id, x.page_id, x.anchor || null);
         a.textContent = `${x.title} (${x.doc_id}/${x.page_id})`;
+        a.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          openDocsReader({ doc_id: x.doc_id, page_id: x.page_id, anchor: x.anchor || null });
+        });
         c.appendChild(a);
       });
       wrap.appendChild(c);
@@ -1142,6 +1339,273 @@
     }
     return await resp.json();
   }
+
+  // ---------- Docs reader ----------
+  const docsState = {
+    catalog: null,
+    selectedDocId: null,
+    selectedDocTitle: null,
+    pages: [],
+    page: null,
+    htmlNameToPageId: new Map(),
+  };
+
+  function setDocsStatus(text, { error = false } = {}) {
+    if (!docsStatusEl) return;
+    docsStatusEl.textContent = String(text || '');
+    docsStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
+  }
+
+  function setDocsBreadcrumb(text) {
+    if (!docsBreadcrumbEl) return;
+    docsBreadcrumbEl.textContent = String(text || 'Select a page…');
+  }
+
+  function docsHashFor(docId, pageId, anchor) {
+    const p = new URLSearchParams();
+    p.set('view', 'docs');
+    if (docId) p.set('doc', String(docId));
+    if (pageId) p.set('page', String(pageId));
+    if (anchor) p.set('anchor', String(anchor));
+    return `#${p.toString()}`;
+  }
+
+  function parseDocsHash() {
+    const raw = String(location.hash || '').replace(/^#/, '');
+    if (!raw) return null;
+    const p = new URLSearchParams(raw);
+    if (p.get('view') !== 'docs') return null;
+    const docId = (p.get('doc') || '').trim();
+    const pageId = (p.get('page') || '').trim();
+    const anchor = (p.get('anchor') || '').trim();
+    return { doc_id: docId || null, page_id: pageId || null, anchor: anchor || null };
+  }
+
+  function normalizeHtmlName(href) {
+    let s = String(href || '').trim();
+    if (!s) return '';
+    s = s.replace(/^[.][\\/]/, '');
+    s = s.split('?', 1)[0];
+    s = s.split('#', 1)[0];
+    s = s.split('/').pop() || s;
+    try {
+      s = decodeURIComponent(s);
+    } catch (_) {}
+    return s.trim();
+  }
+
+  async function ensureDocsCatalog() {
+    if (docsState.catalog) return docsState.catalog;
+    setDocsStatus('Loading docs catalog…');
+    const data = await apiJson('/docs/catalog');
+    docsState.catalog = data;
+    return data;
+  }
+
+  function renderDocsGuideSelect(docs, preferredDocId = null) {
+    if (!docsGuideSelectEl) return;
+    docsGuideSelectEl.innerHTML = '';
+    (docs || []).forEach((d) => {
+      const opt = document.createElement('option');
+      opt.value = d.doc_id;
+      opt.textContent = d.doc_title || d.doc_id;
+      docsGuideSelectEl.appendChild(opt);
+    });
+    if (preferredDocId && (docs || []).some((d) => d.doc_id === preferredDocId)) {
+      docsGuideSelectEl.value = preferredDocId;
+    } else if (docsGuideSelectEl.options.length) {
+      docsGuideSelectEl.selectedIndex = 0;
+    }
+  }
+
+  async function loadDocPages(docId) {
+    const data = await apiJson(`/docs/catalog/${encodeURIComponent(docId)}`);
+    docsState.selectedDocId = data.doc_id;
+    docsState.selectedDocTitle = data.doc_title;
+    docsState.pages = Array.isArray(data.pages) ? data.pages : [];
+    docsState.htmlNameToPageId = new Map();
+    docsState.pages.forEach((p) => {
+      const name = normalizeHtmlName(p.source_path).toLowerCase();
+      if (name) docsState.htmlNameToPageId.set(name, p.page_id);
+    });
+    return data;
+  }
+
+  function renderDocsPageList() {
+    if (!docsPageListEl) return;
+    docsPageListEl.innerHTML = '';
+    const pages = docsState.pages || [];
+    if (!pages.length) {
+      docsPageListEl.innerHTML = `<div class="tiny muted">No pages.</div>`;
+      return;
+    }
+    pages.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'docs-item';
+      item.dataset.pageId = p.page_id;
+
+      const depth = Math.max(0, (Array.isArray(p.heading_path) ? p.heading_path.length : 0) - 2);
+      item.style.paddingLeft = `${10 + depth * 14}px`;
+
+      const top = document.createElement('div');
+      top.className = 'top';
+      const title = document.createElement('div');
+      title.textContent = p.page_title || p.page_id;
+      top.appendChild(title);
+      item.appendChild(top);
+
+      const sub = document.createElement('div');
+      sub.className = 'sub';
+      const hp = Array.isArray(p.heading_path) ? p.heading_path.slice(1).join(' › ') : '';
+      sub.textContent = hp || `${docsState.selectedDocId}/${p.page_id}`;
+      item.appendChild(sub);
+
+      item.addEventListener('click', async () => {
+        try {
+          await loadAndRenderDocsPage(docsState.selectedDocId, p.page_id, null);
+          const hash = docsHashFor(docsState.selectedDocId, p.page_id, null);
+          try {
+            history.replaceState(null, '', location.pathname + location.search + hash);
+          } catch (e) {
+            location.hash = hash;
+          }
+        } catch (e) {
+          setDocsStatus(`Failed to load page: ${e?.raw ? String(e.raw) : String(e)}`, { error: true });
+        }
+      });
+
+      docsPageListEl.appendChild(item);
+    });
+    highlightDocsActivePage();
+  }
+
+  function highlightDocsActivePage() {
+    if (!docsPageListEl) return;
+    const active = docsState.page?.page_id || null;
+    docsPageListEl.querySelectorAll('.docs-item').forEach((el) => {
+      const isActive = active && el.dataset.pageId === active;
+      el.classList.toggle('active', Boolean(isActive));
+    });
+  }
+
+  function wireDocsInternalLinks() {
+    if (!docsPageEl) return;
+    const links = docsPageEl.querySelectorAll('a[href]');
+    links.forEach((a) => {
+      const rawHref = a.getAttribute('href') || '';
+      const href = String(rawHref).trim();
+      if (!href) return;
+      if (/^(https?:|data:|blob:)/i.test(href)) return;
+      if (href.startsWith(apiBase)) return;
+      if (href.startsWith('/')) return; // already normalized via normalizeUrl
+
+      const filePart = normalizeHtmlName(href);
+      if (!filePart.toLowerCase().endsWith('.html')) return;
+
+      const pid = docsState.htmlNameToPageId.get(filePart.toLowerCase());
+      if (!pid) return;
+
+      a.removeAttribute('target');
+      a.removeAttribute('rel');
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        openDocsReader({ doc_id: docsState.selectedDocId, page_id: pid });
+      });
+    });
+  }
+
+  async function loadAndRenderDocsPage(docId, pageId, anchor = null) {
+    setDocsStatus('Loading page…');
+    docsOpenRawBtn.disabled = true;
+    const page = await apiJson(`/docs/page/${encodeURIComponent(docId)}/${encodeURIComponent(pageId)}`);
+    docsState.page = page;
+    docsState.selectedDocId = page.doc_id;
+    docsState.selectedDocTitle = page.doc_title;
+    setDocsBreadcrumb(`${page.doc_title} › ${page.page_title}`);
+    docsOpenRawBtn.disabled = false;
+
+    if (docsPageEl) {
+      docsPageEl.innerHTML = renderMarkdown(page.markdown || '');
+      docsPageEl.scrollTop = 0;
+      wireDocsInternalLinks();
+      if (anchor && anchor !== 'pagetitle') {
+        // Anchors are from HTML export; keep v1 behavior to scroll to top.
+      }
+    }
+    setDocsStatus('');
+    highlightDocsActivePage();
+  }
+
+  async function openDocsReader({ doc_id = null, page_id = null, anchor = null } = {}) {
+    openModal(docsPanel);
+    setDocsStatus('');
+
+    try {
+      const catalog = await ensureDocsCatalog();
+      const docs = Array.isArray(catalog?.docs) ? catalog.docs : [];
+      renderDocsGuideSelect(docs, doc_id);
+      const selectedDocId = doc_id || docsGuideSelectEl?.value || (docs[0]?.doc_id ?? null);
+      if (!selectedDocId) {
+        setDocsStatus('No docs found. Run ingestion to create datastore.', { error: true });
+        return;
+      }
+      await loadDocPages(selectedDocId);
+      renderDocsPageList();
+
+      let desiredPage = page_id || null;
+      if (!desiredPage && docsState.page?.doc_id === selectedDocId) desiredPage = docsState.page.page_id;
+      if (!desiredPage && Array.isArray(docsState.pages) && docsState.pages.length) desiredPage = docsState.pages[0].page_id;
+      if (desiredPage) {
+        await loadAndRenderDocsPage(selectedDocId, desiredPage, anchor);
+      } else {
+        setDocsBreadcrumb(`${docsState.selectedDocTitle} › Select a page…`);
+        if (docsPageEl) docsPageEl.innerHTML = '';
+      }
+
+      const hash = docsHashFor(selectedDocId, desiredPage, anchor);
+      if (location.hash !== hash) {
+        try {
+          history.replaceState(null, '', location.pathname + location.search + hash);
+        } catch (e) {
+          location.hash = hash;
+        }
+      }
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Failed to load docs: ${raw}`, { error: true });
+    }
+  }
+
+  docsGuideSelectEl?.addEventListener('change', async () => {
+    const docId = docsGuideSelectEl.value;
+    if (!docId) return;
+    try {
+      await loadDocPages(docId);
+      docsState.page = null;
+      docsOpenRawBtn.disabled = true;
+      renderDocsPageList();
+      setDocsBreadcrumb(`${docsState.selectedDocTitle} › Select a page…`);
+      if (docsPageEl) docsPageEl.innerHTML = '';
+      const hash = docsHashFor(docId, null, null);
+      try {
+        history.replaceState(null, '', location.pathname + location.search + hash);
+      } catch (e) {
+        location.hash = hash;
+      }
+      setDocsStatus('');
+    } catch (e) {
+      setDocsStatus(`Failed to load guide: ${e?.raw ? String(e.raw) : String(e)}`, { error: true });
+    }
+  });
+
+  docsOpenRawBtn?.addEventListener('click', () => {
+    const page = docsState.page;
+    if (!page) return;
+    const rel = String(page.source_path || '').trim();
+    if (!rel) return;
+    const url = `${apiBase}/rawdocs/${encodeURIComponent(page.version || 'evo_1_32')}/${encodeURI(rel)}`;
+    window.open(url, '_blank', 'noreferrer');
+  });
 
   async function refreshSessions() {
     historyList.innerHTML = `<div class="mini-item muted"><span class="slash">/</span> Loading…</div>`;
@@ -1266,15 +1730,25 @@
 
   // ---------- Modal control ----------
   function closeAllModals() {
+    const wasDocs = docsPanel.classList.contains('visible');
     historyPanel.classList.remove('visible');
     adminPanel.classList.remove('visible');
     redactorPanel.classList.remove('visible');
+    docsPanel.classList.remove('visible');
     overlay.classList.remove('visible');
+    if (wasDocs && parseDocsHash()) {
+      try {
+        history.replaceState(null, '', location.pathname + location.search);
+      } catch (e) {
+        location.hash = '';
+      }
+    }
   }
   function openModal(which) {
     historyPanel.classList.remove('visible');
     adminPanel.classList.remove('visible');
     redactorPanel.classList.remove('visible');
+    docsPanel.classList.remove('visible');
 
     which.classList.add('visible');
     overlay.classList.add('visible');
@@ -1321,6 +1795,15 @@
     }
   });
 
+  docsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (docsPanel.classList.contains('visible')) closeAllModals();
+    else {
+      const deep = parseDocsHash();
+      openDocsReader(deep || {});
+    }
+  });
+
   overlay.addEventListener('click', () => closeAllModals());
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllModals(); });
 
@@ -1332,6 +1815,7 @@
 
 	  // Admin buttons (mock)
 	  document.getElementById('adminOkBtn').addEventListener('click', closeAllModals);
+	  docsOkBtn.addEventListener('click', closeAllModals);
 	  document.getElementById('applyBtn').addEventListener('click', () => {
 	    applyAdminSettings();
 	    pulse(adminPanel);
@@ -1533,6 +2017,10 @@
 
   // Init
   renderList();
+  (async () => {
+    const deep = parseDocsHash();
+    if (deep) await openDocsReader(deep);
+  })();
 </script>
 </body>
 </html>

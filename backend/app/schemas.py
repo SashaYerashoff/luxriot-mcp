@@ -92,3 +92,46 @@ class AdminSettingsResponse(BaseModel):
     defaults: dict[str, Any]
     settings: dict[str, Any]
     effective: dict[str, Any]
+
+
+class DocCatalogEntry(BaseModel):
+    doc_id: str
+    doc_title: str
+    page_count: int
+
+
+class DocsCatalogResponse(BaseModel):
+    docs: list[DocCatalogEntry]
+
+
+class DocPageInfo(BaseModel):
+    page_id: str
+    page_title: str
+    heading_path: list[str]
+    anchor: str | None = None
+    source_path: str
+
+
+class DocCatalogDetailResponse(BaseModel):
+    doc_id: str
+    doc_title: str
+    pages: list[DocPageInfo]
+
+
+class PageImage(BaseModel):
+    original: str
+    url: str
+    alt: str | None = None
+
+
+class DocPageResponse(BaseModel):
+    version: str
+    doc_id: str
+    doc_title: str
+    page_id: str
+    page_title: str
+    heading_path: list[str]
+    anchor: str | None = None
+    source_path: str
+    markdown: str
+    images: list[PageImage]
