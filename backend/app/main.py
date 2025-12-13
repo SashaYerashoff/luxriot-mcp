@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
+import shutil
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
@@ -31,6 +35,9 @@ from .schemas import (
     ImageResult,
     MessagesResponse,
     PageImage,
+    ReindexJob,
+    ReindexRequest,
+    ReindexStatusResponse,
     SearchRequest,
     SearchResponse,
     SessionCreateRequest,
@@ -52,6 +59,11 @@ app.add_middleware(
 search_engine = SearchEngine(version=DEFAULT_VERSION, datastore_dir=DATASTORE_DIR)
 docs_store = DocsStore(version=DEFAULT_VERSION, datastore_dir=DATASTORE_DIR)
 
+_search_lock = asyncio.Lock()
+_reindex_lock = asyncio.Lock()
+_reindex_job: dict[str, Any] | None = None
+_reindex_task: asyncio.Task[None] | None = None
+
 
 def _safe_resolve(base: Path, unsafe_path: str) -> Path:
     candidate = (base / unsafe_path).resolve()
@@ -64,6 +76,180 @@ def _safe_resolve(base: Path, unsafe_path: str) -> Path:
 def _startup() -> None:
     app_db.init_db()
     ensure_defaults()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _job_defaults() -> dict[str, Any]:
+    return {
+        "docs_dir": str(DOCS_DIR),
+        "version": DEFAULT_VERSION,
+        "datastore_dir": str((DATASTORE_DIR / DEFAULT_VERSION).resolve()),
+        "lmstudio_base_url": LMSTUDIO_BASE_URL,
+    }
+
+
+def _append_log(job: dict[str, Any], line: str) -> None:
+    logs: list[str] = job.get("logs_tail") if isinstance(job.get("logs_tail"), list) else []
+    logs.append(line)
+    if len(logs) > 220:
+        logs = logs[-220:]
+    job["logs_tail"] = logs
+    job["updated_at"] = _utc_now()
+
+
+def _update_phase_from_log(job: dict[str, Any], line: str) -> None:
+    s = str(line or "")
+    if "Ingesting doc:" in s:
+        job["phase"] = "converting_html_to_md"
+    elif s.strip().startswith("Done:") or s.strip().startswith("Done."):
+        # Keep 'finalizing'/'done' for the outer controller.
+        pass
+    elif s.startswith("Indexing "):
+        job["phase"] = "indexing_bm25"
+    elif s.startswith("Computing embeddings "):
+        job["phase"] = "computing_embeddings"
+    elif s.startswith("ERROR:"):
+        job["phase"] = "failed"
+        job["error"] = s
+    if s.startswith("  Done:"):
+        try:
+            job["doc_done"] = int(job.get("doc_done") or 0) + 1
+        except Exception:
+            job["doc_done"] = None
+        job["updated_at"] = _utc_now()
+
+
+async def _pump_stream(job: dict[str, Any], stream: asyncio.StreamReader) -> None:
+    while True:
+        line = await stream.readline()
+        if not line:
+            break
+        text = line.decode("utf-8", errors="replace").rstrip()
+        _append_log(job, text)
+        _update_phase_from_log(job, text)
+
+
+async def _run_reindex_job(job: dict[str, Any]) -> None:
+    global _reindex_job, _reindex_task
+
+    job["status"] = "running"
+    job["phase"] = "starting"
+    job["updated_at"] = _utc_now()
+
+    docs_dir = Path(str(job.get("docs_dir") or "")).expanduser()
+    version = str(job.get("version") or DEFAULT_VERSION)
+    build_dir = Path(str(job.get("build_dir") or "")).expanduser()
+    target_dir = DATASTORE_DIR / version
+
+    script = REPO_ROOT / "backend" / "cli" / "ingest_evo_1_32.py"
+    if not script.exists():
+        job["status"] = "failed"
+        job["phase"] = "failed"
+        job["error"] = f"Missing ingestion CLI: {script}"
+        job["updated_at"] = _utc_now()
+        return
+
+    if build_dir.exists():
+        try:
+            shutil.rmtree(build_dir)
+        except Exception as e:
+            job["status"] = "failed"
+            job["phase"] = "failed"
+            job["error"] = f"Failed to remove build dir {build_dir}: {e}"
+            job["updated_at"] = _utc_now()
+            return
+
+    cmd = [
+        sys.executable,
+        str(script),
+        "--docs-dir",
+        str(docs_dir),
+        "--out-dir",
+        str(build_dir),
+        "--version",
+        version,
+        "--lmstudio-base-url",
+        LMSTUDIO_BASE_URL,
+        "--embedding-max-chars",
+        str(int(job.get("embedding_max_chars") or 4000)),
+        "--clean",
+    ]
+    if not bool(job.get("compute_embeddings", True)):
+        cmd.append("--no-embeddings")
+
+    _append_log(job, f"Running: {' '.join(cmd)}")
+    job["phase"] = "running_ingest"
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(REPO_ROOT),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except Exception as e:
+        job["status"] = "failed"
+        job["phase"] = "failed"
+        job["error"] = f"Failed to start ingestion process: {e}"
+        job["updated_at"] = _utc_now()
+        return
+
+    try:
+        job["pid"] = int(proc.pid) if proc.pid else None
+    except Exception:
+        job["pid"] = None
+
+    stdout = proc.stdout or asyncio.StreamReader()
+    stderr = proc.stderr or asyncio.StreamReader()
+
+    await asyncio.gather(_pump_stream(job, stdout), _pump_stream(job, stderr))
+    exit_code = await proc.wait()
+
+    job["exit_code"] = int(exit_code)
+    job["updated_at"] = _utc_now()
+    if exit_code != 0:
+        job["status"] = "failed"
+        job["phase"] = "failed"
+        if not job.get("error"):
+            job["error"] = f"Ingestion failed with exit code {exit_code}"
+        return
+
+    job["phase"] = "swapping"
+    job["updated_at"] = _utc_now()
+
+    async with _search_lock:
+        search_engine.close()
+        try:
+            if not build_dir.exists():
+                raise RuntimeError(f"Build output missing: {build_dir}")
+
+            backup_dir = None
+            if target_dir.exists():
+                suffix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                backup_dir = target_dir.with_name(f"{target_dir.name}.bak_{suffix}")
+                target_dir.rename(backup_dir)
+
+            build_dir.rename(target_dir)
+            docs_store.invalidate()
+            if backup_dir and backup_dir.exists():
+                pass
+        except Exception as e:
+            job["status"] = "failed"
+            job["phase"] = "failed"
+            job["error"] = f"Swap failed: {e}"
+            job["updated_at"] = _utc_now()
+            return
+
+    job["status"] = "succeeded"
+    job["phase"] = "done"
+    job["updated_at"] = _utc_now()
+
+    async with _reindex_lock:
+        _reindex_task = None
+        _reindex_job = job
 
 
 @app.get("/health")
@@ -82,6 +268,53 @@ def health() -> dict[str, Any]:
         "retrieval_mode": retrieval_mode,
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
     }
+
+
+@app.get("/admin/reindex", response_model=ReindexStatusResponse, response_model_exclude_none=True)
+async def admin_reindex_status() -> ReindexStatusResponse:
+    async with _reindex_lock:
+        job = _reindex_job
+    return ReindexStatusResponse(defaults=_job_defaults(), job=ReindexJob(**job) if job else None)
+
+
+@app.post("/admin/reindex", response_model=ReindexStatusResponse, response_model_exclude_none=True)
+async def admin_reindex_start(req: ReindexRequest) -> ReindexStatusResponse:
+    global _reindex_job, _reindex_task
+
+    async with _reindex_lock:
+        if _reindex_job and _reindex_job.get("status") == "running":
+            raise HTTPException(status_code=409, detail="Reindex is already running")
+
+        docs_dir = Path(str(req.docs_dir or DOCS_DIR)).expanduser()
+        if not docs_dir.exists() or not docs_dir.is_dir():
+            raise HTTPException(status_code=400, detail=f"docs_dir not found or not a directory: {docs_dir}")
+
+        doc_total = len([p for p in docs_dir.iterdir() if p.is_dir()])
+        job_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(4)
+        build_dir = (DATASTORE_DIR / f".build_{DEFAULT_VERSION}_{job_id}").resolve()
+
+        job: dict[str, Any] = {
+            "job_id": job_id,
+            "status": "running",
+            "phase": "queued",
+            "docs_dir": str(docs_dir),
+            "version": DEFAULT_VERSION,
+            "compute_embeddings": bool(req.compute_embeddings),
+            "embedding_max_chars": int(req.embedding_max_chars),
+            "started_at": _utc_now(),
+            "updated_at": _utc_now(),
+            "doc_total": int(doc_total),
+            "doc_done": 0,
+            "exit_code": None,
+            "error": None,
+            "logs_tail": [],
+            "build_dir": str(build_dir),
+        }
+
+        _reindex_job = job
+        _reindex_task = asyncio.create_task(_run_reindex_job(job))
+
+    return ReindexStatusResponse(defaults=_job_defaults(), job=ReindexJob(**job))
 
 
 @app.get("/")
@@ -304,28 +537,29 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
 
     try:
         debug: dict[str, Any] | None = {} if bool(getattr(req, "debug", False)) else None
-        results = await search_engine.search(
-            req.query,
-            k=req.k,
-            mode=mode,
-            mmr_enabled=mmr_enabled,
-            mmr_lambda=mmr_lambda,
-            mmr_candidates=mmr_candidates,
-            mmr_use_embeddings=mmr_use_embeddings,
-            expand_neighbors=expand_neighbors,
-            expand_max_chars=expand_max_chars,
-            heading_boost=heading_boost,
-            bm25_candidates=bm25_candidates,
-            embedding_candidates=embedding_candidates,
-            rrf_k=rrf_k,
-            bm25_weight=bm25_weight,
-            embedding_weight=embedding_weight,
-            doc_priority=[str(x) for x in doc_priority],
-            doc_priority_boost=doc_priority_boost,
-            max_per_page=max_per_page,
-            max_per_doc=max_per_doc,
-            debug_out=debug,
-        )
+        async with _search_lock:
+            results = await search_engine.search(
+                req.query,
+                k=req.k,
+                mode=mode,
+                mmr_enabled=mmr_enabled,
+                mmr_lambda=mmr_lambda,
+                mmr_candidates=mmr_candidates,
+                mmr_use_embeddings=mmr_use_embeddings,
+                expand_neighbors=expand_neighbors,
+                expand_max_chars=expand_max_chars,
+                heading_boost=heading_boost,
+                bm25_candidates=bm25_candidates,
+                embedding_candidates=embedding_candidates,
+                rrf_k=rrf_k,
+                bm25_weight=bm25_weight,
+                embedding_weight=embedding_weight,
+                doc_priority=[str(x) for x in doc_priority],
+                doc_priority_boost=doc_priority_boost,
+                max_per_page=max_per_page,
+                max_per_doc=max_per_doc,
+                debug_out=debug,
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
@@ -417,27 +651,28 @@ async def chat(req: ChatRequest) -> ChatResponse:
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
 
     try:
-        retrieval = await search_engine.search(
-            req.message,
-            k=req.k,
-            mode=retrieval_mode,
-            mmr_enabled=mmr_enabled,
-            mmr_lambda=mmr_lambda,
-            mmr_candidates=mmr_candidates,
-            mmr_use_embeddings=mmr_use_embeddings,
-            expand_neighbors=expand_neighbors,
-            expand_max_chars=expand_max_chars,
-            heading_boost=heading_boost,
-            bm25_candidates=bm25_candidates,
-            embedding_candidates=embedding_candidates,
-            rrf_k=rrf_k,
-            bm25_weight=bm25_weight,
-            embedding_weight=embedding_weight,
-            doc_priority=doc_priority_list,
-            doc_priority_boost=doc_priority_boost,
-            max_per_page=max_per_page,
-            max_per_doc=max_per_doc,
-        )
+        async with _search_lock:
+            retrieval = await search_engine.search(
+                req.message,
+                k=req.k,
+                mode=retrieval_mode,
+                mmr_enabled=mmr_enabled,
+                mmr_lambda=mmr_lambda,
+                mmr_candidates=mmr_candidates,
+                mmr_use_embeddings=mmr_use_embeddings,
+                expand_neighbors=expand_neighbors,
+                expand_max_chars=expand_max_chars,
+                heading_boost=heading_boost,
+                bm25_candidates=bm25_candidates,
+                embedding_candidates=embedding_candidates,
+                rrf_k=rrf_k,
+                bm25_weight=bm25_weight,
+                embedding_weight=embedding_weight,
+                doc_priority=doc_priority_list,
+                doc_priority_boost=doc_priority_boost,
+                max_per_page=max_per_page,
+                max_per_doc=max_per_doc,
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:

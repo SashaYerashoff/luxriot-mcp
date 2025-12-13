@@ -108,6 +108,36 @@ class AdminSettingsResponse(BaseModel):
     effective: dict[str, Any]
 
 
+class ReindexRequest(BaseModel):
+    docs_dir: str | None = None
+    compute_embeddings: bool = True
+    embedding_max_chars: int = Field(default=4000, ge=256, le=8000)
+
+
+class ReindexJob(BaseModel):
+    job_id: str
+    status: Literal["running", "succeeded", "failed"]
+    phase: str
+    docs_dir: str
+    version: str
+    compute_embeddings: bool
+    embedding_max_chars: int
+    pid: int | None = None
+    build_dir: str | None = None
+    started_at: str
+    updated_at: str
+    doc_total: int | None = None
+    doc_done: int | None = None
+    exit_code: int | None = None
+    error: str | None = None
+    logs_tail: list[str] = Field(default_factory=list)
+
+
+class ReindexStatusResponse(BaseModel):
+    defaults: dict[str, Any]
+    job: ReindexJob | None = None
+
+
 class DocCatalogEntry(BaseModel):
     doc_id: str
     doc_title: str

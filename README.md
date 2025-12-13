@@ -27,6 +27,10 @@ To serve on your LAN, run:
 uvicorn backend.app.main:app --host 0.0.0.0 --reload --port 8000
 ```
 
+## Re-index from UI
+
+Open `Administrator tools → Docs` and click `RE-INDEX` to rebuild `datastore/evo_1_32/` from the docs folder.
+
 ## Web scraping (optional)
 
 In `Administrator tools → Web`, enable web tools, then:

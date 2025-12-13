@@ -36,6 +36,13 @@ class DocsStore:
     def is_ready(self) -> bool:
         return self.pages_jsonl_path.exists()
 
+    def invalidate(self) -> None:
+        self._mtime = None
+        self._doc_order = []
+        self._doc_titles = {}
+        self._doc_pages = {}
+        self._pages = {}
+
     def _safe_resolve(self, base: Path, rel: str) -> Path:
         candidate = (base / rel).resolve()
         if not str(candidate).startswith(str(base.resolve())):
@@ -159,4 +166,3 @@ class DocsStore:
         if not md_path.exists() or not md_path.is_file():
             raise FileNotFoundError(f"Markdown not found: {md_path}")
         return md_path.read_text(encoding="utf-8", errors="ignore")
-

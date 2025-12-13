@@ -99,6 +99,10 @@ class SearchEngine:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+        self._meta = None
+        self._embedding_vectors = None
+        self._embedding_dim = None
+        self._embedding_model_id = None
 
     def _load_meta(self) -> dict[str, Any]:
         if self._meta is not None:

@@ -484,6 +484,9 @@
     .err-details{margin-top:10px;}
     .err-details summary{cursor:pointer;color:var(--danger);font-size:12px;}
     .err-details pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:rgba(0,0,0,.25);padding:10px;border-radius:12px;border:1px solid var(--border);}
+    .log-details{margin-top:10px;}
+    .log-details summary{cursor:pointer;color:var(--muted);font-size:12px;}
+    .log-details pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:rgba(0,0,0,.25);padding:10px;border-radius:12px;border:1px solid var(--border);}
 
     /* In-panel scrolling */
     .mini-panel{max-height:320px;overflow:auto;}
@@ -564,6 +567,28 @@
 	        <div class="row"><span class="slash">/</span> Docs version: <span class="kbd" id="adminDocsVersion">—</span></div>
 	        <div class="row"><span class="slash">/</span> Datastore ready: <span class="kbd" id="adminDatastoreReady">—</span></div>
 	        <div class="row"><span class="slash">/</span> LM Studio: <span class="kbd" id="adminLmstudioUrl">—</span></div>
+	      </div>
+
+	      <div class="card">
+	        <h3>Docs</h3>
+	        <label>Docs folder (Help+Manual export root)</label>
+	        <input id="adminDocsDir" type="text" placeholder="/path/to/docs"/>
+	        <div class="inline" style="margin-top:8px;">
+	          <span class="pill"><input id="adminIngestEmbeddings" type="checkbox" checked> embeddings</span>
+	          <div style="flex:1;min-width:180px;">
+	            <label style="margin:0 0 6px;">Emb max chars</label>
+	            <input id="adminEmbeddingMaxChars" type="number" min="256" max="8000" value="4000"/>
+	          </div>
+	        </div>
+	        <div class="inline" style="margin-top:10px;">
+	          <button class="btn danger" id="adminReindexBtn">RE-INDEX</button>
+	          <button class="btn ghost" id="adminReindexRefreshBtn">REFRESH</button>
+	        </div>
+	        <div class="tiny muted" id="adminReindexStatus" style="margin-top:10px;"></div>
+	        <details class="log-details">
+	          <summary>Show reindex logs</summary>
+	          <pre id="adminReindexLogs"></pre>
+	        </details>
 	      </div>
 	
 		      <div class="card">
@@ -1045,6 +1070,14 @@
 		  const adminTemperatureEl = document.getElementById('adminTemperature');
 	  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
 
+	  const adminDocsDirEl = document.getElementById('adminDocsDir');
+	  const adminIngestEmbeddingsEl = document.getElementById('adminIngestEmbeddings');
+	  const adminEmbeddingMaxCharsEl = document.getElementById('adminEmbeddingMaxChars');
+	  const adminReindexBtnEl = document.getElementById('adminReindexBtn');
+	  const adminReindexRefreshBtnEl = document.getElementById('adminReindexRefreshBtn');
+	  const adminReindexStatusEl = document.getElementById('adminReindexStatus');
+	  const adminReindexLogsEl = document.getElementById('adminReindexLogs');
+
 	  const adminWebEnabledEl = document.getElementById('adminWebEnabled');
 	  const adminWebTimeoutSEl = document.getElementById('adminWebTimeoutS');
 	  const adminWebMaxCharsEl = document.getElementById('adminWebMaxChars');
@@ -1080,6 +1113,8 @@
 
 	  let adminBundle = null; // {defaults, settings, effective}
 	  let chatKDefault = 8;
+	  let reindexPollTimer = null;
+	  let lastReindex = null;
 
 	  function _linesToList(text) {
 	    return String(text || '')
@@ -1118,6 +1153,92 @@
 	  adminRetrievalModeEl.addEventListener('change', _syncPromptPreview);
 	  adminRetrievalKEl.addEventListener('input', _syncPromptPreview);
 	  adminDocPriorityEl.addEventListener('input', _syncPromptPreview);
+
+	  function stopReindexPoll() {
+	    if (reindexPollTimer) {
+	      clearInterval(reindexPollTimer);
+	      reindexPollTimer = null;
+	    }
+	  }
+
+	  function _fmtJob(job) {
+	    if (!job) return 'Idle.';
+	    const st = String(job.status || 'unknown');
+	    const phase = String(job.phase || 'unknown');
+	    const done = typeof job.doc_done === 'number' ? job.doc_done : null;
+	    const total = typeof job.doc_total === 'number' ? job.doc_total : null;
+	    const prog = (done !== null && total !== null) ? ` ${done}/${total} docs` : '';
+	    const code = (typeof job.exit_code === 'number') ? ` exit=${job.exit_code}` : '';
+	    return `${st} · ${phase}${prog}${code}`;
+	  }
+
+	  function renderReindexStatus(payload) {
+	    lastReindex = payload || null;
+	    const defaults = payload?.defaults || {};
+	    const job = payload?.job || null;
+
+	    if (adminDocsDirEl && (!adminDocsDirEl.value || adminDocsDirEl.value.trim().length < 2)) {
+	      adminDocsDirEl.value = String(defaults.docs_dir || 'docs');
+	    }
+	    if (adminEmbeddingMaxCharsEl && !adminEmbeddingMaxCharsEl.value) {
+	      adminEmbeddingMaxCharsEl.value = String(job?.embedding_max_chars ?? 4000);
+	    }
+
+	    if (adminReindexStatusEl) {
+	      adminReindexStatusEl.textContent = _fmtJob(job);
+	    }
+	    if (adminReindexLogsEl) {
+	      const lines = Array.isArray(job?.logs_tail) ? job.logs_tail : [];
+	      adminReindexLogsEl.textContent = lines.join('\n');
+	    }
+
+	    const running = job?.status === 'running';
+	    if (adminReindexBtnEl) adminReindexBtnEl.disabled = Boolean(running);
+	  }
+
+	  async function fetchReindexStatus({ startPoll = true } = {}) {
+	    try {
+	      const payload = await apiJson('/admin/reindex');
+	      renderReindexStatus(payload);
+	      const running = payload?.job?.status === 'running';
+	      if (running && startPoll && !reindexPollTimer) {
+	        reindexPollTimer = setInterval(() => fetchReindexStatus({ startPoll: false }), 1200);
+	      }
+	      if (!running) stopReindexPoll();
+	      return payload;
+	    } catch (e) {
+	      if (adminReindexStatusEl) adminReindexStatusEl.textContent = `Reindex status failed: ${e?.raw ? String(e.raw) : String(e)}`;
+	      stopReindexPoll();
+	      return null;
+	    }
+	  }
+
+	  async function startReindex() {
+	    const docsDir = String(adminDocsDirEl?.value || '').trim();
+	    const computeEmb = Boolean(adminIngestEmbeddingsEl?.checked);
+	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 4000);
+
+	    if (!docsDir) {
+	      if (adminReindexStatusEl) adminReindexStatusEl.textContent = 'Set docs folder path first.';
+	      return;
+	    }
+	    if (!confirm(`Re-index docs from:\\n${docsDir}\\n\\nThis rebuilds the datastore and may take a while.`)) return;
+
+	    if (adminReindexStatusEl) adminReindexStatusEl.textContent = 'Starting reindex...';
+	    try {
+	      const payload = await apiJson('/admin/reindex', {
+	        method: 'POST',
+	        body: { docs_dir: docsDir, compute_embeddings: computeEmb, embedding_max_chars: embMax }
+	      });
+	      renderReindexStatus(payload);
+	      fetchReindexStatus().catch(() => {});
+	    } catch (e) {
+	      if (adminReindexStatusEl) adminReindexStatusEl.textContent = `Reindex start failed: ${e?.raw ? String(e.raw) : String(e)}`;
+	    }
+	  }
+
+	  if (adminReindexBtnEl) adminReindexBtnEl.addEventListener('click', () => startReindex());
+	  if (adminReindexRefreshBtnEl) adminReindexRefreshBtnEl.addEventListener('click', () => fetchReindexStatus());
 
 	  async function loadAdminPanel() {
 	    adminSaveHintEl.textContent = '';
@@ -1178,6 +1299,8 @@
 
 	    chatKDefault = Number(retrieval.k_default ?? 8);
 	    _syncPromptPreview();
+
+	    await fetchReindexStatus().catch(() => {});
 	  }
 
 	  function applyDefaultsToForm() {
@@ -2375,6 +2498,7 @@
   // ---------- Modal control ----------
   function closeAllModals() {
     const wasDocs = docsPanel.classList.contains('visible');
+    stopReindexPoll();
     historyPanel.classList.remove('visible');
     adminPanel.classList.remove('visible');
     redactorPanel.classList.remove('visible');
