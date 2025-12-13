@@ -135,6 +135,39 @@
       display:flex;
       flex-direction:column;
     }
+    #docsPanel.light{
+      --text:#1a1b1e;
+      --muted:#55606d;
+      --border:rgba(0,0,0,.14);
+      --panel:rgba(255,255,255,.95);
+      --panel2:rgba(245,246,248,.95);
+      background:linear-gradient(180deg, var(--panel), var(--panel2));
+      box-shadow:0 20px 60px rgba(0,0,0,.18);
+    }
+    #docsPanel.light .card{
+      background:rgba(255,255,255,.72);
+    }
+    #docsPanel.light input[type="text"],
+    #docsPanel.light textarea,
+    #docsPanel.light select{
+      background:rgba(255,255,255,.92);
+      border-color:rgba(0,0,0,.12);
+      color:var(--text);
+    }
+    #docsPanel.light .docs-item{
+      background:rgba(255,255,255,.72);
+    }
+    #docsPanel.light .docs-item:hover{border-color:rgba(0,0,0,.20);}
+    #docsPanel.light .docsPage code{
+      background:rgba(0,0,0,.05);
+      border-color:rgba(0,0,0,.12);
+      color:var(--text);
+    }
+    #docsPanel.light .docsPage pre{
+      background:rgba(0,0,0,.04);
+      border-color:rgba(0,0,0,.12);
+    }
+    #docsPanel.light .docsPage th{background:rgba(0,0,0,.04);}
     #docsPanel.fullscreen{
       left:24px;
       right:24px;
@@ -787,6 +820,14 @@
         <label>Guide</label>
         <select id="docsGuideSelect"></select>
 
+        <label>Search docs</label>
+        <div class="inline">
+          <input id="docsSearchInput" type="text" placeholder="Search across all docs…" style="flex:1;"/>
+          <button class="btn ghost small" id="docsSearchBtn">SEARCH</button>
+          <button class="btn ghost small" id="docsSearchClearBtn">CLEAR</button>
+        </div>
+        <div class="docs-list" id="docsSearchResults" style="display:none; max-height:240px;"></div>
+
         <label>Pages</label>
         <div class="docs-list" id="docsPageList"></div>
 
@@ -798,6 +839,7 @@
           <div class="tiny muted" id="docsBreadcrumb">Select a page…</div>
           <div class="inline" style="justify-content:flex-end;">
             <button class="btn ghost small" id="docsFullscreenBtn">FULL</button>
+            <button class="btn ghost small" id="docsThemeBtn">LIGHT</button>
             <button class="btn ghost small" id="docsOpenRawBtn" disabled>OPEN RAW</button>
           </div>
         </div>
@@ -965,11 +1007,16 @@
 
     // ---------- Docs reader UI ----------
     const docsGuideSelectEl = document.getElementById('docsGuideSelect');
+    const docsSearchInputEl = document.getElementById('docsSearchInput');
+    const docsSearchBtn = document.getElementById('docsSearchBtn');
+    const docsSearchClearBtn = document.getElementById('docsSearchClearBtn');
+    const docsSearchResultsEl = document.getElementById('docsSearchResults');
     const docsPageListEl = document.getElementById('docsPageList');
     const docsPageEl = document.getElementById('docsPage');
     const docsBreadcrumbEl = document.getElementById('docsBreadcrumb');
     const docsStatusEl = document.getElementById('docsStatus');
     const docsFullscreenBtn = document.getElementById('docsFullscreenBtn');
+    const docsThemeBtn = document.getElementById('docsThemeBtn');
     const docsOpenRawBtn = document.getElementById('docsOpenRawBtn');
     const docsOkBtn = document.getElementById('docsOkBtn');
 
@@ -1535,6 +1582,8 @@
     pages: [],
     page: null,
     htmlNameToPageId: new Map(),
+    searchQuery: '',
+    searchPack: null,
   };
 
   function setDocsStatus(text, { error = false } = {}) {
@@ -1587,6 +1636,106 @@
     const data = await apiJson('/docs/catalog');
     docsState.catalog = data;
     return data;
+  }
+
+  function clearDocsSearch({ keepInput = false } = {}) {
+    docsState.searchQuery = '';
+    docsState.searchPack = null;
+    if (docsSearchResultsEl) {
+      docsSearchResultsEl.innerHTML = '';
+      docsSearchResultsEl.style.display = 'none';
+    }
+    if (docsSearchInputEl && !keepInput) docsSearchInputEl.value = '';
+  }
+
+  function renderDocsSearchResults(pack) {
+    if (!docsSearchResultsEl) return;
+    docsSearchResultsEl.innerHTML = '';
+    const chunks = Array.isArray(pack?.chunks) ? pack.chunks : [];
+    if (!chunks.length) {
+      docsSearchResultsEl.innerHTML = `<div class="tiny muted">No results.</div>`;
+      docsSearchResultsEl.style.display = 'block';
+      return;
+    }
+
+    const seen = new Set();
+    chunks.forEach((ch, idx) => {
+      const docId = String(ch.doc_id || '');
+      const pageId = String(ch.page_id || '');
+      const key = `${docId}/${pageId}/${String(ch.heading_path?.slice(-1)[0] || '')}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      const item = document.createElement('div');
+      item.className = 'docs-item';
+      item.style.marginBottom = '10px';
+
+      const top = document.createElement('div');
+      top.className = 'top';
+      const title = document.createElement('div');
+      const hp = Array.isArray(ch.heading_path) ? ch.heading_path : [];
+      title.textContent = hp.length ? hp[hp.length - 1] : `${docId}/${pageId}`;
+      top.appendChild(title);
+      const badge = document.createElement('div');
+      badge.className = 'badge score';
+      badge.textContent = `#${idx + 1}`;
+      top.appendChild(badge);
+      item.appendChild(top);
+
+      const sub = document.createElement('div');
+      sub.className = 'sub';
+      sub.textContent = `${docId}/${pageId}`;
+      item.appendChild(sub);
+
+      const snippet = document.createElement('div');
+      snippet.className = 'tiny muted';
+      const txt = String(ch.text || '').replace(/\s+/g, ' ').trim();
+      snippet.textContent = txt.slice(0, 160) + (txt.length > 160 ? '…' : '');
+      snippet.style.marginTop = '6px';
+      item.appendChild(snippet);
+
+      item.addEventListener('click', () => {
+        if (!docId || !pageId) return;
+        if (docsState.selectedDocId === docId) {
+          loadAndRenderDocsPage(docId, pageId, null).catch((e) => {
+            setDocsStatus(`Failed to load page: ${e?.raw ? String(e.raw) : String(e)}`, { error: true });
+          });
+        } else {
+          openDocsReader({ doc_id: docId, page_id: pageId, anchor: null });
+        }
+      });
+
+      docsSearchResultsEl.appendChild(item);
+    });
+
+    docsSearchResultsEl.style.display = 'block';
+  }
+
+  async function runDocsSearch(query, { k = 12 } = {}) {
+    const q = String(query || '').trim();
+    if (!q) {
+      clearDocsSearch();
+      setDocsStatus('');
+      return;
+    }
+    docsState.searchQuery = q;
+    setDocsStatus('Searching docs…');
+    if (docsSearchResultsEl) {
+      docsSearchResultsEl.style.display = 'block';
+      docsSearchResultsEl.innerHTML = `<div class="tiny muted">Loading…</div>`;
+    }
+    try {
+      const kk = Math.max(1, Math.min(25, Number(k || 12)));
+      const pack = await apiJson('/docs/search', { method: 'POST', body: { query: q, k: kk } });
+      docsState.searchPack = pack;
+      renderDocsSearchResults(pack);
+      const found = Array.isArray(pack?.chunks) ? pack.chunks.length : 0;
+      setDocsStatus(`Search: ${found} result(s).`);
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Search failed: ${raw}`, { error: true });
+      if (docsSearchResultsEl) docsSearchResultsEl.innerHTML = `<div class="tiny muted">Search failed.</div>`;
+    }
   }
 
   function renderDocsGuideSelect(docs, preferredDocId = null) {
@@ -1726,6 +1875,7 @@
   async function openDocsReader({ doc_id = null, page_id = null, anchor = null } = {}) {
     openModal(docsPanel);
     setDocsStatus('');
+    // Keep prior search results, but don't auto-run.
 
     try {
       const catalog = await ensureDocsCatalog();
@@ -1738,6 +1888,12 @@
       }
       await loadDocPages(selectedDocId);
       renderDocsPageList();
+
+      // If search is active, keep the results visible.
+      if (docsState.searchQuery) {
+        if (docsSearchInputEl) docsSearchInputEl.value = docsState.searchQuery;
+        if (docsState.searchPack) renderDocsSearchResults(docsState.searchPack);
+      }
 
       let desiredPage = page_id || null;
       if (!desiredPage && docsState.page?.doc_id === selectedDocId) desiredPage = docsState.page.page_id;
@@ -1794,6 +1950,23 @@
     window.open(url, '_blank', 'noreferrer');
   });
 
+  docsSearchBtn?.addEventListener('click', () => runDocsSearch(docsSearchInputEl?.value, { k: 12 }));
+  docsSearchClearBtn?.addEventListener('click', () => {
+    clearDocsSearch();
+    setDocsStatus('');
+  });
+  docsSearchInputEl?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runDocsSearch(docsSearchInputEl.value, { k: 12 });
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      clearDocsSearch();
+      setDocsStatus('');
+    }
+  });
+
   function setDocsFullscreen(enabled) {
     const on = Boolean(enabled);
     docsPanel.classList.toggle('fullscreen', on);
@@ -1802,6 +1975,19 @@
 
   docsFullscreenBtn?.addEventListener('click', () => {
     setDocsFullscreen(!docsPanel.classList.contains('fullscreen'));
+  });
+
+  function setDocsTheme(theme) {
+    const t = String(theme || '').toLowerCase() === 'light' ? 'light' : 'dark';
+    docsPanel.classList.toggle('light', t === 'light');
+    if (docsThemeBtn) docsThemeBtn.textContent = t === 'light' ? 'DARK' : 'LIGHT';
+    try {
+      localStorage.setItem('luxriot_docs_theme', t);
+    } catch (e) {}
+  }
+
+  docsThemeBtn?.addEventListener('click', () => {
+    setDocsTheme(docsPanel.classList.contains('light') ? 'dark' : 'light');
   });
 
   // ---------- Retrieval debug ----------
@@ -2368,6 +2554,12 @@
   (async () => {
     const deep = parseDocsHash();
     if (deep) await openDocsReader(deep);
+  })();
+  (function initDocsTheme() {
+    try {
+      const t = localStorage.getItem('luxriot_docs_theme') || 'dark';
+      setDocsTheme(t);
+    } catch (e) {}
   })();
 </script>
 </body>
