@@ -683,6 +683,32 @@
 		        <label>Max tokens</label>
 		        <input id="adminMaxTokens" type="number" min="64" max="4096" value="800"/>
 		      </div>
+
+	      <div class="card">
+	        <h3>Web</h3>
+	        <div class="inline" style="margin-top:8px;">
+	          <span class="pill"><input id="adminWebEnabled" type="checkbox" checked> enabled</span>
+	        </div>
+	        <label>Timeout (seconds)</label>
+	        <input id="adminWebTimeoutS" type="number" min="2" max="120" step="1" value="15"/>
+	        <label>Max chars (per fetch)</label>
+	        <input id="adminWebMaxChars" type="number" min="1000" max="50000" step="500" value="20000"/>
+	        <label>Max bytes (download)</label>
+	        <input id="adminWebMaxBytes" type="number" min="100000" max="5000000" step="50000" value="1000000"/>
+	        <div class="inline">
+	          <div style="flex:1;">
+	            <label>Max URLs per message</label>
+	            <input id="adminWebMaxUrls" type="number" min="0" max="5" value="2"/>
+	          </div>
+	          <div style="flex:1;">
+	            <label>Search k</label>
+	            <input id="adminWebSearchK" type="number" min="1" max="10" value="5"/>
+	          </div>
+	        </div>
+	        <div class="tiny muted" style="margin-top:8px;">
+	          Used when the user pastes a URL, or uses <span class="kbd">search:</span> / <span class="kbd">web:</span>.
+	        </div>
+	      </div>
 	
 	      <div class="card">
 	        <h3>Notes</h3>
@@ -1007,6 +1033,13 @@
 		  const adminTemperatureEl = document.getElementById('adminTemperature');
 	  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
 
+	  const adminWebEnabledEl = document.getElementById('adminWebEnabled');
+	  const adminWebTimeoutSEl = document.getElementById('adminWebTimeoutS');
+	  const adminWebMaxCharsEl = document.getElementById('adminWebMaxChars');
+	  const adminWebMaxBytesEl = document.getElementById('adminWebMaxBytes');
+	  const adminWebMaxUrlsEl = document.getElementById('adminWebMaxUrls');
+	  const adminWebSearchKEl = document.getElementById('adminWebSearchK');
+
     // ---------- Docs reader UI ----------
     const docsGuideSelectEl = document.getElementById('docsGuideSelect');
     const docsSearchInputEl = document.getElementById('docsSearchInput');
@@ -1047,11 +1080,14 @@
 	    const retrievalMode = adminRetrievalModeEl.value || 'bm25';
 	    const retrievalK = adminRetrievalKEl.value || String(chatKDefault);
 	    const docPriority = _linesToList(adminDocPriorityEl.value).join(', ');
+	    const webEnabled = adminWebEnabledEl ? Boolean(adminWebEnabledEl.checked) : false;
 	    const vars = {
 	      docs_version: adminDocsVersionEl.textContent || '(unknown)',
 	      retrieval_mode: retrievalMode,
 	      retrieval_k: retrievalK,
 	      doc_priority: docPriority,
+	      web_enabled: String(webEnabled),
+	      web_context: '(external web context inserted at runtime)',
 	      context: '(documentation context inserted at runtime)'
 	    };
 	    let out = String(template || '');
@@ -1091,6 +1127,7 @@
 		    const effective = adminBundle.effective || {};
 		    const retrieval = effective.retrieval || {};
 		    const llm = effective.llm || {};
+		    const web = effective.web || {};
 
 		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
 		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
@@ -1117,6 +1154,13 @@
 		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
 		    adminTemperatureEl.value = llm.temperature ?? 0.2;
 		    adminMaxTokensEl.value = llm.max_tokens ?? 800;
+
+		    adminWebEnabledEl.checked = Boolean(web.enabled ?? true);
+		    adminWebTimeoutSEl.value = web.timeout_s ?? 15;
+		    adminWebMaxCharsEl.value = web.max_chars ?? 20000;
+		    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
+		    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
+		    adminWebSearchKEl.value = web.search_k ?? 5;
 
 	    adminSystemPromptEl.value = effective.system_prompt_template || '';
 
@@ -1129,6 +1173,7 @@
 	    const d = adminBundle.defaults;
 		    const retrieval = d.retrieval || {};
 		    const llm = d.llm || {};
+		    const web = d.web || {};
 
 		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
 		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
@@ -1155,6 +1200,13 @@
 		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
 		    adminTemperatureEl.value = llm.temperature ?? 0.2;
 		    adminMaxTokensEl.value = llm.max_tokens ?? 800;
+
+		    adminWebEnabledEl.checked = Boolean(web.enabled ?? true);
+		    adminWebTimeoutSEl.value = web.timeout_s ?? 15;
+		    adminWebMaxCharsEl.value = web.max_chars ?? 20000;
+		    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
+		    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
+		    adminWebSearchKEl.value = web.search_k ?? 5;
 
 	    adminSystemPromptEl.value = d.system_prompt_template || '';
 	    adminSaveHintEl.textContent = 'Loaded defaults (not yet applied).';
@@ -1205,11 +1257,20 @@
 		      temperature: Number(adminTemperatureEl.value || 0.2),
 		      max_tokens: Number(adminMaxTokensEl.value || 800)
 		    };
+		    const web = {
+		      enabled: Boolean(adminWebEnabledEl.checked),
+		      timeout_s: Number(adminWebTimeoutSEl.value || 15),
+		      max_chars: Number(adminWebMaxCharsEl.value || 20000),
+		      max_bytes: Number(adminWebMaxBytesEl.value || 1000000),
+		      max_urls_per_message: Number(adminWebMaxUrlsEl.value || 2),
+		      search_k: Number(adminWebSearchKEl.value || 5)
+		    };
 	    const payload = {
 	      settings: {
 	        system_prompt_template: tmpl,
 	        retrieval,
-	        llm
+	        llm,
+	        web
 	      }
 	    };
 
@@ -2205,8 +2266,14 @@
 
 	    const retrievalMode = adminBundle?.effective?.retrieval?.mode || 'bm25';
 	    const modelId = (adminBundle?.effective?.llm?.model || '').trim() || 'LM Studio';
+	    const webEnabled = Boolean(adminBundle?.effective?.web?.enabled ?? false);
+	    const hasUrl = /https?:\/\/\S+/i.test(text);
 
-	    setPendingStatus(`Searching documentation (${retrievalMode})…`);
+	    setPendingStatus(
+	      webEnabled && hasUrl
+	        ? `Fetching web page + searching documentation (${retrievalMode})…`
+	        : `Searching documentation (${retrievalMode})…`
+	    );
 
 	    try {
 	      const k = Math.max(1, Math.min(25, Number(chatKDefault || 8)));

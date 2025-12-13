@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from .lmstudio import LMStudioError, chat_completion
 from .logging_utils import get_logger
 from .prompting import PromptTemplateError, render_template
 from .settings import SettingsError, ensure_defaults, get_settings_bundle, update_settings
+from .web_tools import WebToolError, duckduckgo_search, extract_urls, fetch_url, parse_search_query
 from .schemas import (
     AdminSettingsResponse,
     AdminSettingsUpdateRequest,
@@ -438,6 +440,47 @@ async def chat(req: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+
+    web_cfg = settings.get("web") if isinstance(settings.get("web"), dict) else {}
+    web_enabled = bool(web_cfg.get("enabled", False))
+    web_timeout_s = float(web_cfg.get("timeout_s", 15) or 15)
+    web_max_bytes = int(web_cfg.get("max_bytes", 1_000_000) or 1_000_000)
+    web_max_chars = int(web_cfg.get("max_chars", 20_000) or 20_000)
+    web_max_urls = int(web_cfg.get("max_urls_per_message", 2) or 2)
+    web_search_k = int(web_cfg.get("search_k", 5) or 5)
+
+    web_context_blocks: list[str] = []
+    if web_enabled:
+        urls = extract_urls(req.message, max_urls=web_max_urls)
+        search_q = parse_search_query(req.message)
+        if urls:
+            tasks = [
+                fetch_url(u, timeout_s=web_timeout_s, max_bytes=web_max_bytes, max_chars=web_max_chars) for u in urls
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for u, res in zip(urls, results):
+                if isinstance(res, Exception):
+                    detail = str(res).strip() or repr(res)
+                    raise HTTPException(status_code=502, detail=f"Web fetch failed for {u}: {detail}")
+                title = f" | {res.title}" if getattr(res, "title", None) else ""
+                web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {res.final_url}{title}\n{res.text}")
+        elif search_q:
+            try:
+                found = await duckduckgo_search(
+                    search_q, k=web_search_k, timeout_s=web_timeout_s, max_bytes=web_max_bytes
+                )
+            except WebToolError as e:
+                raise HTTPException(status_code=502, detail=str(e)) from e
+            if found:
+                for r in found:
+                    title = str(r.get("title") or "").strip()
+                    url = str(r.get("url") or "").strip()
+                    snippet = str(r.get("snippet") or "").strip()
+                    if not url:
+                        continue
+                    title_part = f" | {title}" if title else ""
+                    snippet_part = f"\n{snippet}" if snippet else ""
+                    web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {url}{title_part}{snippet_part}")
     max_citations = int(retrieval_cfg.get("max_citations", 8))
     max_images = int(retrieval_cfg.get("max_images", 6))
     citations = _build_citations(retrieval, DEFAULT_VERSION, max_citations=max_citations)
@@ -449,6 +492,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
         source = f"{r['doc_id']}/{r['page_id']}"
         context_blocks.append(f"[{i}] {source} | {hp}\n{r['text']}")
 
+    if web_context_blocks:
+        context_blocks.append("EXTERNAL WEB CONTEXT (not Luxriot EVO docs):")
+        context_blocks.extend(web_context_blocks)
+
     context_text = "\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)"
 
     try:
@@ -459,6 +506,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
                 "retrieval_mode": retrieval_mode,
                 "retrieval_k": str(req.k),
                 "doc_priority": doc_priority_str,
+                "web_enabled": str(web_enabled),
                 "context": context_text,
             },
             required_placeholders=[str(x) for x in required_placeholders],

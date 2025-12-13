@@ -43,5 +43,13 @@
       "luxriot-evo-s-installation-guide",
       "luxriot-evo-monitor-http-api"
     ]
+  },
+  "web": {
+    "enabled": true,
+    "timeout_s": 15,
+    "max_bytes": 1000000,
+    "max_chars": 20000,
+    "max_urls_per_message": 2,
+    "search_k": 5
   }
 }

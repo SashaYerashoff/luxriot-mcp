@@ -27,6 +27,13 @@ To serve on your LAN, run:
 uvicorn backend.app.main:app --host 0.0.0.0 --reload --port 8000
 ```
 
+## Web scraping (optional)
+
+In `Administrator tools → Web`, enable web tools, then:
+
+- Paste a URL in chat (e.g. `fetch https://www.luxriot.com/`) to fetch+summarize it.
+- Use `search: <query>` / `web: <query>` to include DuckDuckGo HTML search results in context.
+
 ## Environment variables
 
 - `LMSTUDIO_BASE_URL` (default `http://localhost:1234`)
