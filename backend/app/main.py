@@ -461,7 +461,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
             for u, res in zip(urls, results):
                 if isinstance(res, Exception):
                     detail = str(res).strip() or repr(res)
-                    raise HTTPException(status_code=502, detail=f"Web fetch failed for {u}: {detail}")
+                    web_context_blocks.append(f"[W{len(web_context_blocks)+1}] ERROR fetching {u}: {detail}")
+                    continue
                 title = f" | {res.title}" if getattr(res, "title", None) else ""
                 web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {res.final_url}{title}\n{res.text}")
         elif search_q:
@@ -470,7 +471,8 @@ async def chat(req: ChatRequest) -> ChatResponse:
                     search_q, k=web_search_k, timeout_s=web_timeout_s, max_bytes=web_max_bytes
                 )
             except WebToolError as e:
-                raise HTTPException(status_code=502, detail=str(e)) from e
+                web_context_blocks.append(f"[W{len(web_context_blocks)+1}] ERROR web search: {e}")
+                found = []
             if found:
                 for r in found:
                     title = str(r.get("title") or "").strip()

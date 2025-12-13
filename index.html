@@ -48,6 +48,12 @@
       flex:1;background:var(--panel);border:1px solid var(--border);border-radius:16px;
       padding:18px;min-height:92px;color:var(--text);
     }
+    .input-area:focus{outline:none;}
+    .input-area[contenteditable="true"]:empty:before{
+      content: attr(data-placeholder);
+      color: var(--muted);
+      opacity: .9;
+    }
     .send{
       background:rgba(63,163,124,.35);border:1px solid rgba(63,163,124,.45);
       color:var(--text);border-radius:24px;padding:12px 20px;cursor:pointer;
@@ -535,7 +541,7 @@
   </div>
 
   <div class="input-wrap">
-    <div class="input-area" id="userInput" contenteditable="true" aria-label="User input">User input</div>
+    <div class="input-area" id="userInput" contenteditable="true" aria-label="User input" data-placeholder="User input"></div>
     <button class="send" id="sendBtn">SEND</button>
   </div>
 

@@ -17,18 +17,98 @@ class WebToolError(RuntimeError):
 _URL_RE = re.compile(r"https?://[^\s)<>\"]+", re.IGNORECASE)
 _SEARCH_PREFIX_RE = re.compile(r"(?is)^\s*(?:web|ddg|search)\s*:\s*(.+?)\s*$")
 
+_TLD_ALLOWLIST = {
+    "com",
+    "net",
+    "org",
+    "io",
+    "ai",
+    "app",
+    "dev",
+    "cloud",
+    "info",
+    "biz",
+    "tv",
+    "me",
+    "us",
+    "ca",
+    "eu",
+    "uk",
+    "de",
+    "fr",
+    "it",
+    "es",
+    "nl",
+    "se",
+    "no",
+    "fi",
+    "pl",
+    "cz",
+    "ch",
+    "at",
+    "au",
+    "nz",
+    "br",
+    "in",
+    "sg",
+    "hk",
+    "jp",
+    "cn",
+    "kr",
+    "tw",
+    "tr",
+    "gr",
+    "pt",
+    "ru",
+    "ua",
+}
+
+
+def normalize_url(candidate: str) -> str | None:
+    c = str(candidate or "").strip()
+    if not c:
+        return None
+
+    c = c.strip("()[]{}<>\"'")
+    c = c.rstrip(".,);]}>\"'?!")
+    if not c:
+        return None
+
+    low = c.lower()
+    if low.startswith(("http://", "https://")):
+        return c
+    if low.startswith("www."):
+        return f"https://{c}"
+
+    # Bare domain/path (only if TLD looks like a real web TLD).
+    if "." not in c:
+        return None
+    head = re.split(r"[/?#]", c, maxsplit=1)[0]
+    head = head.split(":", 1)[0]
+    if not head or not re.fullmatch(r"[a-z0-9.-]+", head, flags=re.IGNORECASE):
+        return None
+    tld = head.rsplit(".", 1)[-1].lower()
+    if tld not in _TLD_ALLOWLIST:
+        return None
+    return f"https://{c}"
+
 
 def extract_urls(text: str, max_urls: int) -> list[str]:
     if max_urls <= 0:
         return []
-    raw = _URL_RE.findall(text or "")
+
+    raw: list[str] = []
+    raw.extend(_URL_RE.findall(text or ""))
+    # Also consider whitespace-separated candidates like "www.example.com" or "example.com/path".
+    raw.extend(re.split(r"\s+", (text or "").strip()))
+    raw = [r for r in raw if r]
+
     if not raw:
         return []
     out: list[str] = []
     seen: set[str] = set()
     for u in raw:
-        # Trim common trailing punctuation.
-        u = u.rstrip(".,);]}>\"'")
+        u = normalize_url(u)
         if not u:
             continue
         if u in seen:
