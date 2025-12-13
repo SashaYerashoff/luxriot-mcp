@@ -13,6 +13,17 @@
     "max_citations": 8,
     "max_images": 6,
     "doc_priority_boost": 0.05,
+    "heading_boost": 0.6,
+    "mmr": {
+      "enabled": true,
+      "lambda": 0.8,
+      "candidates": 80,
+      "use_embeddings": true
+    },
+    "expand": {
+      "neighbors": 1,
+      "max_chars": 4200
+    },
     "dedupe": {
       "max_per_page": 3,
       "max_per_doc": 12
@@ -20,7 +31,7 @@
     "hybrid": {
       "rrf_k": 60,
       "bm25_weight": 1.0,
-      "embedding_weight": 1.0,
+      "embedding_weight": 0.6,
       "bm25_candidates": 120,
       "embedding_candidates": 120
     },

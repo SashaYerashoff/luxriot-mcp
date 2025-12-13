@@ -264,6 +264,7 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
     mode = str(retrieval.get("mode", "bm25"))
     doc_priority = retrieval.get("doc_priority") if isinstance(retrieval.get("doc_priority"), list) else []
     doc_priority_boost = float(retrieval.get("doc_priority_boost", 0.0) or 0.0)
+    heading_boost = float(retrieval.get("heading_boost", 0.0) or 0.0)
     dedupe = retrieval.get("dedupe") if isinstance(retrieval.get("dedupe"), dict) else {}
     max_per_page = int(dedupe.get("max_per_page", 0) or 0)
     max_per_doc = int(dedupe.get("max_per_doc", 0) or 0)
@@ -274,11 +275,28 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
     bm25_weight = float(hybrid.get("bm25_weight", 1.0) or 1.0)
     embedding_weight = float(hybrid.get("embedding_weight", 1.0) or 1.0)
 
+    mmr = retrieval.get("mmr") if isinstance(retrieval.get("mmr"), dict) else {}
+    mmr_enabled = bool(mmr.get("enabled", False))
+    mmr_lambda = float(mmr.get("lambda", 0.7) or 0.7)
+    mmr_candidates = int(mmr.get("candidates", 0) or 0) or None
+    mmr_use_embeddings = bool(mmr.get("use_embeddings", True))
+
+    expand = retrieval.get("expand") if isinstance(retrieval.get("expand"), dict) else {}
+    expand_neighbors = int(expand.get("neighbors", 0) or 0)
+    expand_max_chars = int(expand.get("max_chars", 0) or 0)
+
     try:
         results = await search_engine.search(
             req.query,
             k=req.k,
             mode=mode,
+            mmr_enabled=mmr_enabled,
+            mmr_lambda=mmr_lambda,
+            mmr_candidates=mmr_candidates,
+            mmr_use_embeddings=mmr_use_embeddings,
+            expand_neighbors=expand_neighbors,
+            expand_max_chars=expand_max_chars,
+            heading_boost=heading_boost,
             bm25_candidates=bm25_candidates,
             embedding_candidates=embedding_candidates,
             rrf_k=rrf_k,
@@ -358,6 +376,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     doc_priority_list = [str(x) for x in doc_priority] if isinstance(doc_priority, list) else []
     doc_priority_boost = float(retrieval_cfg.get("doc_priority_boost", 0.0) or 0.0)
+    heading_boost = float(retrieval_cfg.get("heading_boost", 0.0) or 0.0)
     dedupe = retrieval_cfg.get("dedupe") if isinstance(retrieval_cfg.get("dedupe"), dict) else {}
     max_per_page = int(dedupe.get("max_per_page", 0) or 0)
     max_per_doc = int(dedupe.get("max_per_doc", 0) or 0)
@@ -368,11 +387,28 @@ async def chat(req: ChatRequest) -> ChatResponse:
     bm25_weight = float(hybrid.get("bm25_weight", 1.0) or 1.0)
     embedding_weight = float(hybrid.get("embedding_weight", 1.0) or 1.0)
 
+    mmr = retrieval_cfg.get("mmr") if isinstance(retrieval_cfg.get("mmr"), dict) else {}
+    mmr_enabled = bool(mmr.get("enabled", False))
+    mmr_lambda = float(mmr.get("lambda", 0.7) or 0.7)
+    mmr_candidates = int(mmr.get("candidates", 0) or 0) or None
+    mmr_use_embeddings = bool(mmr.get("use_embeddings", True))
+
+    expand = retrieval_cfg.get("expand") if isinstance(retrieval_cfg.get("expand"), dict) else {}
+    expand_neighbors = int(expand.get("neighbors", 0) or 0)
+    expand_max_chars = int(expand.get("max_chars", 0) or 0)
+
     try:
         retrieval = await search_engine.search(
             req.message,
             k=req.k,
             mode=retrieval_mode,
+            mmr_enabled=mmr_enabled,
+            mmr_lambda=mmr_lambda,
+            mmr_candidates=mmr_candidates,
+            mmr_use_embeddings=mmr_use_embeddings,
+            expand_neighbors=expand_neighbors,
+            expand_max_chars=expand_max_chars,
+            heading_boost=heading_boost,
             bm25_candidates=bm25_candidates,
             embedding_candidates=embedding_candidates,
             rrf_k=rrf_k,

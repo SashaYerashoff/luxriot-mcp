@@ -9,7 +9,10 @@ Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 document
 - **Frontend**: wired (`frontend-mock.html`) to backend APIs; renders answers, citations, screenshots; shows raw errors.
 - **MCP server**: implemented (`mcp-server/`) exposing `luxriot_docs_query`.
 - **Prompt transparency**: **no hardcoded prompts in service code**. System prompt is stored in **settings** and editable via Admin Tools panel.
-- **Retrieval**: BM25 + embeddings + **hybrid (RRF)** implemented and controllable via settings/UI.
+- **Retrieval**: BM25 + embeddings + **hybrid (RRF)**, plus deterministic consistency helpers:
+  - **MMR diversification** (reduces redundancy; settings-driven)
+  - **Heading match boost** (helps “Add/Configure/…” pages surface)
+  - **Neighbor expansion** (stitches adjacent chunks to keep procedures intact)
 
 ## Prompt transparency contract
 - Prompts are **data**, not code:

@@ -17,6 +17,41 @@ from .lmstudio import LMStudioError, embeddings as lm_embeddings
 log = get_logger(__name__)
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "new",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "you",
+    # Product boilerplate terms (present in most headings).
+    "luxriot",
+    "evo",
+}
 
 
 def tokenize(text: str) -> list[str]:
@@ -222,7 +257,7 @@ class SearchEngine:
                 score = idf * (tf * (k1 + 1.0) / denom)
                 scores[chunk_id] = scores.get(chunk_id, 0.0) + score
 
-        top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:k]
+        top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
         return top, chunk_rows
 
     async def _embedding_rank(self, query: str, k: int) -> list[tuple[str, float]]:
@@ -249,8 +284,21 @@ class SearchEngine:
                 s += q[i] * v[i]
             scores.append((cid, float(s)))
 
-        scores.sort(key=lambda kv: kv[1], reverse=True)
+        scores.sort(key=lambda kv: (-kv[1], kv[0]))
         return scores[:k]
+
+    def _heading_match_multiplier(self, heading_path: list[str], query_terms: set[str], boost: float) -> float:
+        if boost <= 0.0 or not query_terms:
+            return 1.0
+        hay = " ".join(heading_path or [])
+        heading_terms = set(tokenize(hay))
+        if not heading_terms:
+            return 1.0
+        overlap = query_terms.intersection(heading_terms)
+        if not overlap:
+            return 1.0
+        frac = float(len(overlap)) / float(len(query_terms) or 1)
+        return 1.0 + float(boost) * frac
 
     def _doc_priority_multiplier(self, doc_id: str, priority: list[str], boost: float, prio_map: dict[str, int]) -> float:
         if boost <= 0.0:
@@ -293,12 +341,298 @@ class SearchEngine:
                 break
         return out
 
+    def _dot(self, a: array, b: array) -> float:
+        if len(a) != len(b):
+            return 0.0
+        s = 0.0
+        for i in range(len(a)):
+            s += float(a[i]) * float(b[i])
+        return float(s)
+
+    def _jaccard_similarity(self, a: set[str], b: set[str]) -> float:
+        if not a or not b:
+            return 0.0
+        inter = a.intersection(b)
+        if not inter:
+            return 0.0
+        union = a.union(b)
+        return float(len(inter)) / float(len(union) or 1)
+
+    def _mmr_select(
+        self,
+        ranked: list[tuple[str, float]],
+        chunk_rows: dict[str, ChunkRow],
+        *,
+        k: int,
+        mmr_lambda: float,
+        use_embeddings: bool,
+        max_per_page: int,
+        max_per_doc: int,
+    ) -> list[tuple[str, float]]:
+        if k <= 0:
+            return []
+        if not ranked:
+            return []
+
+        # Clamp lambda to [0, 1]. Higher values favor relevance; lower values favor diversity.
+        lam = float(mmr_lambda)
+        if lam < 0.0:
+            lam = 0.0
+        if lam > 1.0:
+            lam = 1.0
+
+        # Pre-filter to candidates we can actually return.
+        candidates: list[tuple[str, float]] = [(cid, float(score)) for cid, score in ranked if cid in chunk_rows]
+        if not candidates:
+            return []
+
+        # Normalize relevance to [0, 1] using min-max scores for stable MMR arithmetic.
+        scores = [score for _, score in candidates]
+        min_score = min(scores)
+        max_score = max(scores)
+        if max_score > min_score:
+            rel = {cid: (score - min_score) / (max_score - min_score) for cid, score in candidates}
+        else:
+            rel = {cid: 1.0 for cid, _ in candidates}
+
+        use_emb = bool(use_embeddings) and self.embeddings_ready()
+        cand_vec: dict[str, array] = {}
+        cand_tokens: dict[str, set[str]] = {}
+        if use_emb:
+            self._load_embeddings()
+            assert self._embedding_vectors is not None
+            for cid, _ in candidates:
+                v = self._embedding_vectors.get(cid)
+                if v is not None:
+                    cand_vec[cid] = v
+
+        if not use_emb or len(cand_vec) < len(candidates):
+            for cid, _ in candidates:
+                if cid in cand_tokens:
+                    continue
+                row = chunk_rows.get(cid)
+                if not row:
+                    continue
+                toks = tokenize(row.text)
+                # Bound token-set size to keep it cheap and stable.
+                cand_tokens[cid] = set(toks[:256])
+
+        selected: list[tuple[str, float]] = []
+        selected_ids: list[str] = []
+        page_counts: Counter[tuple[str, str]] = Counter()
+        doc_counts: Counter[str] = Counter()
+
+        def allowed(cid: str) -> bool:
+            row = chunk_rows.get(cid)
+            if not row:
+                return False
+            page_key = (row.doc_id, row.page_id)
+            if max_per_page > 0 and page_counts[page_key] >= max_per_page:
+                return False
+            if max_per_doc > 0 and doc_counts[row.doc_id] >= max_per_doc:
+                return False
+            return True
+
+        def update_counts(cid: str) -> None:
+            row = chunk_rows.get(cid)
+            if not row:
+                return
+            page_counts[(row.doc_id, row.page_id)] += 1
+            doc_counts[row.doc_id] += 1
+
+        def similarity(a_id: str, b_id: str) -> float:
+            if a_id == b_id:
+                return 1.0
+            if use_emb and a_id in cand_vec and b_id in cand_vec:
+                s = self._dot(cand_vec[a_id], cand_vec[b_id])
+                if s < 0.0:
+                    s = 0.0
+                if s > 1.0:
+                    s = 1.0
+                return float(s)
+            a_toks = cand_tokens.get(a_id) or set()
+            b_toks = cand_tokens.get(b_id) or set()
+            return self._jaccard_similarity(a_toks, b_toks)
+
+        # Deterministic MMR selection.
+        while len(selected) < k:
+            best_cid: str | None = None
+            best_mmr: float = -1e18
+
+            for cid, orig_score in candidates:
+                if cid in selected_ids:
+                    continue
+                if not allowed(cid):
+                    continue
+
+                relevance = float(rel.get(cid, 0.0))
+                if not selected_ids:
+                    mmr_score = relevance
+                else:
+                    max_sim = 0.0
+                    for sid in selected_ids:
+                        sim = similarity(cid, sid)
+                        if sim > max_sim:
+                            max_sim = sim
+                    mmr_score = lam * relevance - (1.0 - lam) * max_sim
+
+                if mmr_score > best_mmr:
+                    best_mmr = mmr_score
+                    best_cid = cid
+                    best_orig_score = orig_score
+
+            if best_cid is None:
+                break
+            selected.append((best_cid, float(best_orig_score)))
+            selected_ids.append(best_cid)
+            update_counts(best_cid)
+
+        return selected
+
+    def _neighbor_chunk_ids(self, chunk_id: str, neighbors: int) -> list[str]:
+        if neighbors <= 0:
+            return [chunk_id]
+        try:
+            doc_part, page_part, idx_part = chunk_id.rsplit(":", 2)
+            idx = int(idx_part)
+        except Exception:
+            return [chunk_id]
+        start = max(0, idx - neighbors)
+        end = idx + neighbors
+        return [f"{doc_part}:{page_part}:{i:03d}" for i in range(start, end + 1)]
+
+    def _expand_chunk_text(
+        self,
+        chunk_id: str,
+        chunk_rows: dict[str, ChunkRow],
+        *,
+        neighbors: int,
+        max_chars: int,
+    ) -> tuple[str, list[str]]:
+        if neighbors <= 0:
+            row = chunk_rows.get(chunk_id)
+            return (row.text, row.images) if row else ("", [])
+
+        wanted = self._neighbor_chunk_ids(chunk_id, neighbors)
+        missing = [cid for cid in wanted if cid not in chunk_rows]
+        if missing:
+            fetched = self._fetch_chunk_rows(missing)
+            chunk_rows.update(fetched)
+
+        segments: list[tuple[str, str, list[str]]] = []
+        for cid in wanted:
+            row = chunk_rows.get(cid)
+            if not row:
+                continue
+            segments.append((cid, row.text, row.images))
+
+        if not segments:
+            return ("", [])
+
+        center_idx = 0
+        for i, (cid, _, _) in enumerate(segments):
+            if cid == chunk_id:
+                center_idx = i
+                break
+
+        # Always include the center segment; expand outward until we hit max_chars.
+        include: set[int] = {center_idx}
+        text_total = len(segments[center_idx][1])
+        if max_chars <= 0:
+            include = set(range(len(segments)))
+        else:
+            remaining = max_chars - text_total
+            if remaining <= 0:
+                text = segments[center_idx][1][:max_chars]
+                images = segments[center_idx][2]
+                return text, images
+
+            left = center_idx - 1
+            right = center_idx + 1
+            while remaining > 0 and (left >= 0 or right < len(segments)):
+                progressed = False
+                if left >= 0:
+                    seg_len = len(segments[left][1]) + 2
+                    if seg_len <= remaining:
+                        include.add(left)
+                        remaining -= seg_len
+                        progressed = True
+                    left -= 1
+                if right < len(segments):
+                    seg_len = len(segments[right][1]) + 2
+                    if seg_len <= remaining:
+                        include.add(right)
+                        remaining -= seg_len
+                        progressed = True
+                    right += 1
+                if not progressed:
+                    break
+
+        texts: list[str] = []
+        images_out: list[str] = []
+        seen_img: set[str] = set()
+        for i in sorted(include):
+            t = segments[i][1].strip()
+            if t:
+                texts.append(t)
+            for url in segments[i][2]:
+                if url in seen_img:
+                    continue
+                seen_img.add(url)
+                images_out.append(url)
+
+        return "\n\n".join(texts).strip(), images_out
+
+    def _rows_to_results(
+        self,
+        selected: list[tuple[str, float]],
+        chunk_rows: dict[str, ChunkRow],
+        *,
+        expand_neighbors: int,
+        expand_max_chars: int,
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for cid, score in selected:
+            row = chunk_rows.get(cid)
+            if not row:
+                continue
+            if expand_neighbors > 0:
+                text, images = self._expand_chunk_text(
+                    cid,
+                    chunk_rows,
+                    neighbors=expand_neighbors,
+                    max_chars=expand_max_chars,
+                )
+            else:
+                text, images = row.text, row.images
+            out.append(
+                {
+                    "chunk_id": cid,
+                    "doc_id": row.doc_id,
+                    "page_id": row.page_id,
+                    "heading_path": row.heading_path,
+                    "text": text,
+                    "score": float(score),
+                    "source_path": row.source_path,
+                    "anchor": row.anchor,
+                    "images": images,
+                }
+            )
+        return out
+
     async def search(
         self,
         query: str,
         k: int = 8,
         mode: str = "bm25",
         *,
+        mmr_enabled: bool = False,
+        mmr_lambda: float = 0.7,
+        mmr_candidates: int | None = None,
+        mmr_use_embeddings: bool = True,
+        expand_neighbors: int = 0,
+        expand_max_chars: int = 0,
+        heading_boost: float = 0.0,
         bm25_candidates: int | None = None,
         embedding_candidates: int | None = None,
         rrf_k: int = 60,
@@ -315,40 +649,50 @@ class SearchEngine:
 
         doc_priority = doc_priority or []
         prio_map = {d: i for i, d in enumerate(doc_priority)}
+        mmr_enabled = bool(mmr_enabled)
+        use_mmr = mmr_enabled and k > 1
+        cand_limit = int(mmr_candidates or 0) or 0
+        if cand_limit > 0:
+            cand_limit = max(cand_limit, k)
+        heading_boost = float(heading_boost or 0.0)
+        query_terms_for_heading = {t for t in tokenize(query) if t not in _STOPWORDS}
 
         if mode == "bm25":
-            top, chunk_rows = self._bm25_rank(query, k)
+            top, chunk_rows = self._bm25_rank(query, cand_limit if use_mmr and cand_limit else k)
             adjusted = []
             for cid, score in top:
                 row = chunk_rows.get(cid)
                 if not row:
                     continue
                 score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                score *= self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
                 adjusted.append((cid, score))
-            adjusted.sort(key=lambda kv: kv[1], reverse=True)
-            selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
-            return [
-                {
-                    "chunk_id": cid,
-                    "doc_id": chunk_rows[cid].doc_id,
-                    "page_id": chunk_rows[cid].page_id,
-                    "heading_path": chunk_rows[cid].heading_path,
-                    "text": chunk_rows[cid].text,
-                    "score": float(score),
-                    "source_path": chunk_rows[cid].source_path,
-                    "anchor": chunk_rows[cid].anchor,
-                    "images": chunk_rows[cid].images,
-                }
-                for cid, score in selected
-                if cid in chunk_rows
-            ]
+            adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
+            if use_mmr:
+                selected = self._mmr_select(
+                    adjusted,
+                    chunk_rows,
+                    k=k,
+                    mmr_lambda=mmr_lambda,
+                    use_embeddings=mmr_use_embeddings,
+                    max_per_page=max_per_page,
+                    max_per_doc=max_per_doc,
+                )
+            else:
+                selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
+            return self._rows_to_results(
+                selected,
+                chunk_rows,
+                expand_neighbors=int(expand_neighbors or 0),
+                expand_max_chars=int(expand_max_chars or 0),
+            )
 
         if mode == "embedding":
             if not self.embeddings_ready():
                 raise RuntimeError(
                     "Embeddings mode requested but embeddings are not available. Re-run ingestion to build embeddings."
                 )
-            top = await self._embedding_rank(query, k=max(k, 1))
+            top = await self._embedding_rank(query, k=max((cand_limit if use_mmr and cand_limit else k), 1))
             chunk_ids = [cid for cid, _ in top]
             chunk_rows = self._fetch_chunk_rows(chunk_ids)
             adjusted = []
@@ -357,24 +701,27 @@ class SearchEngine:
                 if not row:
                     continue
                 score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                score *= self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
                 adjusted.append((cid, score))
-            adjusted.sort(key=lambda kv: kv[1], reverse=True)
-            selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
-            return [
-                {
-                    "chunk_id": cid,
-                    "doc_id": chunk_rows[cid].doc_id,
-                    "page_id": chunk_rows[cid].page_id,
-                    "heading_path": chunk_rows[cid].heading_path,
-                    "text": chunk_rows[cid].text,
-                    "score": float(score),
-                    "source_path": chunk_rows[cid].source_path,
-                    "anchor": chunk_rows[cid].anchor,
-                    "images": chunk_rows[cid].images,
-                }
-                for cid, score in selected
-                if cid in chunk_rows
-            ]
+            adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
+            if use_mmr:
+                selected = self._mmr_select(
+                    adjusted,
+                    chunk_rows,
+                    k=k,
+                    mmr_lambda=mmr_lambda,
+                    use_embeddings=mmr_use_embeddings,
+                    max_per_page=max_per_page,
+                    max_per_doc=max_per_doc,
+                )
+            else:
+                selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
+            return self._rows_to_results(
+                selected,
+                chunk_rows,
+                expand_neighbors=int(expand_neighbors or 0),
+                expand_max_chars=int(expand_max_chars or 0),
+            )
 
         # hybrid
         if not self.embeddings_ready():
@@ -406,22 +753,26 @@ class SearchEngine:
             row = chunk_rows.get(cid)
             if row:
                 score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                score *= self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
             combined.append((cid, score))
 
-        combined.sort(key=lambda kv: kv[1], reverse=True)
-        selected = self._apply_dedupe(combined, chunk_rows, k, max_per_page, max_per_doc)
-        return [
-            {
-                "chunk_id": cid,
-                "doc_id": chunk_rows[cid].doc_id,
-                "page_id": chunk_rows[cid].page_id,
-                "heading_path": chunk_rows[cid].heading_path,
-                "text": chunk_rows[cid].text,
-                "score": float(score),
-                "source_path": chunk_rows[cid].source_path,
-                "anchor": chunk_rows[cid].anchor,
-                "images": chunk_rows[cid].images,
-            }
-            for cid, score in selected
-            if cid in chunk_rows
-        ]
+        combined.sort(key=lambda kv: (-kv[1], kv[0]))
+        if use_mmr:
+            trimmed = combined[: (cand_limit if cand_limit else len(combined))]
+            selected = self._mmr_select(
+                trimmed,
+                chunk_rows,
+                k=k,
+                mmr_lambda=mmr_lambda,
+                use_embeddings=mmr_use_embeddings,
+                max_per_page=max_per_page,
+                max_per_doc=max_per_doc,
+            )
+        else:
+            selected = self._apply_dedupe(combined, chunk_rows, k, max_per_page, max_per_doc)
+        return self._rows_to_results(
+            selected,
+            chunk_rows,
+            expand_neighbors=int(expand_neighbors or 0),
+            expand_max_chars=int(expand_max_chars or 0),
+        )

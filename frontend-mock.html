@@ -485,6 +485,8 @@
 		        </div>
 		        <label>Doc priority boost (soft)</label>
 		        <input id="adminDocPriorityBoost" type="number" step="0.01" min="0" max="1" value="0.05"/>
+		        <label>Heading match boost</label>
+		        <input id="adminHeadingBoost" type="number" step="0.05" min="0" max="2" value="0.6"/>
 		        <label>Doc priority (one per line)</label>
 		        <textarea id="adminDocPriority" class="mono" style="height:120px;" placeholder="luxriot-evo-global-administration-guide&#10;luxriot-evo-monitor&#10;..."></textarea>
 		
@@ -526,6 +528,38 @@
 		            <div style="flex:1;">
 		              <label>Emb candidates</label>
 		              <input id="adminEmbCandidates" type="number" min="10" max="500" value="120"/>
+		            </div>
+		          </div>
+
+		          <div class="hr"></div>
+
+		          <div class="tiny muted">Diversification (MMR)</div>
+		          <div class="inline" style="margin-top:8px;">
+		            <span class="pill"><input id="adminMmrEnabled" type="checkbox" checked> enabled</span>
+		            <span class="pill"><input id="adminMmrUseEmbeddings" type="checkbox" checked> use embeddings</span>
+		          </div>
+		          <div class="inline">
+		            <div style="flex:1;">
+		              <label>MMR λ (0–1)</label>
+		              <input id="adminMmrLambda" type="number" step="0.05" min="0" max="1" value="0.8"/>
+		            </div>
+		            <div style="flex:1;">
+		              <label>MMR candidates</label>
+		              <input id="adminMmrCandidates" type="number" min="10" max="500" value="80"/>
+		            </div>
+		          </div>
+
+		          <div class="hr"></div>
+
+		          <div class="tiny muted">Chunk expansion (neighbors)</div>
+		          <div class="inline" style="margin-top:8px;">
+		            <div style="flex:1;">
+		              <label>Neighbors (±N)</label>
+		              <input id="adminExpandNeighbors" type="number" min="0" max="5" value="1"/>
+		            </div>
+		            <div style="flex:1;">
+		              <label>Max chars per chunk</label>
+		              <input id="adminExpandMaxChars" type="number" min="0" max="20000" value="4200"/>
 		            </div>
 		          </div>
 		        </details>
@@ -799,6 +833,7 @@
 		  const adminMaxCitationsEl = document.getElementById('adminMaxCitations');
 		  const adminMaxImagesEl = document.getElementById('adminMaxImages');
 		  const adminDocPriorityBoostEl = document.getElementById('adminDocPriorityBoost');
+		  const adminHeadingBoostEl = document.getElementById('adminHeadingBoost');
 		  const adminDocPriorityEl = document.getElementById('adminDocPriority');
 		  const adminMaxPerPageEl = document.getElementById('adminMaxPerPage');
 		  const adminMaxPerDocEl = document.getElementById('adminMaxPerDoc');
@@ -807,6 +842,12 @@
 		  const adminEmbWeightEl = document.getElementById('adminEmbWeight');
 		  const adminBm25CandidatesEl = document.getElementById('adminBm25Candidates');
 		  const adminEmbCandidatesEl = document.getElementById('adminEmbCandidates');
+		  const adminMmrEnabledEl = document.getElementById('adminMmrEnabled');
+		  const adminMmrUseEmbeddingsEl = document.getElementById('adminMmrUseEmbeddings');
+		  const adminMmrLambdaEl = document.getElementById('adminMmrLambda');
+		  const adminMmrCandidatesEl = document.getElementById('adminMmrCandidates');
+		  const adminExpandNeighborsEl = document.getElementById('adminExpandNeighbors');
+		  const adminExpandMaxCharsEl = document.getElementById('adminExpandMaxChars');
 
 		  const adminModelIdEl = document.getElementById('adminModelId');
 		  const adminTimeoutSEl = document.getElementById('adminTimeoutS');
@@ -886,6 +927,7 @@
 		    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
 		    adminMaxImagesEl.value = retrieval.max_images ?? 6;
 		    adminDocPriorityBoostEl.value = retrieval.doc_priority_boost ?? 0.05;
+		    adminHeadingBoostEl.value = retrieval.heading_boost ?? 0.6;
 		    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
 		    adminMaxPerPageEl.value = retrieval?.dedupe?.max_per_page ?? 3;
 		    adminMaxPerDocEl.value = retrieval?.dedupe?.max_per_doc ?? 12;
@@ -894,6 +936,12 @@
 		    adminEmbWeightEl.value = retrieval?.hybrid?.embedding_weight ?? 1.0;
 		    adminBm25CandidatesEl.value = retrieval?.hybrid?.bm25_candidates ?? 120;
 		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
+		    adminMmrEnabledEl.checked = Boolean(retrieval?.mmr?.enabled ?? true);
+		    adminMmrUseEmbeddingsEl.checked = Boolean(retrieval?.mmr?.use_embeddings ?? true);
+		    adminMmrLambdaEl.value = retrieval?.mmr?.lambda ?? 0.8;
+		    adminMmrCandidatesEl.value = retrieval?.mmr?.candidates ?? 80;
+		    adminExpandNeighborsEl.value = retrieval?.expand?.neighbors ?? 1;
+		    adminExpandMaxCharsEl.value = retrieval?.expand?.max_chars ?? 4200;
 
 		    adminModelIdEl.value = llm.model ?? '';
 		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
@@ -917,6 +965,7 @@
 		    adminMaxCitationsEl.value = retrieval.max_citations ?? 8;
 		    adminMaxImagesEl.value = retrieval.max_images ?? 6;
 		    adminDocPriorityBoostEl.value = retrieval.doc_priority_boost ?? 0.05;
+		    adminHeadingBoostEl.value = retrieval.heading_boost ?? 0.6;
 		    adminDocPriorityEl.value = Array.isArray(retrieval.doc_priority) ? retrieval.doc_priority.join('\n') : '';
 		    adminMaxPerPageEl.value = retrieval?.dedupe?.max_per_page ?? 3;
 		    adminMaxPerDocEl.value = retrieval?.dedupe?.max_per_doc ?? 12;
@@ -925,6 +974,12 @@
 		    adminEmbWeightEl.value = retrieval?.hybrid?.embedding_weight ?? 1.0;
 		    adminBm25CandidatesEl.value = retrieval?.hybrid?.bm25_candidates ?? 120;
 		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
+		    adminMmrEnabledEl.checked = Boolean(retrieval?.mmr?.enabled ?? true);
+		    adminMmrUseEmbeddingsEl.checked = Boolean(retrieval?.mmr?.use_embeddings ?? true);
+		    adminMmrLambdaEl.value = retrieval?.mmr?.lambda ?? 0.8;
+		    adminMmrCandidatesEl.value = retrieval?.mmr?.candidates ?? 80;
+		    adminExpandNeighborsEl.value = retrieval?.expand?.neighbors ?? 1;
+		    adminExpandMaxCharsEl.value = retrieval?.expand?.max_chars ?? 4200;
 
 		    adminModelIdEl.value = llm.model ?? '';
 		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
@@ -950,6 +1005,17 @@
 		      max_citations: Number(adminMaxCitationsEl.value || 8),
 		      max_images: Number(adminMaxImagesEl.value || 6),
 		      doc_priority_boost: Number(adminDocPriorityBoostEl.value || 0),
+		      heading_boost: Number(adminHeadingBoostEl.value || 0),
+		      mmr: {
+		        enabled: Boolean(adminMmrEnabledEl.checked),
+		        lambda: Number(adminMmrLambdaEl.value || 0.8),
+		        candidates: Number(adminMmrCandidatesEl.value || 80),
+		        use_embeddings: Boolean(adminMmrUseEmbeddingsEl.checked)
+		      },
+		      expand: {
+		        neighbors: Number(adminExpandNeighborsEl.value || 0),
+		        max_chars: Number(adminExpandMaxCharsEl.value || 0)
+		      },
 		      dedupe: {
 		        max_per_page: Number(adminMaxPerPageEl.value || 0),
 		        max_per_doc: Number(adminMaxPerDocEl.value || 0)
