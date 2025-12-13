@@ -3,6 +3,7 @@
   "system_prompt_template_file": "backend/prompts/system_prompt.md",
   "llm": {
     "model": "",
+    "timeout_s": 180,
     "temperature": 0.2,
     "max_tokens": 800
   },

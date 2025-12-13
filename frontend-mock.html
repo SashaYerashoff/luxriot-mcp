@@ -419,6 +419,8 @@
 		        <h3>LLM</h3>
 		        <label>Model ID (optional; blank = auto)</label>
 		        <input id="adminModelId" type="text" placeholder="e.g. mistralai/ministral-3-3b"/>
+		        <label>Timeout (seconds)</label>
+		        <input id="adminTimeoutS" type="number" min="10" max="600" step="5" value="180"/>
 		        <label>Temperature</label>
 		        <input id="adminTemperature" type="number" step="0.01" min="0" max="2" value="0.2"/>
 		        <label>Max tokens</label>
@@ -641,6 +643,7 @@
 		  const adminEmbCandidatesEl = document.getElementById('adminEmbCandidates');
 
 		  const adminModelIdEl = document.getElementById('adminModelId');
+		  const adminTimeoutSEl = document.getElementById('adminTimeoutS');
 		  const adminTemperatureEl = document.getElementById('adminTemperature');
 		  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
 
@@ -718,6 +721,7 @@
 		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
 
 		    adminModelIdEl.value = llm.model ?? '';
+		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
 		    adminTemperatureEl.value = llm.temperature ?? 0.2;
 		    adminMaxTokensEl.value = llm.max_tokens ?? 800;
 
@@ -748,6 +752,7 @@
 		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
 
 		    adminModelIdEl.value = llm.model ?? '';
+		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
 		    adminTemperatureEl.value = llm.temperature ?? 0.2;
 		    adminMaxTokensEl.value = llm.max_tokens ?? 800;
 
@@ -785,6 +790,7 @@
 		    };
 		    const llm = {
 		      model: String(adminModelIdEl.value || '').trim(),
+		      timeout_s: Number(adminTimeoutSEl.value || 180),
 		      temperature: Number(adminTemperatureEl.value || 0.2),
 		      max_tokens: Number(adminMaxTokensEl.value || 800)
 		    };

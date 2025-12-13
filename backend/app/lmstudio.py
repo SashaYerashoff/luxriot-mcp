@@ -112,6 +112,7 @@ async def chat_completion(
     temperature: float = 0.2,
     max_tokens: int = 800,
     model: str | None = None,
+    timeout_s: float = 60.0,
 ) -> str:
     model_id = str(model).strip() if isinstance(model, str) and model.strip() else None
     if not model_id:
@@ -123,10 +124,12 @@ async def chat_completion(
         "max_tokens": max_tokens,
         "stream": False,
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s)) as client:
         try:
             resp = await client.post(f"{base_url}/v1/chat/completions", json=payload)
             resp.raise_for_status()
+        except httpx.TimeoutException as e:
+            raise LMStudioError(f"LM Studio request timed out after {timeout_s:.1f}s ({type(e).__name__}).") from e
         except httpx.HTTPError as e:
             detail = None
             if hasattr(e, "response") and e.response is not None:
@@ -134,7 +137,10 @@ async def chat_completion(
                     detail = e.response.text
                 except Exception:
                     detail = None
-            raise LMStudioError(f"LM Studio request failed: {e} {detail or ''}".strip()) from e
+            msg = str(e).strip() or repr(e)
+            raise LMStudioError(
+                f"LM Studio request failed ({type(e).__name__}): {msg} {detail or ''}".strip()
+            ) from e
 
         data = resp.json()
         try:

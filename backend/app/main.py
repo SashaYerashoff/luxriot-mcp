@@ -270,6 +270,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     llm_model_id = str(llm_model).strip() if isinstance(llm_model, str) else ""
     if not llm_model_id:
         llm_model_id = None
+    timeout_s = float(llm_cfg.get("timeout_s", 60.0) or 60.0)
     temperature = float(llm_cfg.get("temperature", 0.2))
     max_tokens = int(llm_cfg.get("max_tokens", 800))
 
@@ -346,6 +347,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout_s=timeout_s,
             model=llm_model_id,
         )
     except LMStudioError as e:
