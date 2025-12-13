@@ -1554,7 +1554,11 @@
 	    const body = document.createElement('div');
 	    body.className = 'content';
 	    if (role === 'assistant') {
-	      const augmented = augmentWithInlineScreenshots(content || '', images, 3);
+	      const raw = String(content || '');
+	      const hasDocCite = /\[\d{1,3}\]/.test(raw);
+	      wrap.dataset.hasDocCite = hasDocCite ? '1' : '0';
+
+	      const augmented = hasDocCite ? augmentWithInlineScreenshots(raw, images, 3) : { md: raw, inlined: false };
 	      body.innerHTML = renderMarkdown(augmented.md);
 	      wrap.dataset.inlineImages = augmented.inlined ? '1' : '0';
 	    } else {
@@ -1562,7 +1566,7 @@
 	    }
 	    wrap.appendChild(body);
 
-    if (Array.isArray(citations) && citations.length) {
+    if (wrap.dataset.hasDocCite === '1' && Array.isArray(citations) && citations.length) {
       const c = document.createElement('div');
       c.className = 'citations';
       const seen = new Set();
@@ -1582,7 +1586,7 @@
       wrap.appendChild(c);
     }
 
-	    if (Array.isArray(images) && images.length && wrap.dataset.inlineImages !== '1') {
+	    if (wrap.dataset.hasDocCite === '1' && Array.isArray(images) && images.length && wrap.dataset.inlineImages !== '1') {
 	      const g = document.createElement('div');
 	      g.className = 'thumb-grid';
 	      images.forEach((x) => {
