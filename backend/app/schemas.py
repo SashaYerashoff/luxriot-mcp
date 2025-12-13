@@ -31,12 +31,14 @@ class ImageResult(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     k: int = Field(default=8, ge=1, le=25)
+    debug: bool = False
 
 
 class SearchResponse(BaseModel):
     chunks: list[ChunkResult]
     citations: list[Citation]
     images: list[ImageResult]
+    debug: dict[str, Any] | None = None
 
 
 class ChatRequest(BaseModel):

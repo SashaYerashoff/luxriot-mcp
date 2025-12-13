@@ -135,6 +135,15 @@
       display:flex;
       flex-direction:column;
     }
+    #docsPanel.fullscreen{
+      left:24px;
+      right:24px;
+      top:24px;
+      bottom:24px;
+      transform:none;
+      width:auto;
+      max-height:none;
+    }
     .docs-grid{
       display:grid;
       grid-template-columns: 320px 1fr;
@@ -224,6 +233,52 @@
     .docsPage table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;}
     .docsPage th,.docsPage td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;}
     .docsPage th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
+
+    /* Retrieval debug modal viewport + internal scroll */
+    #debugPanel{
+      max-height:calc(100vh - 220px);
+      overflow:hidden;
+    }
+    #debugPanel.visible{
+      display:flex;
+      flex-direction:column;
+    }
+    .debug-body{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:4px 6px 10px;
+    }
+    .debug-grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:18px;
+      align-items:start;
+    }
+    .debug-results{
+      max-height:520px;
+      overflow:auto;
+      padding-right:10px;
+    }
+    .debug-row{
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      margin-bottom:10px;
+      background:rgba(16,17,19,.35);
+    }
+    .debug-row .top{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      font-size:12px;
+      color:var(--text);
+      opacity:.94;
+    }
+    .debug-kv{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5;}
+    .debug-kv .k{color:rgba(214,217,223,.78);}
+    .debug-snippet{margin-top:8px;font-size:12px;color:var(--text);opacity:.92;white-space:pre-wrap;}
 
     /* Redactor panel */
     .redactor-grid{
@@ -434,6 +489,9 @@
 
     <!-- NEW: Docs reader -->
     <div class="action" id="docsBtn" title="Documentation reader">📚</div>
+
+    <!-- NEW: Retrieval debug -->
+    <div class="action" id="debugBtn" title="Retrieval debug">🧪</div>
 
     <!-- NEW: Redactor panel toggle -->
     <div class="action" id="redactorBtn" title="Redactor / Annotations">✎</div>
@@ -739,6 +797,7 @@
         <div class="docs-toolbar">
           <div class="tiny muted" id="docsBreadcrumb">Select a page…</div>
           <div class="inline" style="justify-content:flex-end;">
+            <button class="btn ghost small" id="docsFullscreenBtn">FULL</button>
             <button class="btn ghost small" id="docsOpenRawBtn" disabled>OPEN RAW</button>
           </div>
         </div>
@@ -748,6 +807,53 @@
 
     <div class="admin-actions">
       <button class="btn primary" id="docsOkBtn">OK</button>
+    </div>
+  </div>
+
+  <!-- NEW: Retrieval debug panel -->
+  <div id="debugPanel" class="modal" role="dialog" aria-label="Retrieval debug">
+    <div class="modal-header">Retrieval debug:</div>
+
+    <div class="debug-body">
+      <div class="debug-grid">
+        <div class="card">
+          <h3>Query</h3>
+          <label>Query</label>
+          <textarea id="debugQuery" class="mono" style="height:120px;" placeholder="Type a question, then RUN."></textarea>
+
+          <div class="inline" style="margin-top:10px;">
+            <div style="flex:1;">
+              <label>k</label>
+              <input id="debugK" type="number" min="1" max="25" value="8"/>
+            </div>
+            <div style="flex:1;">
+              <label>&nbsp;</label>
+              <button class="btn small" id="debugRunBtn">RUN</button>
+            </div>
+          </div>
+
+          <div class="tiny muted" id="debugStatus" style="margin-top:10px;"></div>
+
+          <details class="err-details" style="margin-top:10px;">
+            <summary>Show settings snapshot</summary>
+            <pre id="debugSettings"></pre>
+          </details>
+        </div>
+
+        <div class="card">
+          <h3>Selected chunks (why)</h3>
+          <div id="debugResults" class="debug-results"></div>
+          <details class="err-details" style="margin-top:10px;">
+            <summary>Show raw JSON</summary>
+            <pre id="debugRaw"></pre>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-actions">
+      <button class="btn ghost" id="debugUseLastBtn">USE LAST</button>
+      <button class="btn primary" id="debugOkBtn">OK</button>
     </div>
   </div>
 
@@ -775,6 +881,7 @@
 
   let lastUserMessage = "User input";
   let lastAssistantMessage = "Hi Sasha, I am ready to assist and learn.";
+  let lastRetrievalPack = null; // last /docs/search response (may include debug)
 
   const annotations = []; // in-memory only
 
@@ -789,10 +896,12 @@
   const adminPanel = document.getElementById('adminPanel');
   const redactorPanel = document.getElementById('redactorPanel');
   const docsPanel = document.getElementById('docsPanel');
+  const debugPanel = document.getElementById('debugPanel');
 
   const toolsBtn = document.getElementById('toolsBtn');
   const topToolToggle = document.getElementById('topToolToggle');
   const docsBtn = document.getElementById('docsBtn');
+  const debugBtn = document.getElementById('debugBtn');
   const redactorBtn = document.getElementById('redactorBtn');
   const historyBtn = document.getElementById('historyBtn');
 
@@ -860,8 +969,20 @@
     const docsPageEl = document.getElementById('docsPage');
     const docsBreadcrumbEl = document.getElementById('docsBreadcrumb');
     const docsStatusEl = document.getElementById('docsStatus');
+    const docsFullscreenBtn = document.getElementById('docsFullscreenBtn');
     const docsOpenRawBtn = document.getElementById('docsOpenRawBtn');
     const docsOkBtn = document.getElementById('docsOkBtn');
+
+    // ---------- Retrieval debug UI ----------
+    const debugQueryEl = document.getElementById('debugQuery');
+    const debugKEl = document.getElementById('debugK');
+    const debugRunBtn = document.getElementById('debugRunBtn');
+    const debugUseLastBtn = document.getElementById('debugUseLastBtn');
+    const debugOkBtn = document.getElementById('debugOkBtn');
+    const debugStatusEl = document.getElementById('debugStatus');
+    const debugSettingsEl = document.getElementById('debugSettings');
+    const debugResultsEl = document.getElementById('debugResults');
+    const debugRawEl = document.getElementById('debugRaw');
 
 	  let adminBundle = null; // {defaults, settings, effective}
 	  let chatKDefault = 8;
@@ -1673,6 +1794,151 @@
     window.open(url, '_blank', 'noreferrer');
   });
 
+  function setDocsFullscreen(enabled) {
+    const on = Boolean(enabled);
+    docsPanel.classList.toggle('fullscreen', on);
+    if (docsFullscreenBtn) docsFullscreenBtn.textContent = on ? 'EXIT' : 'FULL';
+  }
+
+  docsFullscreenBtn?.addEventListener('click', () => {
+    setDocsFullscreen(!docsPanel.classList.contains('fullscreen'));
+  });
+
+  // ---------- Retrieval debug ----------
+  function setDebugStatus(text, { error = false } = {}) {
+    if (!debugStatusEl) return;
+    debugStatusEl.textContent = String(text || '');
+    debugStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
+  }
+
+  function fmt(n, digits = 4) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return '—';
+    return x.toFixed(digits);
+  }
+
+  function renderRetrievalDebug(pack) {
+    if (!debugResultsEl) return;
+    debugResultsEl.innerHTML = '';
+
+    if (debugRawEl) debugRawEl.textContent = JSON.stringify(pack || null, null, 2);
+    if (debugSettingsEl) {
+      debugSettingsEl.textContent = JSON.stringify(
+        { retrieval: adminBundle?.effective?.retrieval || null, llm: adminBundle?.effective?.llm || null },
+        null,
+        2
+      );
+    }
+
+    const dbg = pack?.debug;
+    if (!dbg) {
+      debugResultsEl.innerHTML = `<div class="tiny muted">No debug info returned. Run with debug enabled.</div>`;
+      return;
+    }
+
+    const chunks = Array.isArray(pack?.chunks) ? pack.chunks : [];
+    const selected = Array.isArray(dbg?.selected) ? dbg.selected : [];
+    const mmrTrace = Array.isArray(dbg?.mmr_trace) ? dbg.mmr_trace : [];
+    const mmrById = new Map();
+    mmrTrace.forEach((t) => { if (t?.chunk_id) mmrById.set(String(t.chunk_id), t); });
+
+    setDebugStatus(
+      `mode=${dbg.mode} k=${dbg.k} candidates=${dbg.candidates_count ?? '—'} mmr=${dbg?.mmr?.enabled ? 'on' : 'off'} expand=${dbg?.expand?.neighbors || 0}`,
+      { error: false }
+    );
+
+    selected.forEach((s, idx) => {
+      const row = document.createElement('div');
+      row.className = 'debug-row';
+
+      const top = document.createElement('div');
+      top.className = 'top';
+      const title = document.createElement('div');
+      const label = s?.page_id ? `${s.doc_id}/${s.page_id}` : (s?.chunk_id || `#${idx + 1}`);
+      title.textContent = `#${s?.rank ?? (idx + 1)} ${label}`;
+      top.appendChild(title);
+
+      const open = document.createElement('button');
+      open.className = 'btn ghost small';
+      open.textContent = 'OPEN';
+      open.addEventListener('click', () => {
+        if (!s?.doc_id || !s?.page_id) return;
+        openDocsReader({ doc_id: s.doc_id, page_id: s.page_id, anchor: null });
+      });
+      top.appendChild(open);
+      row.appendChild(top);
+
+      const kv = document.createElement('div');
+      kv.className = 'debug-kv';
+
+      const parts = [];
+      parts.push(`<span class="k">score</span>=${fmt(s?.returned_score ?? s?.score, 6)}`);
+      if (s?.rrf_base !== undefined) parts.push(`<span class="k">rrf</span>=${fmt(s.rrf_base, 6)}`);
+      if (s?.bm25?.rank) parts.push(`<span class="k">bm25</span>#${s.bm25.rank} (${fmt(s?.bm25?.score, 4)})`);
+      if (s?.embedding?.rank) parts.push(`<span class="k">emb</span>#${s.embedding.rank} (${fmt(s?.embedding?.score, 4)})`);
+      if (s?.doc_priority_mult) parts.push(`<span class="k">doc×</span>${fmt(s.doc_priority_mult, 3)}`);
+      if (s?.heading_mult) parts.push(`<span class="k">head×</span>${fmt(s.heading_mult, 3)}`);
+
+      const mmr = s?.chunk_id ? mmrById.get(String(s.chunk_id)) : null;
+      if (mmr) {
+        parts.push(`<span class="k">mmr</span>@${mmr.step} rel=${fmt(mmr.relevance, 3)} sim=${fmt(mmr.max_similarity, 3)} mmr=${fmt(mmr.mmr_score, 3)}`);
+      }
+      kv.innerHTML = parts.join(' · ');
+      row.appendChild(kv);
+
+      const chunk = chunks[idx];
+      if (chunk?.text) {
+        const details = document.createElement('details');
+        details.className = 'err-details';
+        const sum = document.createElement('summary');
+        sum.textContent = 'Show chunk text';
+        const pre = document.createElement('pre');
+        pre.textContent = String(chunk.text).slice(0, 2400);
+        details.appendChild(sum);
+        details.appendChild(pre);
+        row.appendChild(details);
+      }
+
+      debugResultsEl.appendChild(row);
+    });
+  }
+
+  async function runRetrievalDebug(query, k) {
+    const q = String(query || '').trim();
+    const kk = Math.max(1, Math.min(25, Number(k || 8)));
+    if (!q) {
+      setDebugStatus('Enter a query first.', { error: true });
+      return;
+    }
+    setDebugStatus('Running /docs/search (debug)…');
+    debugResultsEl.innerHTML = `<div class="tiny muted">Loading…</div>`;
+    try {
+      const pack = await apiJson('/docs/search', { method: 'POST', body: { query: q, k: kk, debug: true } });
+      lastRetrievalPack = pack;
+      renderRetrievalDebug(pack);
+      setDebugStatus('OK');
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDebugStatus(`Failed: ${raw}`, { error: true });
+      if (debugRawEl) debugRawEl.textContent = raw;
+    }
+  }
+
+  debugRunBtn?.addEventListener('click', () => runRetrievalDebug(debugQueryEl?.value, debugKEl?.value));
+  debugUseLastBtn?.addEventListener('click', () => {
+    if (lastRetrievalPack) {
+      renderRetrievalDebug(lastRetrievalPack);
+      return;
+    }
+    runRetrievalDebug(lastUserMessage, chatKDefault);
+  });
+  debugQueryEl?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      runRetrievalDebug(debugQueryEl.value, debugKEl?.value);
+    }
+  });
+
   async function refreshSessions() {
     historyList.innerHTML = `<div class="mini-item muted"><span class="slash">/</span> Loading…</div>`;
     try {
@@ -1759,7 +2025,8 @@
 
 	      // Real preflight search (for UX feedback + quick sanity).
 	      try {
-	        const search = await apiJson('/docs/search', { method: 'POST', body: { query: text, k } });
+	        const search = await apiJson('/docs/search', { method: 'POST', body: { query: text, k, debug: true } });
+	        lastRetrievalPack = search;
 	        const found = Array.isArray(search?.chunks) ? search.chunks.length : 0;
 	        setPendingStatus(`Found ${found} relevant sections. Generating answer (${modelId})…`);
 	      } catch (e) {
@@ -1801,6 +2068,7 @@
     adminPanel.classList.remove('visible');
     redactorPanel.classList.remove('visible');
     docsPanel.classList.remove('visible');
+    debugPanel.classList.remove('visible');
     overlay.classList.remove('visible');
     if (wasDocs && parseDocsHash()) {
       try {
@@ -1815,6 +2083,7 @@
     adminPanel.classList.remove('visible');
     redactorPanel.classList.remove('visible');
     docsPanel.classList.remove('visible');
+    debugPanel.classList.remove('visible');
 
     which.classList.add('visible');
     overlay.classList.add('visible');
@@ -1870,6 +2139,18 @@
     }
   });
 
+  debugBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (debugPanel.classList.contains('visible')) closeAllModals();
+    else {
+      openModal(debugPanel);
+      if (debugQueryEl) debugQueryEl.value = String(lastUserMessage || '').trim();
+      if (debugKEl) debugKEl.value = String(chatKDefault || 8);
+      if (lastRetrievalPack) renderRetrievalDebug(lastRetrievalPack);
+      else setDebugStatus('Tip: ask a question first, then USE LAST.', { error: false });
+    }
+  });
+
   overlay.addEventListener('click', () => closeAllModals());
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllModals(); });
 
@@ -1882,6 +2163,7 @@
 	  // Admin buttons (mock)
 	  document.getElementById('adminOkBtn').addEventListener('click', closeAllModals);
 	  docsOkBtn.addEventListener('click', closeAllModals);
+	  debugOkBtn.addEventListener('click', closeAllModals);
 	  document.getElementById('applyBtn').addEventListener('click', () => {
 	    applyAdminSettings();
 	    pulse(adminPanel);

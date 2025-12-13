@@ -247,7 +247,7 @@ def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageR
     return urls
 
 
-@app.post("/docs/search", response_model=SearchResponse)
+@app.post("/docs/search", response_model=SearchResponse, response_model_exclude_none=True)
 async def docs_search(req: SearchRequest) -> SearchResponse:
     if not search_engine.is_ready():
         log.error("Search index missing; run ingestion CLI to create datastore/%s/index.sqlite", DEFAULT_VERSION)
@@ -286,6 +286,7 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
 
     try:
+        debug: dict[str, Any] | None = {} if bool(getattr(req, "debug", False)) else None
         results = await search_engine.search(
             req.query,
             k=req.k,
@@ -306,6 +307,7 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
             doc_priority_boost=doc_priority_boost,
             max_per_page=max_per_page,
             max_per_doc=max_per_doc,
+            debug_out=debug,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -323,7 +325,7 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
     ]
     citations = _build_citations(results, DEFAULT_VERSION, max_citations=max_citations)
     images = _build_images(results, max_images=max_images)
-    return SearchResponse(chunks=chunks, citations=citations, images=images)
+    return SearchResponse(chunks=chunks, citations=citations, images=images, debug=debug)
 
 
 @app.post("/chat", response_model=ChatResponse)

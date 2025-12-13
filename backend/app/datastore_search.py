@@ -368,6 +368,7 @@ class SearchEngine:
         use_embeddings: bool,
         max_per_page: int,
         max_per_doc: int,
+        trace_out: list[dict[str, Any]] | None = None,
     ) -> list[tuple[str, float]]:
         if k <= 0:
             return []
@@ -480,12 +481,24 @@ class SearchEngine:
                     best_mmr = mmr_score
                     best_cid = cid
                     best_orig_score = orig_score
+                    best_relevance = relevance
+                    best_max_sim = float(max_sim) if selected_ids else 0.0
 
             if best_cid is None:
                 break
             selected.append((best_cid, float(best_orig_score)))
             selected_ids.append(best_cid)
             update_counts(best_cid)
+            if trace_out is not None:
+                trace_out.append(
+                    {
+                        "step": len(selected_ids),
+                        "chunk_id": best_cid,
+                        "relevance": float(best_relevance),
+                        "max_similarity": float(best_max_sim),
+                        "mmr_score": float(best_mmr),
+                    }
+                )
 
         return selected
 
@@ -642,6 +655,7 @@ class SearchEngine:
         doc_priority_boost: float = 0.0,
         max_per_page: int = 0,
         max_per_doc: int = 0,
+        debug_out: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         mode = (mode or "bm25").lower().strip()
         if mode not in ("bm25", "embedding", "hybrid"):
@@ -656,18 +670,53 @@ class SearchEngine:
             cand_limit = max(cand_limit, k)
         heading_boost = float(heading_boost or 0.0)
         query_terms_for_heading = {t for t in tokenize(query) if t not in _STOPWORDS}
+        want_debug = debug_out is not None
+        if want_debug:
+            debug_out.clear()
+            debug_out.update(
+                {
+                    "query": query,
+                    "mode": mode,
+                    "k": int(k),
+                    "doc_priority_boost": float(doc_priority_boost or 0.0),
+                    "heading_boost": float(heading_boost or 0.0),
+                    "doc_priority": list(doc_priority),
+                    "dedupe": {"max_per_page": int(max_per_page or 0), "max_per_doc": int(max_per_doc or 0)},
+                    "mmr": {
+                        "enabled": bool(mmr_enabled),
+                        "lambda": float(mmr_lambda),
+                        "candidates": int(cand_limit or 0),
+                        "use_embeddings": bool(mmr_use_embeddings),
+                    },
+                    "expand": {"neighbors": int(expand_neighbors or 0), "max_chars": int(expand_max_chars or 0)},
+                }
+            )
 
         if mode == "bm25":
             top, chunk_rows = self._bm25_rank(query, cand_limit if use_mmr and cand_limit else k)
-            adjusted = []
-            for cid, score in top:
+            adjusted: list[tuple[str, float]] = []
+            cand_debug: dict[str, dict[str, Any]] = {}
+            for rank, (cid, bm25_score) in enumerate(top, start=1):
                 row = chunk_rows.get(cid)
                 if not row:
                     continue
-                score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
-                score *= self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
-                adjusted.append((cid, score))
+                doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
+                score = float(bm25_score) * float(doc_mult) * float(heading_mult)
+                adjusted.append((cid, float(score)))
+                if want_debug:
+                    cand_debug[cid] = {
+                        "chunk_id": cid,
+                        "doc_id": row.doc_id,
+                        "page_id": row.page_id,
+                        "heading_path": row.heading_path,
+                        "score": float(score),
+                        "bm25": {"rank": int(rank), "score": float(bm25_score)},
+                        "doc_priority_mult": float(doc_mult),
+                        "heading_mult": float(heading_mult),
+                    }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
+            mmr_trace: list[dict[str, Any]] = []
             if use_mmr:
                 selected = self._mmr_select(
                     adjusted,
@@ -677,15 +726,33 @@ class SearchEngine:
                     use_embeddings=mmr_use_embeddings,
                     max_per_page=max_per_page,
                     max_per_doc=max_per_doc,
+                    trace_out=mmr_trace if want_debug else None,
                 )
             else:
                 selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
-            return self._rows_to_results(
+            results = self._rows_to_results(
                 selected,
                 chunk_rows,
                 expand_neighbors=int(expand_neighbors or 0),
                 expand_max_chars=int(expand_max_chars or 0),
             )
+            if want_debug:
+                debug_out["candidates_count"] = int(len(adjusted))
+                debug_out["candidates_top"] = [cand_debug[cid] for cid, _ in adjusted[: min(50, len(adjusted))] if cid in cand_debug]
+                debug_out["mmr_trace"] = mmr_trace
+                debug_out["selected"] = []
+                for i, r in enumerate(results, start=1):
+                    info = dict(cand_debug.get(r["chunk_id"], {}))
+                    info.update(
+                        {
+                            "rank": int(i),
+                            "returned_score": float(r.get("score", 0.0)),
+                            "text_chars": int(len(r.get("text") or "")),
+                            "images_count": int(len(r.get("images") or [])),
+                        }
+                    )
+                    debug_out["selected"].append(info)
+            return results
 
         if mode == "embedding":
             if not self.embeddings_ready():
@@ -695,15 +762,29 @@ class SearchEngine:
             top = await self._embedding_rank(query, k=max((cand_limit if use_mmr and cand_limit else k), 1))
             chunk_ids = [cid for cid, _ in top]
             chunk_rows = self._fetch_chunk_rows(chunk_ids)
-            adjusted = []
-            for cid, score in top:
+            adjusted: list[tuple[str, float]] = []
+            cand_debug: dict[str, dict[str, Any]] = {}
+            for rank, (cid, emb_score) in enumerate(top, start=1):
                 row = chunk_rows.get(cid)
                 if not row:
                     continue
-                score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
-                score *= self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
-                adjusted.append((cid, score))
+                doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
+                score = float(emb_score) * float(doc_mult) * float(heading_mult)
+                adjusted.append((cid, float(score)))
+                if want_debug:
+                    cand_debug[cid] = {
+                        "chunk_id": cid,
+                        "doc_id": row.doc_id,
+                        "page_id": row.page_id,
+                        "heading_path": row.heading_path,
+                        "score": float(score),
+                        "embedding": {"rank": int(rank), "score": float(emb_score)},
+                        "doc_priority_mult": float(doc_mult),
+                        "heading_mult": float(heading_mult),
+                    }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
+            mmr_trace: list[dict[str, Any]] = []
             if use_mmr:
                 selected = self._mmr_select(
                     adjusted,
@@ -713,15 +794,33 @@ class SearchEngine:
                     use_embeddings=mmr_use_embeddings,
                     max_per_page=max_per_page,
                     max_per_doc=max_per_doc,
+                    trace_out=mmr_trace if want_debug else None,
                 )
             else:
                 selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
-            return self._rows_to_results(
+            results = self._rows_to_results(
                 selected,
                 chunk_rows,
                 expand_neighbors=int(expand_neighbors or 0),
                 expand_max_chars=int(expand_max_chars or 0),
             )
+            if want_debug:
+                debug_out["candidates_count"] = int(len(adjusted))
+                debug_out["candidates_top"] = [cand_debug[cid] for cid, _ in adjusted[: min(50, len(adjusted))] if cid in cand_debug]
+                debug_out["mmr_trace"] = mmr_trace
+                debug_out["selected"] = []
+                for i, r in enumerate(results, start=1):
+                    info = dict(cand_debug.get(r["chunk_id"], {}))
+                    info.update(
+                        {
+                            "rank": int(i),
+                            "returned_score": float(r.get("score", 0.0)),
+                            "text_chars": int(len(r.get("text") or "")),
+                            "images_count": int(len(r.get("images") or [])),
+                        }
+                    )
+                    debug_out["selected"].append(info)
+            return results
 
         # hybrid
         if not self.embeddings_ready():
@@ -731,32 +830,60 @@ class SearchEngine:
 
         bm25_candidates = int(bm25_candidates or max(50, k))
         embedding_candidates = int(embedding_candidates or max(50, k))
+        if want_debug:
+            debug_out["hybrid"] = {
+                "rrf_k": int(rrf_k),
+                "bm25_weight": float(bm25_weight),
+                "embedding_weight": float(embedding_weight),
+                "bm25_candidates": int(bm25_candidates),
+                "embedding_candidates": int(embedding_candidates),
+            }
 
         bm25_top, _bm25_rows = self._bm25_rank(query, bm25_candidates)
         emb_top = await self._embedding_rank(query, embedding_candidates)
 
         bm25_rank = {cid: i + 1 for i, (cid, _) in enumerate(bm25_top)}
         emb_rank = {cid: i + 1 for i, (cid, _) in enumerate(emb_top)}
+        bm25_score = {cid: float(score) for cid, score in bm25_top}
+        emb_score = {cid: float(score) for cid, score in emb_top}
 
         candidate_ids = set(bm25_rank.keys()) | set(emb_rank.keys())
         chunk_rows = self._fetch_chunk_rows(list(candidate_ids))
 
         combined: list[tuple[str, float]] = []
+        cand_debug: dict[str, dict[str, Any]] = {}
         for cid in candidate_ids:
-            score = 0.0
+            base = 0.0
             r_b = bm25_rank.get(cid)
             r_e = emb_rank.get(cid)
             if r_b is not None:
-                score += float(bm25_weight) / float(rrf_k + r_b)
+                base += float(bm25_weight) / float(rrf_k + r_b)
             if r_e is not None:
-                score += float(embedding_weight) / float(rrf_k + r_e)
+                base += float(embedding_weight) / float(rrf_k + r_e)
             row = chunk_rows.get(cid)
+            doc_mult = 1.0
+            heading_mult = 1.0
             if row:
-                score *= self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
-                score *= self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
-            combined.append((cid, score))
+                doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
+                heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
+            score = float(base) * float(doc_mult) * float(heading_mult)
+            combined.append((cid, float(score)))
+            if want_debug and row:
+                cand_debug[cid] = {
+                    "chunk_id": cid,
+                    "doc_id": row.doc_id,
+                    "page_id": row.page_id,
+                    "heading_path": row.heading_path,
+                    "score": float(score),
+                    "rrf_base": float(base),
+                    "bm25": {"rank": int(r_b) if r_b is not None else None, "score": bm25_score.get(cid)},
+                    "embedding": {"rank": int(r_e) if r_e is not None else None, "score": emb_score.get(cid)},
+                    "doc_priority_mult": float(doc_mult),
+                    "heading_mult": float(heading_mult),
+                }
 
         combined.sort(key=lambda kv: (-kv[1], kv[0]))
+        mmr_trace: list[dict[str, Any]] = []
         if use_mmr:
             trimmed = combined[: (cand_limit if cand_limit else len(combined))]
             selected = self._mmr_select(
@@ -767,12 +894,30 @@ class SearchEngine:
                 use_embeddings=mmr_use_embeddings,
                 max_per_page=max_per_page,
                 max_per_doc=max_per_doc,
+                trace_out=mmr_trace if want_debug else None,
             )
         else:
             selected = self._apply_dedupe(combined, chunk_rows, k, max_per_page, max_per_doc)
-        return self._rows_to_results(
+        results = self._rows_to_results(
             selected,
             chunk_rows,
             expand_neighbors=int(expand_neighbors or 0),
             expand_max_chars=int(expand_max_chars or 0),
         )
+        if want_debug:
+            debug_out["candidates_count"] = int(len(combined))
+            debug_out["candidates_top"] = [cand_debug[cid] for cid, _ in combined[: min(50, len(combined))] if cid in cand_debug]
+            debug_out["mmr_trace"] = mmr_trace
+            debug_out["selected"] = []
+            for i, r in enumerate(results, start=1):
+                info = dict(cand_debug.get(r["chunk_id"], {}))
+                info.update(
+                    {
+                        "rank": int(i),
+                        "returned_score": float(r.get("score", 0.0)),
+                        "text_chars": int(len(r.get("text") or "")),
+                        "images_count": int(len(r.get("images") or [])),
+                    }
+                )
+                debug_out["selected"].append(info)
+        return results
