@@ -205,7 +205,7 @@ class SearchEngine:
             postings_by_term[term] = lst
 
         if not candidate_chunk_ids:
-            return []
+            return ([], {})
 
         chunk_rows = self._fetch_chunk_rows(list(candidate_chunk_ids))
         scores: dict[str, float] = {}
