@@ -88,7 +88,7 @@ def _job_defaults() -> dict[str, Any]:
         "version": DEFAULT_VERSION,
         "datastore_dir": str((DATASTORE_DIR / DEFAULT_VERSION).resolve()),
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
-        "embedding_max_chars": 512,
+        "embedding_max_chars": 448,
         "embedding_batch_size": 8,
     }
 
@@ -176,7 +176,7 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
         "--lmstudio-base-url",
         LMSTUDIO_BASE_URL,
         "--embedding-max-chars",
-        str(int(job.get("embedding_max_chars") or 512)),
+        str(int(job.get("embedding_max_chars") or 448)),
         "--embedding-batch-size",
         str(int(job.get("embedding_batch_size") or 8)),
         "--clean",

@@ -142,7 +142,21 @@ def html_to_markdown(
     # Copy and remap images.
     for img in main.select("img[src]"):
         src = str(img.get("src") or "").strip()
-        if not src or src.startswith("http") or src.startswith("data:"):
+        if not src:
+            img.decompose()
+            continue
+        if src.startswith("data:"):
+            # Help+Manual sometimes embeds large base64 images. Keep output deterministic and avoid
+            # polluting markdown/chunks with base64 blobs that break embedding backends.
+            alt = str(img.get("alt") or "").strip()
+            if alt:
+                span = soup.new_tag("span")
+                span.string = f"[Image: {alt}]"
+                img.replace_with(span)
+            else:
+                img.decompose()
+            continue
+        if src.startswith("http"):
             continue
         # normalize ./ prefix
         if src.startswith("./"):
@@ -508,7 +522,7 @@ def main() -> int:
     ap.add_argument("--version", type=str, default="evo_1_32", help="Version id used in /assets/{version}/ URLs")
     ap.add_argument("--lmstudio-base-url", type=str, default="http://localhost:1234", help="LM Studio base URL")
     ap.add_argument("--embedding-model", type=str, default="", help="Embedding model id (defaults to first embedding model from /v1/models)")
-    ap.add_argument("--embedding-max-chars", type=int, default=512, help="Max characters per chunk sent for embedding")
+    ap.add_argument("--embedding-max-chars", type=int, default=448, help="Max characters per chunk sent for embedding")
     ap.add_argument("--embedding-batch-size", type=int, default=8, help="How many chunks to embed per request (lower = more stable)")
     ap.add_argument("--no-embeddings", action="store_true", help="Skip computing embeddings")
     ap.add_argument("--clean", action="store_true", help="Delete existing out-dir before ingesting")

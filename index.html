@@ -577,7 +577,7 @@
 	          <span class="pill"><input id="adminIngestEmbeddings" type="checkbox" checked> embeddings</span>
 	          <div style="flex:1;min-width:160px;">
 	            <label style="margin:0 0 6px;">Emb max chars</label>
-	            <input id="adminEmbeddingMaxChars" type="number" min="256" max="8000" value="512"/>
+	            <input id="adminEmbeddingMaxChars" type="number" min="256" max="8000" value="448"/>
 	          </div>
 	          <div style="flex:1;min-width:120px;">
 	            <label style="margin:0 0 6px;">Emb batch</label>
@@ -1186,7 +1186,7 @@
 	      adminDocsDirEl.value = String(defaults.docs_dir || 'docs');
 	    }
 	    if (adminEmbeddingMaxCharsEl && !adminEmbeddingMaxCharsEl.value) {
-	      adminEmbeddingMaxCharsEl.value = String(job?.embedding_max_chars ?? defaults.embedding_max_chars ?? 512);
+	      adminEmbeddingMaxCharsEl.value = String(job?.embedding_max_chars ?? defaults.embedding_max_chars ?? 448);
 	    }
 	    if (adminEmbeddingBatchSizeEl && !adminEmbeddingBatchSizeEl.value) {
 	      adminEmbeddingBatchSizeEl.value = String(job?.embedding_batch_size ?? defaults.embedding_batch_size ?? 8);
@@ -1224,7 +1224,7 @@
 	  async function startReindex() {
 	    const docsDir = String(adminDocsDirEl?.value || '').trim();
 	    const computeEmb = Boolean(adminIngestEmbeddingsEl?.checked);
-	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 512);
+	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 448);
 	    const embBatch = Number(adminEmbeddingBatchSizeEl?.value || 8);
 
 	    if (!docsDir) {
