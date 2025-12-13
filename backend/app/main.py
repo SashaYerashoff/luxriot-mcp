@@ -266,6 +266,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
         doc_priority_str = ""
 
     llm_cfg = settings.get("llm") if isinstance(settings.get("llm"), dict) else {}
+    llm_model = llm_cfg.get("model")
+    llm_model_id = str(llm_model).strip() if isinstance(llm_model, str) else ""
+    if not llm_model_id:
+        llm_model_id = None
     temperature = float(llm_cfg.get("temperature", 0.2))
     max_tokens = int(llm_cfg.get("max_tokens", 800))
 
@@ -338,7 +342,12 @@ async def chat(req: ChatRequest) -> ChatResponse:
     messages.append({"role": "user", "content": req.message})
 
     try:
-        answer = await chat_completion(messages=messages, temperature=temperature, max_tokens=max_tokens)
+        answer = await chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model=llm_model_id,
+        )
     except LMStudioError as e:
         log.exception("LM Studio error")
         raise HTTPException(status_code=502, detail=str(e)) from e

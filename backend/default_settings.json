@@ -2,6 +2,7 @@
   "required_placeholders": ["context"],
   "system_prompt_template_file": "backend/prompts/system_prompt.md",
   "llm": {
+    "model": "",
     "temperature": 0.2,
     "max_tokens": 800
   },

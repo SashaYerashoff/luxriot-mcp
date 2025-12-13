@@ -415,13 +415,15 @@
 	        <div class="tiny muted" id="adminSaveHint" style="margin-top:8px;"></div>
 	      </div>
 	
-	      <div class="card">
-	        <h3>LLM</h3>
-	        <label>Temperature</label>
-	        <input id="adminTemperature" type="number" step="0.01" min="0" max="2" value="0.2"/>
-	        <label>Max tokens</label>
-	        <input id="adminMaxTokens" type="number" min="64" max="4096" value="800"/>
-	      </div>
+		      <div class="card">
+		        <h3>LLM</h3>
+		        <label>Model ID (optional; blank = auto)</label>
+		        <input id="adminModelId" type="text" placeholder="e.g. mistralai/ministral-3-3b"/>
+		        <label>Temperature</label>
+		        <input id="adminTemperature" type="number" step="0.01" min="0" max="2" value="0.2"/>
+		        <label>Max tokens</label>
+		        <input id="adminMaxTokens" type="number" min="64" max="4096" value="800"/>
+		      </div>
 	
 	      <div class="card">
 	        <h3>Notes</h3>
@@ -638,8 +640,9 @@
 		  const adminBm25CandidatesEl = document.getElementById('adminBm25Candidates');
 		  const adminEmbCandidatesEl = document.getElementById('adminEmbCandidates');
 
-	  const adminTemperatureEl = document.getElementById('adminTemperature');
-	  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
+		  const adminModelIdEl = document.getElementById('adminModelId');
+		  const adminTemperatureEl = document.getElementById('adminTemperature');
+		  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
 
 	  let adminBundle = null; // {defaults, settings, effective}
 	  let chatKDefault = 8;
@@ -696,9 +699,9 @@
 	    }
 
 	    adminBundle = await apiJson('/admin/settings');
-	    const effective = adminBundle.effective || {};
-	    const retrieval = effective.retrieval || {};
-	    const llm = effective.llm || {};
+		    const effective = adminBundle.effective || {};
+		    const retrieval = effective.retrieval || {};
+		    const llm = effective.llm || {};
 
 		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
 		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
@@ -714,8 +717,9 @@
 		    adminBm25CandidatesEl.value = retrieval?.hybrid?.bm25_candidates ?? 120;
 		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
 
-	    adminTemperatureEl.value = llm.temperature ?? 0.2;
-	    adminMaxTokensEl.value = llm.max_tokens ?? 800;
+		    adminModelIdEl.value = llm.model ?? '';
+		    adminTemperatureEl.value = llm.temperature ?? 0.2;
+		    adminMaxTokensEl.value = llm.max_tokens ?? 800;
 
 	    adminSystemPromptEl.value = effective.system_prompt_template || '';
 
@@ -726,8 +730,8 @@
 	  function applyDefaultsToForm() {
 	    if (!adminBundle?.defaults) return;
 	    const d = adminBundle.defaults;
-	    const retrieval = d.retrieval || {};
-	    const llm = d.llm || {};
+		    const retrieval = d.retrieval || {};
+		    const llm = d.llm || {};
 
 		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
 		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
@@ -743,8 +747,9 @@
 		    adminBm25CandidatesEl.value = retrieval?.hybrid?.bm25_candidates ?? 120;
 		    adminEmbCandidatesEl.value = retrieval?.hybrid?.embedding_candidates ?? 120;
 
-	    adminTemperatureEl.value = llm.temperature ?? 0.2;
-	    adminMaxTokensEl.value = llm.max_tokens ?? 800;
+		    adminModelIdEl.value = llm.model ?? '';
+		    adminTemperatureEl.value = llm.temperature ?? 0.2;
+		    adminMaxTokensEl.value = llm.max_tokens ?? 800;
 
 	    adminSystemPromptEl.value = d.system_prompt_template || '';
 	    adminSaveHintEl.textContent = 'Loaded defaults (not yet applied).';
@@ -778,10 +783,11 @@
 		      },
 		      doc_priority: _linesToList(adminDocPriorityEl.value)
 		    };
-	    const llm = {
-	      temperature: Number(adminTemperatureEl.value || 0.2),
-	      max_tokens: Number(adminMaxTokensEl.value || 800)
-	    };
+		    const llm = {
+		      model: String(adminModelIdEl.value || '').trim(),
+		      temperature: Number(adminTemperatureEl.value || 0.2),
+		      max_tokens: Number(adminMaxTokensEl.value || 800)
+		    };
 	    const payload = {
 	      settings: {
 	        system_prompt_template: tmpl,

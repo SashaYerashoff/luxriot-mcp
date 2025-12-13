@@ -111,8 +111,11 @@ async def chat_completion(
     base_url: str = LMSTUDIO_BASE_URL,
     temperature: float = 0.2,
     max_tokens: int = 800,
+    model: str | None = None,
 ) -> str:
-    model_id = await get_model_id(base_url)
+    model_id = str(model).strip() if isinstance(model, str) and model.strip() else None
+    if not model_id:
+        model_id = await get_model_id(base_url)
     payload = {
         "model": model_id,
         "messages": messages,
