@@ -160,6 +160,7 @@ Image preservation rule:
 Notes:
 - LM Studio `/v1/embeddings` can return intermittent `400 {"error":"Model has unloaded or crashed.."}` for some doc strings.
 - The ingester uses deterministic text normalization (H3/table markdown cleanup) plus bounded truncation / bag-of-words fallback to ensure ingestion completes; it logs when fallbacks are used.
+- Default reindex knobs are conservative for stability: `embedding_max_chars=512`, `embedding_batch_size=8` (adjustable in Admin Tools → Docs).
 
 Image selection policy:
 - cap per answer (3–6)

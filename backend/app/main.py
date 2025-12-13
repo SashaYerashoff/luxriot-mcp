@@ -88,6 +88,8 @@ def _job_defaults() -> dict[str, Any]:
         "version": DEFAULT_VERSION,
         "datastore_dir": str((DATASTORE_DIR / DEFAULT_VERSION).resolve()),
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
+        "embedding_max_chars": 512,
+        "embedding_batch_size": 8,
     }
 
 
@@ -174,7 +176,9 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
         "--lmstudio-base-url",
         LMSTUDIO_BASE_URL,
         "--embedding-max-chars",
-        str(int(job.get("embedding_max_chars") or 4000)),
+        str(int(job.get("embedding_max_chars") or 512)),
+        "--embedding-batch-size",
+        str(int(job.get("embedding_batch_size") or 8)),
         "--clean",
     ]
     if not bool(job.get("compute_embeddings", True)):
@@ -301,6 +305,7 @@ async def admin_reindex_start(req: ReindexRequest) -> ReindexStatusResponse:
             "version": DEFAULT_VERSION,
             "compute_embeddings": bool(req.compute_embeddings),
             "embedding_max_chars": int(req.embedding_max_chars),
+            "embedding_batch_size": int(req.embedding_batch_size),
             "started_at": _utc_now(),
             "updated_at": _utc_now(),
             "doc_total": int(doc_total),

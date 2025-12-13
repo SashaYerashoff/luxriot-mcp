@@ -7,6 +7,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import time
 import unicodedata
 from collections import Counter
 from array import array
@@ -169,8 +170,43 @@ def html_to_markdown(
     return md_page, images
 
 
+def _split_long_block(text: str, max_chars: int) -> list[str]:
+    s = (text or "").strip()
+    if not s:
+        return []
+    if max_chars <= 0 or len(s) <= max_chars:
+        return [s]
+
+    out: list[str] = []
+    while s:
+        if len(s) <= max_chars:
+            out.append(s)
+            break
+
+        cut = max_chars
+        # Prefer splitting at a newline near the end (keeps lists/images intact),
+        # then whitespace; fall back to a hard cut.
+        nl = s.rfind("\n", int(max_chars * 0.6), max_chars)
+        if nl != -1:
+            cut = nl
+        else:
+            sp = s.rfind(" ", int(max_chars * 0.6), max_chars)
+            if sp != -1:
+                cut = sp
+
+        part = s[:cut].rstrip()
+        if part:
+            out.append(part)
+        s = s[cut:].lstrip()
+
+    return out
+
+
 def chunk_markdown(md_text: str, max_chars: int = 1400) -> list[dict[str, Any]]:
-    parts = [p.strip() for p in md_text.split("\n\n") if p.strip()]
+    raw_parts = [p.strip() for p in md_text.split("\n\n") if p.strip()]
+    parts: list[str] = []
+    for p in raw_parts:
+        parts.extend(_split_long_block(p, max_chars=max_chars))
     chunks: list[dict[str, Any]] = []
     buf: list[str] = []
 
@@ -261,11 +297,26 @@ def _detect_embedding_model_id(base_url: str) -> str:
 
 def _embed_texts(base_url: str, model_id: str, texts: list[str]) -> list[list[float]]:
     payload = {"model": model_id, "input": texts}
-    resp = httpx.post(f"{base_url}/v1/embeddings", json=payload, timeout=60.0)
-    try:
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"Embeddings HTTP {resp.status_code}: {resp.text[:1000]}") from e
+
+    for attempt in range(1, 4):
+        try:
+            resp = httpx.post(f"{base_url}/v1/embeddings", json=payload, timeout=60.0)
+            break
+        except httpx.RequestError as e:
+            if attempt >= 3:
+                raise RuntimeError(f"Embeddings request failed: {e}") from e
+            time.sleep(0.3 * attempt)
+    else:
+        raise RuntimeError("Embeddings request failed after retries")
+
+    if resp.status_code >= 400:
+        body = ""
+        try:
+            body = resp.text
+        except Exception:
+            body = ""
+        raise RuntimeError(f"Embeddings HTTP {resp.status_code}: {body[:1000]}")
+
     data = resp.json()
     items = data.get("data") or []
     if len(items) != len(texts):
@@ -354,7 +405,9 @@ def _prepare_embedding_variants(text: str, max_chars: int) -> list[tuple[str, st
     if collapsed_ws and collapsed_ws != base:
         variants.append(("collapsed_ws", collapsed_ws))
 
-    for n in (512, 480, 456, 448, 416, 400, 384, 352, 320, 288, 256):
+    # Some local embedding backends are brittle for certain input lengths.
+    # Prefer trying a few deterministic truncation sizes that preserve context.
+    for n in (1280, 1200, 1100, 1024, 896, 832, 768, 704, 640, 576, 512, 448, 384, 320, 256):
         if len(base) > n:
             variants.append((f"truncate_{n}", base[:n]))
 
@@ -410,7 +463,7 @@ def _embed_texts_resilient(
         return " ".join(bag)
 
     batch_fallbacks: list[tuple[str, list[str]]] = []
-    for n in (512, 448, 384, 320, 256):
+    for n in (1280, 1024, 896, 768, 640, 576, 512, 448, 384, 320, 256):
         batch_fallbacks.append((f"truncate_{n}", [t[:n] for t in prepared]))
     batch_fallbacks.append(("collapsed_ws", [" ".join(t.split()) for t in prepared]))
     batch_fallbacks.append(("bag_of_words", [bag_of_words(t) for t in prepared]))
@@ -455,7 +508,8 @@ def main() -> int:
     ap.add_argument("--version", type=str, default="evo_1_32", help="Version id used in /assets/{version}/ URLs")
     ap.add_argument("--lmstudio-base-url", type=str, default="http://localhost:1234", help="LM Studio base URL")
     ap.add_argument("--embedding-model", type=str, default="", help="Embedding model id (defaults to first embedding model from /v1/models)")
-    ap.add_argument("--embedding-max-chars", type=int, default=4000, help="Max characters per chunk sent for embedding")
+    ap.add_argument("--embedding-max-chars", type=int, default=512, help="Max characters per chunk sent for embedding")
+    ap.add_argument("--embedding-batch-size", type=int, default=8, help="How many chunks to embed per request (lower = more stable)")
     ap.add_argument("--no-embeddings", action="store_true", help="Skip computing embeddings")
     ap.add_argument("--clean", action="store_true", help="Delete existing out-dir before ingesting")
     args = ap.parse_args()
@@ -466,6 +520,7 @@ def main() -> int:
     lmstudio_base_url: str = str(args.lmstudio_base_url).rstrip("/")
     embedding_model: str = str(args.embedding_model).strip()
     embedding_max_chars: int = int(args.embedding_max_chars)
+    embedding_batch_size: int = max(1, int(args.embedding_batch_size))
     compute_embeddings: bool = not bool(args.no_embeddings)
 
     if not docs_dir.exists():
@@ -638,12 +693,14 @@ def main() -> int:
 
             if compute_embeddings:
                 embedding_model_id = embedding_model or _detect_embedding_model_id(lmstudio_base_url)
-                log(f"Computing embeddings via {lmstudio_base_url} model={embedding_model_id} ...")
+                log(
+                    f"Computing embeddings via {lmstudio_base_url} model={embedding_model_id} "
+                    f"(batch={embedding_batch_size}, max_chars={embedding_max_chars}) ..."
+                )
 
-                emb_batch = 32
                 rows: list[tuple[str, int, bytes]] = []
-                for i in range(0, len(chunk_id_text), emb_batch):
-                    batch = chunk_id_text[i : i + emb_batch]
+                for i in range(0, len(chunk_id_text), embedding_batch_size):
+                    batch = chunk_id_text[i : i + embedding_batch_size]
                     ids = [x[0] for x in batch]
                     raw_texts = [x[1] for x in batch]
                     try:
@@ -657,7 +714,7 @@ def main() -> int:
                     except Exception as e:
                         max_len = max((len(t) for t in raw_texts), default=0)
                         raise RuntimeError(
-                            f"Embedding request failed at batch {i//emb_batch + 1} (max_chars={max_len}): {e}"
+                            f"Embedding request failed at batch {i//embedding_batch_size + 1} (max_chars={max_len}): {e}"
                         ) from e
 
                     if embedding_dim is None:
@@ -688,6 +745,7 @@ def main() -> int:
                     ("embedding_model_id", str(embedding_model_id or "")),
                     ("embedding_dim", str(int(embedding_dim or 0))),
                     ("embedding_max_chars", str(int(embedding_max_chars))),
+                    ("embedding_batch_size", str(int(embedding_batch_size))),
                 ],
             )
     except Exception as e:

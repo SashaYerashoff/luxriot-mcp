@@ -111,7 +111,8 @@ class AdminSettingsResponse(BaseModel):
 class ReindexRequest(BaseModel):
     docs_dir: str | None = None
     compute_embeddings: bool = True
-    embedding_max_chars: int = Field(default=4000, ge=256, le=8000)
+    embedding_max_chars: int = Field(default=512, ge=256, le=8000)
+    embedding_batch_size: int = Field(default=8, ge=1, le=64)
 
 
 class ReindexJob(BaseModel):
@@ -122,6 +123,7 @@ class ReindexJob(BaseModel):
     version: str
     compute_embeddings: bool
     embedding_max_chars: int
+    embedding_batch_size: int
     pid: int | None = None
     build_dir: str | None = None
     started_at: str

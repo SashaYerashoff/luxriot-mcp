@@ -575,9 +575,13 @@
 	        <input id="adminDocsDir" type="text" placeholder="/path/to/docs"/>
 	        <div class="inline" style="margin-top:8px;">
 	          <span class="pill"><input id="adminIngestEmbeddings" type="checkbox" checked> embeddings</span>
-	          <div style="flex:1;min-width:180px;">
+	          <div style="flex:1;min-width:160px;">
 	            <label style="margin:0 0 6px;">Emb max chars</label>
-	            <input id="adminEmbeddingMaxChars" type="number" min="256" max="8000" value="4000"/>
+	            <input id="adminEmbeddingMaxChars" type="number" min="256" max="8000" value="512"/>
+	          </div>
+	          <div style="flex:1;min-width:120px;">
+	            <label style="margin:0 0 6px;">Emb batch</label>
+	            <input id="adminEmbeddingBatchSize" type="number" min="1" max="64" value="8"/>
 	          </div>
 	        </div>
 	        <div class="inline" style="margin-top:10px;">
@@ -1073,6 +1077,7 @@
 	  const adminDocsDirEl = document.getElementById('adminDocsDir');
 	  const adminIngestEmbeddingsEl = document.getElementById('adminIngestEmbeddings');
 	  const adminEmbeddingMaxCharsEl = document.getElementById('adminEmbeddingMaxChars');
+	  const adminEmbeddingBatchSizeEl = document.getElementById('adminEmbeddingBatchSize');
 	  const adminReindexBtnEl = document.getElementById('adminReindexBtn');
 	  const adminReindexRefreshBtnEl = document.getElementById('adminReindexRefreshBtn');
 	  const adminReindexStatusEl = document.getElementById('adminReindexStatus');
@@ -1181,7 +1186,10 @@
 	      adminDocsDirEl.value = String(defaults.docs_dir || 'docs');
 	    }
 	    if (adminEmbeddingMaxCharsEl && !adminEmbeddingMaxCharsEl.value) {
-	      adminEmbeddingMaxCharsEl.value = String(job?.embedding_max_chars ?? 4000);
+	      adminEmbeddingMaxCharsEl.value = String(job?.embedding_max_chars ?? defaults.embedding_max_chars ?? 512);
+	    }
+	    if (adminEmbeddingBatchSizeEl && !adminEmbeddingBatchSizeEl.value) {
+	      adminEmbeddingBatchSizeEl.value = String(job?.embedding_batch_size ?? defaults.embedding_batch_size ?? 8);
 	    }
 
 	    if (adminReindexStatusEl) {
@@ -1216,7 +1224,8 @@
 	  async function startReindex() {
 	    const docsDir = String(adminDocsDirEl?.value || '').trim();
 	    const computeEmb = Boolean(adminIngestEmbeddingsEl?.checked);
-	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 4000);
+	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 512);
+	    const embBatch = Number(adminEmbeddingBatchSizeEl?.value || 8);
 
 	    if (!docsDir) {
 	      if (adminReindexStatusEl) adminReindexStatusEl.textContent = 'Set docs folder path first.';
@@ -1228,7 +1237,7 @@
 	    try {
 	      const payload = await apiJson('/admin/reindex', {
 	        method: 'POST',
-	        body: { docs_dir: docsDir, compute_embeddings: computeEmb, embedding_max_chars: embMax }
+	        body: { docs_dir: docsDir, compute_embeddings: computeEmb, embedding_max_chars: embMax, embedding_batch_size: embBatch }
 	      });
 	      renderReindexStatus(payload);
 	      fetchReindexStatus().catch(() => {});
