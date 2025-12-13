@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from . import app_db
-from .config import DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL
+from .config import DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
 from .datastore_search import SearchEngine
 from .docs_store import DocsStore
 from .lmstudio import LMStudioError, chat_completion
@@ -78,6 +78,19 @@ def health() -> dict[str, Any]:
         "retrieval_mode": retrieval_mode,
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
     }
+
+
+@app.get("/")
+def ui_root() -> FileResponse:
+    index_path = REPO_ROOT / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="UI not found (missing index.html at repo root)")
+    return FileResponse(str(index_path), media_type="text/html")
+
+
+@app.get("/index.html")
+def ui_index() -> FileResponse:
+    return ui_root()
 
 
 @app.get("/admin/settings", response_model=AdminSettingsResponse)

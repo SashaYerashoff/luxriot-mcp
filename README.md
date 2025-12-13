@@ -19,7 +19,13 @@ python3 backend/cli/ingest_evo_1_32.py --docs-dir docs --out-dir datastore/evo_1
 uvicorn backend.app.main:app --reload --port 8000
 ```
 
-3) Open `frontend-mock.html` in your browser (it calls `http://localhost:8000`).
+3) Open `http://localhost:8000/` in your browser.
+
+To serve on your LAN, run:
+
+```bash
+uvicorn backend.app.main:app --host 0.0.0.0 --reload --port 8000
+```
 
 ## Environment variables
 

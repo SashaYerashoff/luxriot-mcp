@@ -912,7 +912,9 @@
 
 <script>
   // ---------- Backend wiring ----------
-  const apiBase = (new URLSearchParams(location.search).get('api') || 'http://localhost:8000').replace(/\/$/, '');
+  const apiParam = new URLSearchParams(location.search).get('api');
+  const defaultApiBase = (location.protocol === 'file:' ? 'http://localhost:8000' : location.origin);
+  const apiBase = (apiParam || defaultApiBase).replace(/\/$/, '');
 
   // "conversation" state (also used by the redactor UI)
   const session = {

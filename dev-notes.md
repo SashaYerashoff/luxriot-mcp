@@ -6,7 +6,7 @@ Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 document
 ## Current status (repo reality)
 - **Backend (FastAPI)**: implemented and working (`/health`, `/docs/search`, `/chat`, sessions/messages, assets).
 - **Ingestion CLI**: implemented (`backend/cli/ingest_evo_1_32.py`) → builds `datastore/evo_1_32/` incl. **embeddings**.
-- **Frontend**: wired (`frontend-mock.html`) to backend APIs; renders answers, citations, screenshots; shows raw errors.
+- **Frontend**: wired (`index.html`) to backend APIs; renders answers, citations, screenshots; shows raw errors.
 - **MCP server**: implemented (`mcp-server/`) exposing `luxriot_docs_query`.
 - **Prompt transparency**: **no hardcoded prompts in service code**. System prompt is stored in **settings** and editable via Admin Tools panel.
 - **Retrieval**: BM25 + embeddings + **hybrid (RRF)**, plus deterministic consistency helpers:
@@ -23,7 +23,7 @@ Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 document
 ---
 
 ## Definition of Done (end-of-day working)
-1. **Frontend**: `frontend-mock.html` is wired to backend APIs (no mocked successes; show honest errors).
+1. **Frontend**: `index.html` is wired to backend APIs (no mocked successes; show honest errors).
 2. **Docs ingestion**: a CLI ingests **Help+Manual HTML export + relative images** for **6 guides**, converts to **Markdown**, builds an index.
 3. **Retrieval**: query returns a **context pack**: top chunks + citations + a capped set of image refs (e.g., 3–6).
 4. **Model call**: LM Studio at `http://localhost:1234` is used as the LLM endpoint; answers are produced using retrieved context and include citations.
@@ -56,7 +56,7 @@ Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 document
 - Expose MCP tools to LM Studio (stdio or http as supported by LM Studio).
 - Primary tool:
   - `luxriot_docs_query({ query, k })` → calls backend `/docs/search` → returns chunks + citations + image URLs.
-- Optional tools later: fetch_url, ddg_search, wiki, etc.
+- Web tools: `duckduckgo_search({ query, k })`, `fetch_url({ url, ... })` (public web scraping + fetch).
 
 ### C) Frontend (HTML now, can migrate later)
 - Keep your current mock.
@@ -70,7 +70,7 @@ Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 document
 ## Folder layout proposal (inside `luxriot-mcp/`)
 ```
 luxriot-mcp/
-  frontend-mock.html
+  index.html
   docs/                         # input: Help+Manual export(s) for Evo 1.32 (6 guide folders)
   datastore/
     evo_1_32/
