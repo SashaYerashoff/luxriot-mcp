@@ -12,13 +12,13 @@ from urllib.parse import quote_plus
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from . import app_db
 from .config import DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
 from .datastore_search import SearchEngine
 from .docs_store import DocsStore
-from .lmstudio import LMStudioError, chat_completion
+from .lmstudio import LMStudioError, chat_completion, chat_completion_stream
 from .logging_utils import get_logger
 from .prompting import PromptTemplateError, render_template
 from .settings import SettingsError, ensure_defaults, get_settings_bundle, update_settings
@@ -794,6 +794,313 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
     app_db.insert_message(session_id=session_id, role="assistant", content=answer)
     return ChatResponse(answer=answer, citations=citations, images=images, web_sources=web_sources, session_id=session_id)
+
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest) -> StreamingResponse:
+    if not search_engine.is_ready():
+        log.error("Chat requested but index missing; run ingestion CLI.")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Search index not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+        )
+
+    session = None
+    if req.session_id:
+        session = app_db.get_session(req.session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session_id = req.session_id
+    else:
+        session = app_db.create_session(title=req.message[:60])
+        session_id = session["session_id"]
+
+    settings = get_settings_bundle()["effective"]
+    required_placeholders = settings.get("required_placeholders")
+    if not isinstance(required_placeholders, list):
+        required_placeholders = ["context"]
+
+    template = settings.get("system_prompt_template")
+    if not isinstance(template, str) or not template.strip():
+        raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
+
+    retrieval_cfg = settings.get("retrieval") if isinstance(settings.get("retrieval"), dict) else {}
+    retrieval_mode = str(retrieval_cfg.get("mode", "bm25"))
+    doc_priority = retrieval_cfg.get("doc_priority")
+    if isinstance(doc_priority, list):
+        doc_priority_str = ", ".join(str(x) for x in doc_priority)
+    else:
+        doc_priority_str = ""
+
+    llm_cfg = settings.get("llm") if isinstance(settings.get("llm"), dict) else {}
+    llm_model = llm_cfg.get("model")
+    llm_model_id = str(llm_model).strip() if isinstance(llm_model, str) else ""
+    if not llm_model_id:
+        llm_model_id = None
+    timeout_s = float(llm_cfg.get("timeout_s", 60.0) or 60.0)
+    temperature = float(llm_cfg.get("temperature", 0.2))
+    max_tokens = int(llm_cfg.get("max_tokens", 800))
+
+    history = app_db.list_messages(session_id, limit=20)
+    app_db.insert_message(session_id=session_id, role="user", content=req.message)
+
+    doc_priority_list = [str(x) for x in doc_priority] if isinstance(doc_priority, list) else []
+    doc_priority_boost = float(retrieval_cfg.get("doc_priority_boost", 0.0) or 0.0)
+    heading_boost = float(retrieval_cfg.get("heading_boost", 0.0) or 0.0)
+    dedupe = retrieval_cfg.get("dedupe") if isinstance(retrieval_cfg.get("dedupe"), dict) else {}
+    max_per_page = int(dedupe.get("max_per_page", 0) or 0)
+    max_per_doc = int(dedupe.get("max_per_doc", 0) or 0)
+    hybrid = retrieval_cfg.get("hybrid") if isinstance(retrieval_cfg.get("hybrid"), dict) else {}
+    bm25_candidates = int(hybrid.get("bm25_candidates", 0) or 0) or None
+    embedding_candidates = int(hybrid.get("embedding_candidates", 0) or 0) or None
+    rrf_k = int(hybrid.get("rrf_k", 60) or 60)
+    bm25_weight = float(hybrid.get("bm25_weight", 1.0) or 1.0)
+    embedding_weight = float(hybrid.get("embedding_weight", 1.0) or 1.0)
+
+    mmr = retrieval_cfg.get("mmr") if isinstance(retrieval_cfg.get("mmr"), dict) else {}
+    mmr_enabled = bool(mmr.get("enabled", False))
+    mmr_lambda = float(mmr.get("lambda", 0.7) or 0.7)
+    mmr_candidates = int(mmr.get("candidates", 0) or 0) or None
+    mmr_use_embeddings = bool(mmr.get("use_embeddings", True))
+
+    expand = retrieval_cfg.get("expand") if isinstance(retrieval_cfg.get("expand"), dict) else {}
+    expand_neighbors = int(expand.get("neighbors", 0) or 0)
+    expand_max_chars = int(expand.get("max_chars", 0) or 0)
+
+    def sse(event: str, data: Any) -> bytes:
+        if isinstance(data, str):
+            payload = data
+        else:
+            payload = json.dumps(data, ensure_ascii=False)
+        return f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
+
+    async def gen() -> Any:
+        try:
+            yield sse("status", {"phase": "starting", "session_id": session_id})
+
+            yield sse(
+                "status",
+                {
+                    "phase": "retrieving_docs",
+                    "message": f"Searching documentation ({retrieval_mode})…",
+                    "k": int(req.k),
+                },
+            )
+            try:
+                async with _search_lock:
+                    retrieval = await search_engine.search(
+                        req.message,
+                        k=req.k,
+                        mode=retrieval_mode,
+                        mmr_enabled=mmr_enabled,
+                        mmr_lambda=mmr_lambda,
+                        mmr_candidates=mmr_candidates,
+                        mmr_use_embeddings=mmr_use_embeddings,
+                        expand_neighbors=expand_neighbors,
+                        expand_max_chars=expand_max_chars,
+                        heading_boost=heading_boost,
+                        bm25_candidates=bm25_candidates,
+                        embedding_candidates=embedding_candidates,
+                        rrf_k=rrf_k,
+                        bm25_weight=bm25_weight,
+                        embedding_weight=embedding_weight,
+                        doc_priority=doc_priority_list,
+                        doc_priority_boost=doc_priority_boost,
+                        max_per_page=max_per_page,
+                        max_per_doc=max_per_doc,
+                    )
+            except ValueError as e:
+                yield sse("error", {"error": "Bad request", "detail": str(e)})
+                return
+            except RuntimeError as e:
+                yield sse("error", {"error": "Search unavailable", "detail": str(e)})
+                return
+
+            yield sse(
+                "status",
+                {
+                    "phase": "retrieved_docs",
+                    "message": f"Found {len(retrieval)} relevant sections.",
+                    "found": int(len(retrieval)),
+                },
+            )
+
+            web_cfg = settings.get("web") if isinstance(settings.get("web"), dict) else {}
+            web_enabled = bool(web_cfg.get("enabled", False))
+            web_timeout_s = float(web_cfg.get("timeout_s", 15) or 15)
+            web_max_bytes = int(web_cfg.get("max_bytes", 1_000_000) or 1_000_000)
+            web_max_chars = int(web_cfg.get("max_chars", 20_000) or 20_000)
+            web_max_urls = int(web_cfg.get("max_urls_per_message", 2) or 2)
+            web_search_k = int(web_cfg.get("search_k", 5) or 5)
+
+            web_context_blocks: list[str] = []
+            web_sources: list[WebSource] = []
+            if web_enabled:
+                urls = extract_urls(req.message, max_urls=web_max_urls)
+                search_q = parse_search_query(req.message)
+                if urls:
+                    yield sse("status", {"phase": "fetching_web", "message": f"Fetching {len(urls)} URL(s)…"})
+                    tasks = [
+                        fetch_url(u, timeout_s=web_timeout_s, max_bytes=web_max_bytes, max_chars=web_max_chars)
+                        for u in urls
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for u, res in zip(urls, results):
+                        if isinstance(res, Exception):
+                            detail = str(res).strip() or repr(res)
+                            web_context_blocks.append(f"[W{len(web_context_blocks)+1}] ERROR fetching {u}: {detail}")
+                            web_sources.append(WebSource(kind="fetch", url=u, error=detail))
+                            continue
+                        title = f" | {res.title}" if getattr(res, "title", None) else ""
+                        web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {res.final_url}{title}\n{res.text}")
+                        web_sources.append(
+                            WebSource(
+                                kind="fetch",
+                                url=u,
+                                final_url=str(res.final_url),
+                                title=getattr(res, "title", None),
+                                status=int(getattr(res, "status", 0) or 0) or None,
+                                truncated=bool(getattr(res, "truncated", False)),
+                            )
+                        )
+                elif search_q:
+                    yield sse("status", {"phase": "searching_web", "message": f"Searching the web ({web_search_k})…"})
+                    ddg_query_url = "https://html.duckduckgo.com/html/?q=" + quote_plus(search_q)
+                    try:
+                        found = await duckduckgo_search(
+                            search_q, k=web_search_k, timeout_s=web_timeout_s, max_bytes=web_max_bytes
+                        )
+                    except WebToolError as e:
+                        err = str(e)
+                        web_context_blocks.append(f"[W{len(web_context_blocks)+1}] ERROR web search: {err}")
+                        web_sources.append(WebSource(kind="search", url=ddg_query_url, error=err))
+                        found = []
+                    if found:
+                        for r in found:
+                            title = str(r.get("title") or "").strip()
+                            url = str(r.get("url") or "").strip()
+                            snippet = str(r.get("snippet") or "").strip()
+                            if not url:
+                                continue
+                            title_part = f" | {title}" if title else ""
+                            snippet_part = f"\n{snippet}" if snippet else ""
+                            web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {url}{title_part}{snippet_part}")
+                            web_sources.append(
+                                WebSource(kind="search", url=url, title=title or None, snippet=snippet or None)
+                            )
+
+            max_citations = int(retrieval_cfg.get("max_citations", 8))
+            max_images = int(retrieval_cfg.get("max_images", 6))
+            citations = _build_citations(retrieval, DEFAULT_VERSION, max_citations=max_citations)
+            images = _build_images(retrieval, max_images=max_images)
+
+            retrieval_pack = SearchResponse(
+                chunks=[
+                    {
+                        "doc_id": r["doc_id"],
+                        "page_id": r["page_id"],
+                        "heading_path": r["heading_path"],
+                        "text": r["text"],
+                        "score": r["score"],
+                    }
+                    for r in retrieval
+                ],
+                citations=citations,
+                images=images,
+            ).model_dump()
+            retrieval_pack["meta"] = {
+                "docs_version": DEFAULT_VERSION,
+                "retrieval_mode": retrieval_mode,
+                "k": int(req.k),
+                "web_enabled": bool(web_enabled),
+            }
+            if web_sources:
+                retrieval_pack["web_sources"] = [ws.model_dump() for ws in web_sources]
+            yield sse("retrieval", retrieval_pack)
+
+            context_blocks: list[str] = []
+            for i, r in enumerate(retrieval, start=1):
+                hp = " > ".join(r.get("heading_path") or [])
+                source = f"{r['doc_id']}/{r['page_id']}"
+                context_blocks.append(f"[{i}] {source} | {hp}\n{r['text']}")
+
+            if web_context_blocks:
+                context_blocks.append("EXTERNAL WEB CONTEXT (not Luxriot EVO docs):")
+                context_blocks.extend(web_context_blocks)
+
+            context_text = "\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)"
+
+            yield sse("status", {"phase": "building_prompt", "message": "Building prompt…"})
+            try:
+                system_prompt = render_template(
+                    template,
+                    variables={
+                        "docs_version": DEFAULT_VERSION,
+                        "retrieval_mode": retrieval_mode,
+                        "retrieval_k": str(req.k),
+                        "doc_priority": doc_priority_str,
+                        "web_enabled": str(web_enabled),
+                        "context": context_text,
+                    },
+                    required_placeholders=[str(x) for x in required_placeholders],
+                )
+            except PromptTemplateError as e:
+                yield sse("error", {"error": "Prompt template error", "detail": str(e)})
+                return
+
+            messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+            for m in history[-10:]:
+                if m["role"] in ("user", "assistant"):
+                    messages.append({"role": m["role"], "content": m["content"]})
+            messages.append({"role": "user", "content": req.message})
+
+            model_label = llm_model_id or "LM Studio (auto)"
+            yield sse("status", {"phase": "calling_llm", "message": f"Generating answer ({model_label})…"})
+
+            parts: list[str] = []
+            try:
+                async for delta in chat_completion_stream(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout_s=timeout_s,
+                    model=llm_model_id,
+                ):
+                    parts.append(delta)
+                    yield sse("delta", {"delta": delta})
+            except LMStudioError as e:
+                log.exception("LM Studio error (stream)")
+                yield sse("error", {"error": "LM Studio error", "detail": str(e)})
+                return
+
+            answer = "".join(parts)
+            yield sse("status", {"phase": "saving", "message": "Saving answer to session…"})
+            app_db.insert_message(session_id=session_id, role="assistant", content=answer)
+
+            yield sse(
+                "final",
+                ChatResponse(
+                    answer=answer,
+                    citations=citations,
+                    images=images,
+                    web_sources=web_sources,
+                    session_id=session_id,
+                ).model_dump(),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.exception("Chat stream error")
+            yield sse("error", {"error": "Chat stream failed", "detail": str(e)})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/sessions", response_model=SessionsResponse)

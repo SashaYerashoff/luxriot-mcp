@@ -1825,6 +1825,66 @@
     return await resp.json();
   }
 
+  async function apiSse(path, { body, onEvent } = {}) {
+    const opts = { method: 'POST', headers: { accept: 'text/event-stream' } };
+    if (body !== undefined) {
+      opts.headers['content-type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const resp = await fetch(apiBase + path, opts);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      const err = new Error(`HTTP ${resp.status}`);
+      err.status = resp.status;
+      err.raw = text;
+      throw err;
+    }
+    if (!resp.body) {
+      throw new Error('No response body for SSE');
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    function flushOne(frame) {
+      const raw = String(frame || '').replace(/\r/g, '').trim();
+      if (!raw) return;
+      let ev = 'message';
+      const dataLines = [];
+      raw.split('\n').forEach((ln) => {
+        const line = String(ln || '').trimEnd();
+        if (line.startsWith('event:')) ev = line.slice(6).trim();
+        if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      });
+      const dataStr = dataLines.join('\n');
+      let data = dataStr;
+      try {
+        data = JSON.parse(dataStr);
+      } catch (_) {}
+      try {
+        if (typeof onEvent === 'function') onEvent(ev, data);
+      } catch (e) {
+        console.error('SSE handler error', e);
+      }
+    }
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      buf = buf.replace(/\r/g, '');
+      while (true) {
+        const idx = buf.indexOf('\n\n');
+        if (idx === -1) break;
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        flushOne(frame);
+      }
+    }
+    if (buf.trim()) flushOne(buf);
+  }
+
   // ---------- Docs reader ----------
   const docsState = {
     catalog: null,
@@ -2445,10 +2505,28 @@
 	    const pending = appendMessage({ role: 'assistant', content: '' });
 	    pending.classList.add('pending');
 
+	    const pendingBody = pending.querySelector('.content');
+	    if (pendingBody) {
+	      pendingBody.innerHTML = `<div class="activity"><span class="spinner"></span><span class="activity-text"></span></div><div class="stream-body"></div>`;
+	    }
+	    const pendingActivityTextEl = pending.querySelector('.activity-text');
+	    const pendingStreamBodyEl = pending.querySelector('.stream-body');
+
 	    function setPendingStatus(text) {
 	      const body = pending.querySelector('.content');
 	      if (!body) return;
-	      body.innerHTML = `<div class="activity"><span class="spinner"></span><span>${escapeHtml(text)}</span></div>`;
+	      const label = String(text || '');
+	      if (pendingActivityTextEl) {
+	        pendingActivityTextEl.textContent = label;
+	      } else {
+	        body.innerHTML = `<div class="activity"><span class="spinner"></span><span>${escapeHtml(label)}</span></div><div class="stream-body"></div>`;
+	      }
+	      thread.scrollTop = thread.scrollHeight;
+	    }
+
+	    function setPendingStream(mdText) {
+	      if (!pendingStreamBodyEl) return;
+	      pendingStreamBodyEl.innerHTML = renderMarkdown(mdText || '');
 	      thread.scrollTop = thread.scrollHeight;
 	    }
 
@@ -2466,25 +2544,68 @@
 	    try {
 	      const k = Math.max(1, Math.min(25, Number(chatKDefault || 8)));
 
-	      // Real preflight search (for UX feedback + quick sanity).
-	      try {
-	        const search = await apiJson('/docs/search', { method: 'POST', body: { query: text, k, debug: true } });
-	        lastRetrievalPack = search;
-	        const found = Array.isArray(search?.chunks) ? search.chunks.length : 0;
-	        setPendingStatus(`Found ${found} relevant sections. Generating answer (${modelId})…`);
-	      } catch (e) {
-	        setPendingStatus(`Generating answer (${modelId})…`);
-	      }
-
 	      const payload = { message: text, k };
 	      if (session.session_id) payload.session_id = session.session_id;
-	      const data = await apiJson('/chat', { method: 'POST', body: payload });
+
+	      let streamed = '';
+	      let final = null;
+	      let streamError = null;
+
+	      try {
+	        await apiSse('/chat/stream', {
+	          body: payload,
+	          onEvent: (ev, data) => {
+	            if (ev === 'status') {
+	              const msg = data?.message ? String(data.message) : '';
+	              setPendingStatus(msg || `Working… (${String(data?.phase || '…')})`);
+	              if (data?.session_id && !session.session_id) session.session_id = String(data.session_id);
+	            } else if (ev === 'retrieval') {
+	              lastRetrievalPack = data;
+	              const found = Array.isArray(data?.chunks) ? data.chunks.length : 0;
+	              setPendingStatus(`Found ${found} relevant sections. Generating answer (${modelId})…`);
+	            } else if (ev === 'delta') {
+	              const d = data?.delta ? String(data.delta) : '';
+	              if (d) {
+	                streamed += d;
+	                setPendingStream(streamed);
+	              }
+	            } else if (ev === 'final') {
+	              final = data;
+	            } else if (ev === 'error') {
+	              streamError = data;
+	            }
+	          }
+	        });
+	      } catch (e) {
+	        // Fallback to non-stream chat if the stream endpoint is unavailable.
+	        const data = await apiJson('/chat', { method: 'POST', body: payload });
+	        pending.remove();
+	        session.session_id = data.session_id;
+	        lastAssistantMessage = data.answer || '';
+	        saveHint.textContent = "Updated last answer target.";
+	        appendMessage({ role: 'assistant', content: data.answer || '', citations: data.citations || [], images: data.images || [], web_sources: data.web_sources || [] });
+	        refreshSessions();
+	        return;
+	      }
+
+	      if (streamError) {
+	        throw new Error(typeof streamError === 'string' ? streamError : JSON.stringify(streamError));
+	      }
+	      if (!final) {
+	        throw new Error('Stream ended without final response.');
+	      }
 
 	      pending.remove();
-	      session.session_id = data.session_id;
-	      lastAssistantMessage = data.answer || '';
+	      session.session_id = final.session_id || session.session_id;
+	      lastAssistantMessage = final.answer || '';
 	      saveHint.textContent = "Updated last answer target.";
-	      appendMessage({ role: 'assistant', content: data.answer || '', citations: data.citations || [], images: data.images || [], web_sources: data.web_sources || [] });
+	      appendMessage({
+	        role: 'assistant',
+	        content: final.answer || streamed || '',
+	        citations: final.citations || [],
+	        images: final.images || [],
+	        web_sources: final.web_sources || []
+	      });
 	      refreshSessions();
 	    } catch (e) {
 	      pending.remove();

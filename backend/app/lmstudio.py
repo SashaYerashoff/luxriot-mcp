@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import unicodedata
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -147,6 +148,69 @@ async def chat_completion(
             return data["choices"][0]["message"]["content"]
         except Exception as e:
             raise LMStudioError(f"Unexpected LM Studio response shape: {data}") from e
+
+
+async def chat_completion_stream(
+    messages: list[dict[str, Any]],
+    base_url: str = LMSTUDIO_BASE_URL,
+    temperature: float = 0.2,
+    max_tokens: int = 800,
+    model: str | None = None,
+    timeout_s: float = 60.0,
+) -> AsyncIterator[str]:
+    model_id = str(model).strip() if isinstance(model, str) and model.strip() else None
+    if not model_id:
+        model_id = await get_model_id(base_url)
+
+    payload = {
+        "model": model_id,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+
+    # For streaming, read timeout is per-chunk; keep it generous.
+    timeout = httpx.Timeout(timeout_s, connect=10.0, read=timeout_s, write=10.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            async with client.stream("POST", f"{base_url}/v1/chat/completions", json=payload) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    s = line.strip()
+                    if not s.startswith("data:"):
+                        continue
+                    data_str = s[len("data:") :].strip()
+                    if not data_str:
+                        continue
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                    except Exception:
+                        continue
+                    try:
+                        choice0 = (data.get("choices") or [{}])[0] or {}
+                        delta = choice0.get("delta") or {}
+                        content = delta.get("content")
+                        if not content:
+                            continue
+                        yield str(content)
+                    except Exception:
+                        continue
+        except httpx.TimeoutException as e:
+            raise LMStudioError(f"LM Studio request timed out after {timeout_s:.1f}s ({type(e).__name__}).") from e
+        except httpx.HTTPError as e:
+            detail = None
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    detail = e.response.text
+                except Exception:
+                    detail = None
+            msg = str(e).strip() or repr(e)
+            raise LMStudioError(f"LM Studio request failed ({type(e).__name__}): {msg} {detail or ''}".strip()) from e
 
 
 async def embeddings(

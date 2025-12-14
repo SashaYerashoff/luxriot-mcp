@@ -8,6 +8,7 @@ Goal of this sprint: **working end-to-end grounding on Luxriot EVO 1.32 document
 - **Ingestion CLI**: implemented (`backend/cli/ingest_evo_1_32.py`) → builds `datastore/evo_1_32/` incl. **embeddings**.
 - **Admin re-indexing**: UI triggers ingestion in the background and shows status/logs (`/admin/reindex`).
 - **Frontend**: wired (`index.html`) to backend APIs; renders answers, citations, screenshots; shows raw errors.
+- **Streaming**: `POST /chat/stream` (SSE) streams phases + model deltas; UI renders incrementally with activity status.
 - **MCP server**: implemented (`mcp-server/`) exposing `luxriot_docs_query`.
 - **Web scraping**: optional URL fetch + DuckDuckGo HTML search (settings-driven; transparent in Admin Tools).
 - **Prompt transparency**: **no hardcoded prompts in service code**. System prompt is stored in **settings** and editable via Admin Tools panel.

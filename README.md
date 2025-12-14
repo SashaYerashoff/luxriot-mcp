@@ -34,6 +34,11 @@ Open `Administrator tools → Docs` and click `RE-INDEX` to rebuild `datastore/e
 Notes:
 - If embeddings ingestion is unstable (LM Studio returns `400 {"error":"Model has unloaded or crashed.."}`), lower `Emb max chars` (try `448` or `384`) and/or lower `Emb batch` (try `4`).
 
+## Streaming chat (SSE)
+
+- `POST /chat/stream` streams server status + model output deltas (SSE over `fetch`).
+- The UI uses streaming by default and falls back to `POST /chat` if streaming is unavailable.
+
 ## Web scraping (optional)
 
 In `Administrator tools → Web`, enable web tools, then:
