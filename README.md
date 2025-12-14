@@ -38,6 +38,7 @@ Notes:
 
 - `POST /chat/stream` streams server status + model output deltas (SSE over `fetch`).
 - The UI uses streaming by default and falls back to `POST /chat` if streaming is unavailable.
+- While streaming, the UI shows a `STOP` button to cancel generation (keeps partial output in the chat; no assistant message is saved server-side).
 
 ## Web scraping (optional)
 

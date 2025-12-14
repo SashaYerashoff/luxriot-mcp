@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import secrets
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1058,20 +1060,66 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             yield sse("status", {"phase": "calling_llm", "message": f"Generating answer ({model_label})…"})
 
             parts: list[str] = []
+            llm_started = time.monotonic()
+            q: asyncio.Queue[str] = asyncio.Queue()
+            done = asyncio.Event()
+            stream_err: Exception | None = None
+
+            async def reader() -> None:
+                nonlocal stream_err
+                try:
+                    async for delta in chat_completion_stream(
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        timeout_s=timeout_s,
+                        model=llm_model_id,
+                    ):
+                        await q.put(delta)
+                except Exception as e:
+                    stream_err = e
+                finally:
+                    done.set()
+
+            task = asyncio.create_task(reader())
             try:
-                async for delta in chat_completion_stream(
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout_s=timeout_s,
-                    model=llm_model_id,
-                ):
+                while True:
+                    try:
+                        delta = await asyncio.wait_for(q.get(), timeout=3.0)
+                        parts.append(delta)
+                        yield sse("delta", {"delta": delta})
+                    except asyncio.TimeoutError:
+                        if done.is_set():
+                            break
+                        elapsed_s = int(time.monotonic() - llm_started)
+                        yield sse("ping", {"phase": "calling_llm", "elapsed_s": elapsed_s})
+
+                # Drain any remaining queued deltas after completion.
+                while not q.empty():
+                    try:
+                        delta = q.get_nowait()
+                    except Exception:
+                        break
                     parts.append(delta)
                     yield sse("delta", {"delta": delta})
+
+                if stream_err:
+                    raise stream_err
+            except asyncio.CancelledError:
+                raise
             except LMStudioError as e:
                 log.exception("LM Studio error (stream)")
                 yield sse("error", {"error": "LM Studio error", "detail": str(e)})
                 return
+            except Exception as e:
+                log.exception("LM Studio stream error")
+                yield sse("error", {"error": "LM Studio stream error", "detail": str(e)})
+                return
+            finally:
+                if not task.done():
+                    task.cancel()
+                    with contextlib.suppress(Exception):
+                        await task
 
             answer = "".join(parts)
             yield sse("status", {"phase": "saving", "message": "Saving answer to session…"})

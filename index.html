@@ -457,6 +457,18 @@
 	    .msg .content .cite{color:var(--muted);font-size:12px;padding:0 2px;}
 	    .msg.pending{opacity:.95;}
 	    .msg.pending .activity{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;}
+	    .msg.pending .activity .stop-btn{
+	      margin-left:auto;
+	      background:rgba(216,92,92,.18);
+	      border:1px solid rgba(216,92,92,.35);
+	      color:var(--text);
+	      border-radius:18px;
+	      padding:6px 10px;
+	      cursor:pointer;
+	      font-size:11px;
+	    }
+	    .msg.pending .activity .stop-btn:hover{background:rgba(216,92,92,.24);}
+	    .msg.pending .activity .stop-btn:disabled{opacity:.6;cursor:default;}
 	    .msg.pending .spinner{
 	      width:14px;height:14px;border-radius:999px;
 	      border:2px solid rgba(214,217,223,.22);
@@ -993,6 +1005,7 @@
   let lastUserMessage = "User input";
   let lastAssistantMessage = "Hi Sasha, I am ready to assist and learn.";
   let lastRetrievalPack = null; // last /docs/search response (may include debug)
+  let activeChatAbort = null;
 
   const annotations = []; // in-memory only
 
@@ -1825,12 +1838,13 @@
     return await resp.json();
   }
 
-  async function apiSse(path, { body, onEvent } = {}) {
+  async function apiSse(path, { body, onEvent, signal } = {}) {
     const opts = { method: 'POST', headers: { accept: 'text/event-stream' } };
     if (body !== undefined) {
       opts.headers['content-type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
+    if (signal) opts.signal = signal;
     const resp = await fetch(apiBase + path, opts);
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
@@ -2492,6 +2506,7 @@
   }
 
 	  async function sendMessage() {
+	    if (sendBtn.disabled || activeChatAbort) return;
 	    const text = userInput.innerText.trim();
 	    if (!text) return;
 
@@ -2505,12 +2520,20 @@
 	    const pending = appendMessage({ role: 'assistant', content: '' });
 	    pending.classList.add('pending');
 
+	    let streamed = '';
+	    let final = null;
+	    let streamError = null;
+	    let gotAnyEvent = false;
+	    let userStopped = false;
+	    let stoppedFinalized = false;
+
 	    const pendingBody = pending.querySelector('.content');
 	    if (pendingBody) {
-	      pendingBody.innerHTML = `<div class="activity"><span class="spinner"></span><span class="activity-text"></span></div><div class="stream-body"></div>`;
+	      pendingBody.innerHTML = `<div class="activity"><span class="spinner"></span><span class="activity-text"></span><button class="stop-btn" type="button">STOP</button></div><div class="stream-body"></div>`;
 	    }
 	    const pendingActivityTextEl = pending.querySelector('.activity-text');
 	    const pendingStreamBodyEl = pending.querySelector('.stream-body');
+	    const pendingStopBtnEl = pending.querySelector('.stop-btn');
 
 	    function setPendingStatus(text) {
 	      const body = pending.querySelector('.content');
@@ -2547,14 +2570,33 @@
 	      const payload = { message: text, k };
 	      if (session.session_id) payload.session_id = session.session_id;
 
-	      let streamed = '';
-	      let final = null;
-	      let streamError = null;
+	      // Streaming: allow cancel.
+	      const controller = new AbortController();
+	      activeChatAbort = controller;
+	      if (pendingStopBtnEl) {
+	        pendingStopBtnEl.disabled = false;
+	        pendingStopBtnEl.addEventListener('click', () => {
+	          if (stoppedFinalized) return;
+	          userStopped = true;
+	          stoppedFinalized = true;
+	          try { controller.abort(); } catch (e) {}
+	          try {
+	            pending.classList.remove('pending');
+	            const body = pending.querySelector('.content');
+	            if (body) {
+	              const note = `<div class=\"tiny muted\" style=\"margin-top:10px;\">(generation stopped)</div>`;
+	              body.innerHTML = renderMarkdown(streamed || '') + note;
+	            }
+	          } catch (e) {}
+	        }, { once: true });
+	      }
 
 	      try {
 	        await apiSse('/chat/stream', {
 	          body: payload,
+	          signal: controller.signal,
 	          onEvent: (ev, data) => {
+	            gotAnyEvent = true;
 	            if (ev === 'status') {
 	              const msg = data?.message ? String(data.message) : '';
 	              setPendingStatus(msg || `Working… (${String(data?.phase || '…')})`);
@@ -2563,6 +2605,9 @@
 	              lastRetrievalPack = data;
 	              const found = Array.isArray(data?.chunks) ? data.chunks.length : 0;
 	              setPendingStatus(`Found ${found} relevant sections. Generating answer (${modelId})…`);
+	            } else if (ev === 'ping') {
+	              const elapsed = typeof data?.elapsed_s === 'number' ? data.elapsed_s : null;
+	              if (elapsed !== null) setPendingStatus(`Generating answer (${modelId})… ${elapsed}s`);
 	            } else if (ev === 'delta') {
 	              const d = data?.delta ? String(data.delta) : '';
 	              if (d) {
@@ -2577,15 +2622,36 @@
 	          }
 	        });
 	      } catch (e) {
-	        // Fallback to non-stream chat if the stream endpoint is unavailable.
-	        const data = await apiJson('/chat', { method: 'POST', body: payload });
-	        pending.remove();
-	        session.session_id = data.session_id;
-	        lastAssistantMessage = data.answer || '';
-	        saveHint.textContent = "Updated last answer target.";
-	        appendMessage({ role: 'assistant', content: data.answer || '', citations: data.citations || [], images: data.images || [], web_sources: data.web_sources || [] });
-	        refreshSessions();
-	        return;
+	        if (e?.name === 'AbortError' || userStopped) {
+	          // User cancelled generation; keep partial output as-is.
+	          if (!stoppedFinalized) {
+	            try {
+	              pending.classList.remove('pending');
+	              const body = pending.querySelector('.content');
+	              if (body) {
+	                const note = `<div class=\"tiny muted\" style=\"margin-top:10px;\">(generation stopped)</div>`;
+	                body.innerHTML = renderMarkdown(streamed || '') + note;
+	              }
+	            } catch (_) {}
+	          }
+	          return;
+	        }
+
+	        // Fallback to non-stream chat only if streaming isn't supported and nothing has started yet.
+	        if (!gotAnyEvent && (e?.status === 404 || e?.status === 405 || e?.status === 501)) {
+	          const data = await apiJson('/chat', { method: 'POST', body: payload });
+	          pending.remove();
+	          session.session_id = data.session_id;
+	          lastAssistantMessage = data.answer || '';
+	          saveHint.textContent = "Updated last answer target.";
+	          appendMessage({ role: 'assistant', content: data.answer || '', citations: data.citations || [], images: data.images || [], web_sources: data.web_sources || [] });
+	          refreshSessions();
+	          return;
+	        }
+
+	        throw e;
+	      } finally {
+	        activeChatAbort = null;
 	      }
 
 	      if (streamError) {
