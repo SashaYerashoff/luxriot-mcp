@@ -18,9 +18,18 @@
       --warn:#d8b15c;
     }
     *{box-sizing:border-box}
-    body{
-      margin:0;height:100vh;overflow:hidden;background:var(--bg);color:var(--text);
-      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+	    html, body{height:100%;}
+	    body{
+	      margin:0;
+	      min-height:100vh;
+	      height:calc(var(--vh, 1vh) * 100);
+	      overflow:hidden;
+	      background:var(--bg);
+	      color:var(--text);
+	      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+	    }
+    @supports(height:100dvh){
+      body{height:100dvh;}
     }
     .app{
       position:relative;height:100%;padding:24px;border:1px solid var(--border);border-radius:16px;
@@ -43,6 +52,7 @@
     .input-wrap{
       position:absolute;left:50%;bottom:28px;transform:translateX(-50%);
       width:min(980px, 86%);display:flex;align-items:flex-end;gap:16px;
+      z-index:10;
     }
     .input-area{
       flex:1;background:var(--panel);border:1px solid var(--border);border-radius:16px;
@@ -60,8 +70,8 @@
     }
 
     /* Floating actions */
-    .actions-left{position:absolute;left:28px;bottom:34px;display:flex;gap:14px;align-items:center;}
-    .actions-right{position:absolute;right:28px;bottom:54px;display:flex;flex-direction:column;gap:12px;align-items:center;}
+    .actions-left{position:absolute;left:28px;bottom:34px;display:flex;gap:14px;align-items:center;z-index:11;}
+    .actions-right{position:absolute;right:28px;bottom:54px;display:flex;flex-direction:column;gap:12px;align-items:center;z-index:11;}
     .action{
       width:46px;height:46px;border-radius:50%;background:var(--panel);border:1px solid var(--border);
       display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
@@ -79,7 +89,7 @@
     .mini-item:last-child{border-bottom:none}
 
     /* Overlay */
-    .overlay{position:absolute;inset:0;background:rgba(0,0,0,.0);display:none;}
+    .overlay{position:absolute;inset:0;background:rgba(0,0,0,.0);display:none;z-index:90;}
     .overlay.visible{display:block}
 
     /* Modal panels shared */
@@ -90,6 +100,7 @@
       border:1px solid var(--border);border-radius:18px;padding:18px 18px 16px;
       box-shadow:0 20px 60px rgba(0,0,0,.45);
       display:none;backdrop-filter: blur(8px);
+      z-index:100;
     }
     .modal.visible{display:block}
     .modal-header{font-size:18px;color:var(--text);opacity:.92;margin-bottom:14px;}
@@ -405,6 +416,7 @@
       position:absolute;top:56px;right:24px;width:280px;background:var(--panel);
       border:1px solid var(--border);border-radius:14px;padding:14px;font-size:13px;color:var(--muted);
       display:none;
+      z-index:60;
     }
     .user-settings.visible{display:block}
     .user-settings .title{color:var(--text);margin-bottom:10px;opacity:.9}
@@ -514,6 +526,91 @@
       background-clip:padding-box;
     }
     .app ::-webkit-scrollbar-thumb:hover{background:rgba(214,217,223,.34);}
+
+    /* Responsive: keep bottom controls visible and non-overlapping */
+    @media (max-width: 1100px){
+      /* Put action buttons under the input, so they don't get hidden on narrow widths */
+      .actions-left{bottom:24px;}
+      .actions-right{bottom:24px;flex-direction:row;}
+      .input-wrap{bottom:96px;}
+      .thread{bottom:220px;}
+    }
+
+	    @media (max-width: 600px){
+	      .app{
+	        padding:14px 12px;
+	        border:none;
+	        border-radius:0;
+	      }
+	      .header{font-size:13px;}
+	      .brand{font-size:20px;}
+
+	      .thread{
+	        left:12px;
+	        right:12px;
+	        width:auto;
+	        transform:none;
+	        top:64px;
+	        bottom:calc(150px + env(safe-area-inset-bottom));
+	      }
+	      .actions-left{
+	        left:12px;
+	        right:64px;
+	        bottom:calc(12px + env(safe-area-inset-bottom));
+	        gap:10px;
+	      }
+	      .actions-right{
+	        right:12px;
+	        bottom:calc(12px + env(safe-area-inset-bottom));
+	      }
+	      .action{width:42px;height:42px;}
+	      .input-wrap{
+	        left:12px;
+	        right:12px;
+	        width:auto;
+	        transform:none;
+	        bottom:calc(12px + env(safe-area-inset-bottom) + 42px + 12px);
+	        gap:10px;
+	      }
+	      .input-area{
+	        min-height:56px;
+	        height:56px;
+	        max-height:56px;
+	        overflow:auto;
+	        padding:12px;
+	        border-radius:14px;
+	      }
+      .send{
+        padding:10px 14px;
+        border-radius:20px;
+      }
+      .mini-panel{width:min(260px, calc(100vw - 24px));}
+      .modal{
+        left:12px;
+        right:12px;
+        width:auto;
+        transform:none;
+      }
+      #docsPanel.fullscreen{
+        left:0;
+        right:0;
+        top:0;
+        bottom:0;
+      }
+      .docs-grid{grid-template-columns: 1fr;}
+    }
+
+    @media (max-width: 380px){
+      .action{width:38px;height:38px;}
+      .actions-left{gap:8px;right:60px;}
+      .input-wrap{gap:8px;}
+      .send{padding:10px 12px;}
+    }
+
+    @media (max-height: 620px){
+      .thread{top:60px;}
+      .input-area{min-height:48px;}
+    }
   </style>
 </head>
 <body>
@@ -990,6 +1087,14 @@
 </div>
 
 <script>
+  // Mobile viewport height fix (fallback for browsers without dvh).
+  function setVhUnit(){
+    const vh = window.innerHeight * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
+  }
+  setVhUnit();
+  window.addEventListener('resize', setVhUnit);
+
   // ---------- Backend wiring ----------
   const apiParam = new URLSearchParams(location.search).get('api');
   const defaultApiBase = (location.protocol === 'file:' ? 'http://localhost:8000' : location.origin);
