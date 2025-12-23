@@ -431,12 +431,12 @@
       letter-spacing:.2px;
     }
     label{font-size:12px;color:var(--muted);display:block;margin:10px 0 6px;}
-    input[type="text"], textarea, select{
-      width:100%;
-      background:rgba(16,17,19,.65);
-      border:1px solid var(--border);
-      border-radius:10px;
-      color:var(--text);
+	    input[type="text"], input[type="password"], input[type="number"], textarea, select{
+	      width:100%;
+	      background:rgba(16,17,19,.65);
+	      border:1px solid var(--border);
+	      border-radius:10px;
+	      color:var(--text);
       padding:10px 10px;
       outline:none;
       font-size:12px;
@@ -688,10 +688,10 @@
     </div>
 
 	  <div class="header-right">
-	    <div id="userToggle" style="cursor:pointer">Logged as Admin</div>
-	      <div id="topToolToggle" class="action" title="User / Login">👤</div>
+		    <div id="userToggle" style="cursor:pointer">Anonymous</div>
+		      <div id="topToolToggle" class="action" title="User / Login">👤</div>
+		  </div>
 	  </div>
-  </div>
 
   <div id="thread" class="thread"></div>
   <div id="emptyState" class="center">
@@ -733,18 +733,42 @@
 	    <div class="modal-header">Administrator tools:</div>
 	
 	    <div class="admin-grid">
-	      <div class="card">
-	        <h3>Runtime</h3>
-	        <div class="row"><span class="slash">/</span> API base: <span class="kbd" id="adminApiBase">—</span></div>
-	        <div class="row"><span class="slash">/</span> Docs version: <span class="kbd" id="adminDocsVersion">—</span></div>
-	        <div class="row"><span class="slash">/</span> Datastore ready: <span class="kbd" id="adminDatastoreReady">—</span></div>
-	        <div class="row"><span class="slash">/</span> LM Studio: <span class="kbd" id="adminLmstudioUrl">—</span></div>
-	      </div>
+		      <div class="card">
+		        <h3>Runtime</h3>
+		        <div class="row"><span class="slash">/</span> API base: <span class="kbd" id="adminApiBase">—</span></div>
+		        <div class="row"><span class="slash">/</span> Docs version: <span class="kbd" id="adminDocsVersion">—</span></div>
+		        <div class="row"><span class="slash">/</span> Datastore ready: <span class="kbd" id="adminDatastoreReady">—</span></div>
+		        <div class="row"><span class="slash">/</span> LM Studio: <span class="kbd" id="adminLmstudioUrl">—</span></div>
+		      </div>
 
-	      <div class="card">
-	        <h3>Docs</h3>
-	        <label>Docs folder (Help+Manual export root)</label>
-	        <input id="adminDocsDir" type="text" placeholder="/path/to/docs"/>
+		      <div class="card">
+		        <h3>Users</h3>
+		        <div class="tiny muted">Admin-only user management (username/password + role)</div>
+		        <label>New user</label>
+		        <div class="inline">
+		          <input id="adminNewUserUsername" type="text" placeholder="username" style="flex:1;min-width:160px;"/>
+		          <select id="adminNewUserRole" style="width:160px;">
+		            <option value="client" selected>client</option>
+		            <option value="redactor">redactor</option>
+		            <option value="admin">admin</option>
+		          </select>
+		        </div>
+		        <label>Password</label>
+		        <input id="adminNewUserPassword" type="password" placeholder="min 6 chars"/>
+		        <label>Greeting (optional)</label>
+		        <input id="adminNewUserGreeting" type="text" placeholder="Welcome message shown to the user"/>
+		        <div class="inline" style="margin-top:10px;">
+		          <button class="btn ghost small" id="adminUsersRefreshBtn">REFRESH</button>
+		          <button class="btn primary small" id="adminUsersCreateBtn">CREATE</button>
+		        </div>
+		        <div class="tiny muted" id="adminUsersStatus" style="margin-top:10px;"></div>
+		        <div class="list" id="adminUsersList" style="max-height:220px;"></div>
+		      </div>
+
+		      <div class="card">
+		        <h3>Docs</h3>
+		        <label>Docs folder (Help+Manual export root)</label>
+		        <input id="adminDocsDir" type="text" placeholder="/path/to/docs"/>
 	        <div class="inline" style="margin-top:8px;">
 	          <span class="pill"><input id="adminIngestEmbeddings" type="checkbox" checked> embeddings</span>
 	          <div style="flex:1;min-width:160px;">
@@ -1151,14 +1175,24 @@
     </div>
   </div>
 
-  <!-- User settings panel -->
-  <div id="userSettings" class="user-settings">
-    <div class="title">User Settings</div>
-    <div class="row2"><span class="slash">/</span> Organization: YourMom</div>
-    <div class="row2"><span class="slash">/</span> Mailto: admin@god.com</div>
-    <div class="row2"><span class="slash">/</span> Password: *******</div>
-    <div class="row2"><span class="slash">/</span> Avatar: portrait.jpg</div>
-  </div>
+	  <!-- User settings / login panel -->
+	  <div id="userSettings" class="user-settings">
+	    <div class="title">User</div>
+	    <div class="row2"><span class="slash">/</span> Status: <span class="kbd" id="authStatus">—</span></div>
+	    <div class="row2"><span class="slash">/</span> Role: <span class="kbd" id="authRole">—</span></div>
+
+	    <div id="loginForm" style="margin-top:10px;">
+	      <label style="margin-top:10px;">Username</label>
+	      <input id="loginUsername" type="text" placeholder="admin"/>
+	      <label>Password</label>
+	      <input id="loginPassword" type="password" placeholder="••••••••"/>
+	      <div class="inline" style="margin-top:10px;justify-content:space-between;">
+	        <button class="btn primary small" id="loginBtn">LOGIN</button>
+	        <button class="btn ghost small" id="logoutBtn" style="display:none;">LOGOUT</button>
+	      </div>
+	      <div class="tiny muted" id="authHint" style="margin-top:10px;"></div>
+	    </div>
+	  </div>
 
 </div>
 
@@ -1210,8 +1244,16 @@
   const redactorBtn = document.getElementById('redactorBtn');
   const historyBtn = document.getElementById('historyBtn');
 
-  const userToggle = document.getElementById('userToggle');
-  const userSettings = document.getElementById('userSettings');
+	  const userToggle = document.getElementById('userToggle');
+	  const userSettings = document.getElementById('userSettings');
+	  const authStatusEl = document.getElementById('authStatus');
+	  const authRoleEl = document.getElementById('authRole');
+	  const authHintEl = document.getElementById('authHint');
+	  const loginFormEl = document.getElementById('loginForm');
+	  const loginUsernameEl = document.getElementById('loginUsername');
+	  const loginPasswordEl = document.getElementById('loginPassword');
+	  const loginBtnEl = document.getElementById('loginBtn');
+	  const logoutBtnEl = document.getElementById('logoutBtn');
 
   // Redactor fields
   const scoreEl = document.getElementById('score');
@@ -1263,13 +1305,14 @@
 
 			    dockEl.classList.remove('state-actions-wrap', 'state-input-small', 'state-stack');
 
-			    const actionButtons = Array.from(dockActionsEl.querySelectorAll('.action'));
-			    const actionCount = actionButtons.length;
-			    const actionW = actionButtons[0]?.getBoundingClientRect().width || 46;
-			    const gap = parseFloat(getComputedStyle(dockActionsEl).gap || '14') || 14;
-			    const perRow = Math.max(1, Math.ceil(actionCount / 2));
-			    const wrapW = Math.round(perRow * actionW + Math.max(0, perRow - 1) * gap);
-			    dockEl.style.setProperty('--dock-actions-wrap-w', `${wrapW}px`);
+				    const allActionButtons = Array.from(dockActionsEl.querySelectorAll('.action'));
+				    const actionButtons = allActionButtons.filter((el) => getComputedStyle(el).display !== 'none');
+				    const actionCount = actionButtons.length;
+				    const actionW = actionButtons.find((el) => getComputedStyle(el).display !== 'none')?.getBoundingClientRect().width || 46;
+				    const gap = parseFloat(getComputedStyle(dockActionsEl).gap || '14') || 14;
+				    const perRow = Math.max(1, Math.ceil(actionCount / 2));
+				    const wrapW = Math.round(perRow * actionW + Math.max(0, perRow - 1) * gap);
+				    dockEl.style.setProperty('--dock-actions-wrap-w', `${wrapW}px`);
 
 			    const inputW = () => userInput.getBoundingClientRect().width;
 
@@ -1342,12 +1385,22 @@
 	  const adminReindexStatusEl = document.getElementById('adminReindexStatus');
 	  const adminReindexLogsEl = document.getElementById('adminReindexLogs');
 
-	  const adminWebEnabledEl = document.getElementById('adminWebEnabled');
-	  const adminWebTimeoutSEl = document.getElementById('adminWebTimeoutS');
-	  const adminWebMaxCharsEl = document.getElementById('adminWebMaxChars');
-	  const adminWebMaxBytesEl = document.getElementById('adminWebMaxBytes');
-	  const adminWebMaxUrlsEl = document.getElementById('adminWebMaxUrls');
-	  const adminWebSearchKEl = document.getElementById('adminWebSearchK');
+		  const adminWebEnabledEl = document.getElementById('adminWebEnabled');
+		  const adminWebTimeoutSEl = document.getElementById('adminWebTimeoutS');
+		  const adminWebMaxCharsEl = document.getElementById('adminWebMaxChars');
+		  const adminWebMaxBytesEl = document.getElementById('adminWebMaxBytes');
+		  const adminWebMaxUrlsEl = document.getElementById('adminWebMaxUrls');
+		  const adminWebSearchKEl = document.getElementById('adminWebSearchK');
+
+		  // Admin: users
+		  const adminNewUserUsernameEl = document.getElementById('adminNewUserUsername');
+		  const adminNewUserRoleEl = document.getElementById('adminNewUserRole');
+		  const adminNewUserPasswordEl = document.getElementById('adminNewUserPassword');
+		  const adminNewUserGreetingEl = document.getElementById('adminNewUserGreeting');
+		  const adminUsersRefreshBtnEl = document.getElementById('adminUsersRefreshBtn');
+		  const adminUsersCreateBtnEl = document.getElementById('adminUsersCreateBtn');
+		  const adminUsersStatusEl = document.getElementById('adminUsersStatus');
+		  const adminUsersListEl = document.getElementById('adminUsersList');
 
     // ---------- Docs reader UI ----------
     const docsGuideSelectEl = document.getElementById('docsGuideSelect');
@@ -1504,12 +1557,86 @@
 	    }
 	  }
 
-	  if (adminReindexBtnEl) adminReindexBtnEl.addEventListener('click', () => startReindex());
-	  if (adminReindexRefreshBtnEl) adminReindexRefreshBtnEl.addEventListener('click', () => fetchReindexStatus());
+		  if (adminReindexBtnEl) adminReindexBtnEl.addEventListener('click', () => startReindex());
+		  if (adminReindexRefreshBtnEl) adminReindexRefreshBtnEl.addEventListener('click', () => fetchReindexStatus());
 
-	  async function loadAdminPanel() {
-	    adminSaveHintEl.textContent = '';
-	    adminApiBaseEl.textContent = apiBase;
+		  function setAdminUsersStatus(text, { error = false } = {}) {
+		    if (!adminUsersStatusEl) return;
+		    adminUsersStatusEl.textContent = String(text || '');
+		    adminUsersStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
+		  }
+
+		  function renderAdminUsers(users) {
+		    if (!adminUsersListEl) return;
+		    adminUsersListEl.innerHTML = '';
+		    (users || []).forEach((u) => {
+		      const item = document.createElement('div');
+		      item.className = 'item';
+		      const top = document.createElement('div');
+		      top.className = 'top';
+		      const left = document.createElement('div');
+		      left.textContent = u.username || u.user_id;
+		      const badge = document.createElement('div');
+		      badge.className = 'badge';
+		      badge.textContent = u.role || '—';
+		      top.appendChild(left);
+		      top.appendChild(badge);
+		      item.appendChild(top);
+
+		      const sub = document.createElement('div');
+		      sub.className = 'tagline';
+		      sub.textContent = u.greeting ? `Greeting: ${u.greeting}` : `Created: ${u.created_at || '—'}`;
+		      item.appendChild(sub);
+		      adminUsersListEl.appendChild(item);
+		    });
+		    if (!(users || []).length) {
+		      const empty = document.createElement('div');
+		      empty.className = 'tiny muted';
+		      empty.textContent = 'No users found.';
+		      adminUsersListEl.appendChild(empty);
+		    }
+		  }
+
+		  async function loadAdminUsers() {
+		    setAdminUsersStatus('Loading users…');
+		    try {
+		      const data = await apiJson('/auth/users');
+		      renderAdminUsers(data.users || []);
+		      setAdminUsersStatus(`Loaded ${data.users?.length || 0} users.`);
+		    } catch (e) {
+		      const raw = e?.raw ? String(e.raw) : String(e);
+		      setAdminUsersStatus(`Failed to load users: ${raw}`, { error: true });
+		      renderAdminUsers([]);
+		    }
+		  }
+
+		  async function createAdminUser() {
+		    const username = String(adminNewUserUsernameEl?.value || '').trim();
+		    const password = String(adminNewUserPasswordEl?.value || '');
+		    const role = String(adminNewUserRoleEl?.value || 'client').trim();
+		    const greeting = String(adminNewUserGreetingEl?.value || '').trim();
+		    if (!username || !password) {
+		      setAdminUsersStatus('Username and password required.', { error: true });
+		      return;
+		    }
+		    setAdminUsersStatus('Creating user…');
+		    try {
+		      await apiJson('/auth/users', { method: 'POST', body: { username, password, role, greeting: greeting || null } });
+		      if (adminNewUserPasswordEl) adminNewUserPasswordEl.value = '';
+		      await loadAdminUsers();
+		      setAdminUsersStatus(`Created user ${username}.`);
+		    } catch (e) {
+		      const raw = e?.raw ? String(e.raw) : String(e);
+		      setAdminUsersStatus(`Create failed: ${raw}`, { error: true });
+		    }
+		  }
+
+		  adminUsersRefreshBtnEl?.addEventListener('click', () => loadAdminUsers());
+		  adminUsersCreateBtnEl?.addEventListener('click', () => createAdminUser());
+
+		  async function loadAdminPanel() {
+		    adminSaveHintEl.textContent = '';
+		    adminApiBaseEl.textContent = apiBase;
 
 	    let health = null;
 	    try {
@@ -1523,11 +1650,12 @@
 	      adminLmstudioUrlEl.textContent = '—';
 	    }
 
-	    adminBundle = await apiJson('/admin/settings');
-		    const effective = adminBundle.effective || {};
-		    const retrieval = effective.retrieval || {};
-		    const llm = effective.llm || {};
-		    const web = effective.web || {};
+		    adminBundle = await apiJson('/admin/settings');
+			    const effective = adminBundle.effective || {};
+			    const retrieval = effective.retrieval || {};
+			    const llm = effective.llm || {};
+			    const web = effective.web || {};
+			    loadAdminUsers().catch(() => {});
 
 		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
 		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
@@ -2107,7 +2235,7 @@
     return await resp.json();
   }
 
-  async function apiSse(path, { body, onEvent, signal } = {}) {
+	  async function apiSse(path, { body, onEvent, signal } = {}) {
     const opts = { method: 'POST', headers: { accept: 'text/event-stream' } };
     if (body !== undefined) {
       opts.headers['content-type'] = 'application/json';
@@ -2165,13 +2293,140 @@
         flushOne(frame);
       }
     }
-    if (buf.trim()) flushOne(buf);
-  }
+	    if (buf.trim()) flushOne(buf);
+	  }
 
-  // ---------- Docs reader ----------
-  const docsState = {
-    catalog: null,
-    selectedDocId: null,
+	  // ---------- Auth ----------
+	  let authState = { authenticated: false, role: 'anonymous', username: null, greeting: null };
+
+	  function setActionVisible(el, visible) {
+	    if (!el) return;
+	    el.style.display = visible ? '' : 'none';
+	  }
+
+	  function formatUserLabel(a) {
+	    if (a && a.authenticated && a.username) return `Logged as ${a.username} (${a.role})`;
+	    return 'Anonymous';
+	  }
+
+	  function syncGreeting(a) {
+	    const g = (a && a.greeting ? String(a.greeting).trim() : '');
+	    if (g) {
+	      emptyState.textContent = g;
+	      return;
+	    }
+	    if (a && a.authenticated && a.username) {
+	      emptyState.textContent = `Hi ${a.username}, I am ready to assist and learn.`;
+	      return;
+	    }
+	    emptyState.textContent = 'Hi, I am ready to assist and learn.';
+	  }
+
+	  function applyRoleUI(a) {
+	    const role = String(a?.role || 'anonymous');
+	    const isAdmin = role === 'admin';
+	    const isRedactor = role === 'redactor';
+	    const isClient = role === 'client';
+
+	    setActionVisible(toolsBtn, isAdmin);
+	    setActionVisible(redactorBtn, isAdmin || isRedactor);
+	    setActionVisible(debugBtn, isAdmin || isRedactor);
+	    setActionVisible(historyBtn, isAdmin || isRedactor || isClient);
+
+	    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
+	    if (!(isAdmin || isRedactor) && redactorPanel.classList.contains('visible')) closeAllModals();
+	    if (!(isAdmin || isRedactor) && debugPanel.classList.contains('visible')) closeAllModals();
+	    if (!(isAdmin || isRedactor || isClient) && historyPanel.classList.contains('visible')) historyPanel.classList.remove('visible');
+
+	    scheduleDockUpdate();
+	  }
+
+	  function renderAuthPanel(a) {
+	    const role = String(a?.role || 'anonymous');
+	    const status = a?.authenticated ? (a.username || 'user') : 'anonymous';
+	    if (authStatusEl) authStatusEl.textContent = status;
+	    if (authRoleEl) authRoleEl.textContent = role;
+
+	    const isAuthed = Boolean(a?.authenticated);
+	    if (logoutBtnEl) logoutBtnEl.style.display = isAuthed ? '' : 'none';
+	    if (loginBtnEl) loginBtnEl.style.display = isAuthed ? 'none' : '';
+	    if (loginUsernameEl) loginUsernameEl.disabled = isAuthed;
+	    if (loginPasswordEl) loginPasswordEl.disabled = isAuthed;
+	    if (authHintEl) {
+	      authHintEl.textContent = isAuthed ? 'Click LOGOUT to switch user.' : 'Enter username/password to login.';
+	      authHintEl.style.color = 'var(--muted)';
+	    }
+	  }
+
+	  async function refreshAuth() {
+	    try {
+	      const me = await apiJson('/auth/me');
+	      authState = me;
+	    } catch (e) {
+	      authState = { authenticated: false, role: 'anonymous', username: null, greeting: null };
+	    }
+	    if (userToggle) userToggle.textContent = formatUserLabel(authState);
+	    syncGreeting(authState);
+	    renderAuthPanel(authState);
+	    applyRoleUI(authState);
+	  }
+
+	  async function doLogin() {
+	    if (!loginUsernameEl || !loginPasswordEl || !authHintEl) return;
+	    const username = String(loginUsernameEl.value || '').trim();
+	    const password = String(loginPasswordEl.value || '');
+	    if (!username || !password) {
+	      authHintEl.textContent = 'Username and password required.';
+	      authHintEl.style.color = 'var(--danger)';
+	      return;
+	    }
+	    authHintEl.textContent = 'Logging in…';
+	    authHintEl.style.color = 'var(--muted)';
+	    try {
+	      const resp = await apiJson('/auth/login', { method: 'POST', body: { username, password } });
+	      authState = resp.user || { authenticated: true, role: 'client', username, greeting: null };
+	      loginPasswordEl.value = '';
+	      userSettings.classList.remove('visible');
+	      session.session_id = null;
+	      await refreshAuth();
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      authHintEl.textContent = raw || 'Login failed.';
+	      authHintEl.style.color = 'var(--danger)';
+	    }
+	  }
+
+	  async function doLogout() {
+	    if (authHintEl) {
+	      authHintEl.textContent = 'Logging out…';
+	      authHintEl.style.color = 'var(--muted)';
+	    }
+	    try {
+	      await apiJson('/auth/logout', { method: 'POST' });
+	    } catch (e) {}
+	    session.session_id = null;
+	    await refreshAuth();
+	  }
+
+	  loginBtnEl?.addEventListener('click', (e) => {
+	    e.preventDefault();
+	    doLogin();
+	  });
+	  logoutBtnEl?.addEventListener('click', (e) => {
+	    e.preventDefault();
+	    doLogout();
+	  });
+	  loginPasswordEl?.addEventListener('keydown', (e) => {
+	    if (e.key === 'Enter') {
+	      e.preventDefault();
+	      doLogin();
+	    }
+	  });
+
+	  // ---------- Docs reader ----------
+	  const docsState = {
+	    catalog: null,
+	    selectedDocId: null,
     selectedDocTitle: null,
     pages: [],
     page: null,
@@ -3322,12 +3577,13 @@
     saveHint.textContent = "Cleared annotation list.";
   });
 
-  // Init
-  renderList();
-  (async () => {
-    const deep = parseDocsHash();
-    if (deep) await openDocsReader(deep);
-  })();
+	  // Init
+	  refreshAuth();
+	  renderList();
+	  (async () => {
+	    const deep = parseDocsHash();
+	    if (deep) await openDocsReader(deep);
+	  })();
   (function initDocsTheme() {
     try {
       const t = localStorage.getItem('luxriot_docs_theme') || 'dark';
