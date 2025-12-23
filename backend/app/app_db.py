@@ -77,9 +77,6 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_messages_session_created
               ON messages(session_id, created_at);
 
-            CREATE INDEX IF NOT EXISTS idx_sessions_owner_created
-              ON sessions(owner_id, created_at);
-
             CREATE INDEX IF NOT EXISTS idx_users_role
               ON users(role);
             """
@@ -99,6 +96,7 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         "UPDATE sessions SET owner_id = COALESCE(NULLIF(owner_id,''), 'legacy') WHERE owner_id IS NULL OR owner_id = ''"
     )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_owner_created ON sessions(owner_id, created_at);")
 
 
 def create_session(*, owner_id: str, title: str | None = None) -> dict[str, Any]:
