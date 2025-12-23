@@ -78,35 +78,71 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def ensure_bootstrap_admin() -> None:
-    if app_db.count_users() > 0:
-        return
-
     username = str(os.getenv("LUXRIOT_ADMIN_USERNAME") or "admin").strip()
     password = os.getenv("LUXRIOT_ADMIN_PASSWORD")
+    reset = str(os.getenv("LUXRIOT_ADMIN_PASSWORD_RESET") or "").strip().lower() in ("1", "true", "yes", "y")
     generated = False
+
+    if app_db.count_users() == 0:
+        if not password:
+            password = secrets.token_urlsafe(14)
+            generated = True
+
+        try:
+            rec = app_db.create_user(
+                username=username,
+                password_hash=hash_password(password),
+                role="admin",
+                greeting="Welcome, admin.",
+            )
+        except Exception as e:
+            log.exception("Failed to create bootstrap admin user")
+            raise RuntimeError(f"Failed to create bootstrap admin user: {e}") from e
+
+        if generated:
+            log.warning(
+                "BOOTSTRAP admin user created: username=%s password=%s (set LUXRIOT_ADMIN_PASSWORD to override)",
+                rec["username"],
+                password,
+            )
+        else:
+            log.info("Bootstrap admin user created: username=%s (password from env)", rec["username"])
+        return
+
+    # Existing DB: optionally reset/create admin via env var.
+    if not reset:
+        return
     if not password:
-        password = secrets.token_urlsafe(14)
-        generated = True
+        log.warning("LUXRIOT_ADMIN_PASSWORD_RESET is set but LUXRIOT_ADMIN_PASSWORD is empty; skipping.")
+        return
 
-    try:
-        rec = app_db.create_user(
-            username=username,
-            password_hash=hash_password(password),
-            role="admin",
-            greeting="Welcome, admin.",
-        )
-    except Exception as e:
-        log.exception("Failed to create bootstrap admin user")
-        raise RuntimeError(f"Failed to create bootstrap admin user: {e}") from e
-
-    if generated:
+    user = app_db.get_user_by_username(username)
+    password_hash = hash_password(password)
+    if user:
+        try:
+            app_db.update_user(user_id=str(user["user_id"]), role="admin", password_hash=password_hash)
+        except Exception as e:
+            log.exception("Failed to reset admin password")
+            raise RuntimeError(f"Failed to reset admin password: {e}") from e
         log.warning(
-            "BOOTSTRAP admin user created: username=%s password=%s (set LUXRIOT_ADMIN_PASSWORD to override)",
-            rec["username"],
-            password,
+            "Admin password reset via env for username=%s (remove LUXRIOT_ADMIN_PASSWORD_RESET after first run).",
+            username,
         )
     else:
-        log.info("Bootstrap admin user created: username=%s (password from env)", rec["username"])
+        try:
+            app_db.create_user(
+                username=username,
+                password_hash=password_hash,
+                role="admin",
+                greeting="Welcome, admin.",
+            )
+        except Exception as e:
+            log.exception("Failed to create admin user")
+            raise RuntimeError(f"Failed to create admin user: {e}") from e
+        log.warning(
+            "Admin user created via env: username=%s (remove LUXRIOT_ADMIN_PASSWORD_RESET after first run).",
+            username,
+        )
 
 
 def resolve_auth(request: Request) -> AuthContext:
