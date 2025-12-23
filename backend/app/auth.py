@@ -111,6 +111,20 @@ def ensure_bootstrap_admin() -> None:
 
     # Existing DB: optionally reset/create admin via env var.
     if not reset:
+        if password:
+            exists = app_db.get_user_by_username(username)
+            if exists:
+                log.warning(
+                    "Admin user '%s' already exists; ignoring LUXRIOT_ADMIN_PASSWORD. "
+                    "To reset it, set LUXRIOT_ADMIN_PASSWORD_RESET=1 for one restart.",
+                    username,
+                )
+            else:
+                log.warning(
+                    "Users already exist; not creating admin user '%s'. "
+                    "To create it, set LUXRIOT_ADMIN_PASSWORD_RESET=1 (and LUXRIOT_ADMIN_PASSWORD) for one restart.",
+                    username,
+                )
         return
     if not password:
         log.warning("LUXRIOT_ADMIN_PASSWORD_RESET is set but LUXRIOT_ADMIN_PASSWORD is empty; skipping.")
