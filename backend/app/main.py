@@ -12,11 +12,22 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
 from . import app_db
+from .auth import (
+    AUTH_COOKIE,
+    AuthContext,
+    apply_auth_cookies,
+    create_login_session,
+    docs_allowed_for_role,
+    ensure_bootstrap_admin,
+    logout_session,
+    resolve_auth,
+    require_role,
+)
 from .config import DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
 from .datastore_search import SearchEngine
 from .docs_store import DocsStore
@@ -28,6 +39,7 @@ from .web_tools import WebToolError, duckduckgo_search, extract_urls, fetch_url,
 from .schemas import (
     AdminSettingsResponse,
     AdminSettingsUpdateRequest,
+    AuthMeResponse,
     ChatRequest,
     ChatResponse,
     Citation,
@@ -40,10 +52,16 @@ from .schemas import (
     ReindexJob,
     ReindexRequest,
     ReindexStatusResponse,
+    LoginRequest,
+    LoginResponse,
     SearchRequest,
     SearchResponse,
     SessionCreateRequest,
     SessionsResponse,
+    UserCreateRequest,
+    UserInfo,
+    UserUpdateRequest,
+    UsersResponse,
     WebSource,
 )
 
@@ -78,10 +96,89 @@ def _safe_resolve(base: Path, unsafe_path: str) -> Path:
 def _startup() -> None:
     app_db.init_db()
     ensure_defaults()
+    ensure_bootstrap_admin()
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@app.get("/auth/me", response_model=AuthMeResponse)
+def auth_me(response: Response, ctx: AuthContext = Depends(resolve_auth)) -> AuthMeResponse:
+    apply_auth_cookies(response, ctx)
+    p = ctx.principal
+    return AuthMeResponse(
+        authenticated=bool(p.authenticated),
+        role=p.role,
+        username=p.username,
+        greeting=p.greeting,
+    )
+
+
+@app.post("/auth/login", response_model=LoginResponse)
+def auth_login(req: LoginRequest, response: Response) -> LoginResponse:
+    principal, token = create_login_session(username=req.username, password=req.password)
+    response.set_cookie(
+        AUTH_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=int(60 * 60 * 24 * 30),
+    )
+    return LoginResponse(
+        user=AuthMeResponse(
+            authenticated=True,
+            role=principal.role,
+            username=principal.username,
+            greeting=principal.greeting,
+        )
+    )
+
+
+@app.post("/auth/logout", response_model=AuthMeResponse)
+def auth_logout(request: Request, response: Response, ctx: AuthContext = Depends(resolve_auth)) -> AuthMeResponse:
+    if ctx.principal.authenticated:
+        logout_session(request)
+    response.delete_cookie(AUTH_COOKIE)
+    anon_ctx = resolve_auth(request)
+    apply_auth_cookies(response, anon_ctx)
+    p = anon_ctx.principal
+    return AuthMeResponse(authenticated=False, role=p.role, username=None, greeting=p.greeting)
+
+
+@app.get("/auth/users", response_model=UsersResponse)
+def auth_list_users(ctx: AuthContext = Depends(resolve_auth)) -> UsersResponse:
+    require_role(ctx, {"admin"})
+    users = [UserInfo(**u) for u in app_db.list_users(limit=500)]
+    return UsersResponse(users=users)
+
+
+@app.post("/auth/users", response_model=UserInfo)
+def auth_create_user(req: UserCreateRequest, ctx: AuthContext = Depends(resolve_auth)) -> UserInfo:
+    require_role(ctx, {"admin"})
+    from .auth import hash_password
+
+    username = str(req.username).strip()
+    role = str(req.role)
+    greeting = str(req.greeting).strip() if req.greeting is not None else None
+    try:
+        rec = app_db.create_user(username=username, password_hash=hash_password(req.password), role=role, greeting=greeting)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to create user: {e}") from e
+    return UserInfo(**rec)
+
+
+@app.patch("/auth/users/{user_id}", response_model=UserInfo)
+def auth_update_user(user_id: str, req: UserUpdateRequest, ctx: AuthContext = Depends(resolve_auth)) -> UserInfo:
+    require_role(ctx, {"admin"})
+    from .auth import hash_password
+
+    password_hash = hash_password(req.password) if req.password else None
+    rec = app_db.update_user(user_id=user_id, role=req.role, greeting=req.greeting, password_hash=password_hash)
+    if not rec:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserInfo(**{k: rec[k] for k in ("user_id", "username", "role", "greeting", "created_at", "updated_at")})
 
 
 def _job_defaults() -> dict[str, Any]:
@@ -277,14 +374,16 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/admin/reindex", response_model=ReindexStatusResponse, response_model_exclude_none=True)
-async def admin_reindex_status() -> ReindexStatusResponse:
+async def admin_reindex_status(ctx: AuthContext = Depends(resolve_auth)) -> ReindexStatusResponse:
+    require_role(ctx, {"admin"})
     async with _reindex_lock:
         job = _reindex_job
     return ReindexStatusResponse(defaults=_job_defaults(), job=ReindexJob(**job) if job else None)
 
 
 @app.post("/admin/reindex", response_model=ReindexStatusResponse, response_model_exclude_none=True)
-async def admin_reindex_start(req: ReindexRequest) -> ReindexStatusResponse:
+async def admin_reindex_start(req: ReindexRequest, ctx: AuthContext = Depends(resolve_auth)) -> ReindexStatusResponse:
+    require_role(ctx, {"admin"})
     global _reindex_job, _reindex_task
 
     async with _reindex_lock:
@@ -325,20 +424,24 @@ async def admin_reindex_start(req: ReindexRequest) -> ReindexStatusResponse:
 
 
 @app.get("/")
-def ui_root() -> FileResponse:
+def ui_root(request: Request) -> FileResponse:
     index_path = REPO_ROOT / "index.html"
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="UI not found (missing index.html at repo root)")
-    return FileResponse(str(index_path), media_type="text/html")
+    ctx = resolve_auth(request)
+    resp = FileResponse(str(index_path), media_type="text/html")
+    apply_auth_cookies(resp, ctx)
+    return resp
 
 
 @app.get("/index.html")
-def ui_index() -> FileResponse:
-    return ui_root()
+def ui_index(request: Request) -> FileResponse:
+    return ui_root(request)
 
 
 @app.get("/admin/settings", response_model=AdminSettingsResponse)
-def admin_get_settings() -> dict[str, Any]:
+def admin_get_settings(ctx: AuthContext = Depends(resolve_auth)) -> dict[str, Any]:
+    require_role(ctx, {"admin"})
     try:
         return get_settings_bundle()
     except SettingsError as e:
@@ -347,7 +450,8 @@ def admin_get_settings() -> dict[str, Any]:
 
 
 @app.post("/admin/settings", response_model=AdminSettingsResponse)
-def admin_update_settings(req: AdminSettingsUpdateRequest) -> dict[str, Any]:
+def admin_update_settings(req: AdminSettingsUpdateRequest, ctx: AuthContext = Depends(resolve_auth)) -> dict[str, Any]:
+    require_role(ctx, {"admin"})
     try:
         if "system_prompt_template" in req.settings:
             tmpl = req.settings.get("system_prompt_template")
@@ -385,27 +489,43 @@ def rawdocs(version: str, path: str) -> FileResponse:
     return FileResponse(str(file_path))
 
 
+def _doc_allowed(doc_id: str, allow: set[str] | None, deny: set[str]) -> bool:
+    did = str(doc_id or "").strip()
+    if not did:
+        return False
+    if allow is not None and did not in allow:
+        return False
+    if did in deny:
+        return False
+    return True
+
+
 @app.get("/docs/catalog", response_model=DocsCatalogResponse)
-def docs_catalog() -> DocsCatalogResponse:
+def docs_catalog(ctx: AuthContext = Depends(resolve_auth)) -> DocsCatalogResponse:
     if not docs_store.is_ready():
         raise HTTPException(
             status_code=503,
             detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
         )
     try:
-        return DocsCatalogResponse(docs=docs_store.list_docs())
+        allow, deny = docs_allowed_for_role(ctx.principal.role)
+        docs = [d for d in docs_store.list_docs() if _doc_allowed(d.get("doc_id"), allow, deny)]
+        return DocsCatalogResponse(docs=docs)
     except Exception as e:
         log.exception("Docs catalog error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/docs/catalog/{doc_id}", response_model=DocCatalogDetailResponse)
-def docs_catalog_doc(doc_id: str) -> dict[str, Any]:
+def docs_catalog_doc(doc_id: str, ctx: AuthContext = Depends(resolve_auth)) -> dict[str, Any]:
     if not docs_store.is_ready():
         raise HTTPException(
             status_code=503,
             detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
         )
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    if not _doc_allowed(doc_id, allow, deny):
+        raise HTTPException(status_code=403, detail="Doc is not available for this user")
     try:
         return docs_store.list_pages(doc_id)
     except KeyError as e:
@@ -416,12 +536,15 @@ def docs_catalog_doc(doc_id: str) -> dict[str, Any]:
 
 
 @app.get("/docs/page/{doc_id}/{page_id}", response_model=DocPageResponse)
-def docs_page(doc_id: str, page_id: str) -> DocPageResponse:
+def docs_page(doc_id: str, page_id: str, ctx: AuthContext = Depends(resolve_auth)) -> DocPageResponse:
     if not docs_store.is_ready():
         raise HTTPException(
             status_code=503,
             detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
         )
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    if not _doc_allowed(doc_id, allow, deny):
+        raise HTTPException(status_code=403, detail="Doc is not available for this user")
     try:
         page = docs_store.get_page(doc_id, page_id)
         md_text = docs_store.read_markdown(page)
@@ -505,7 +628,7 @@ def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageR
 
 
 @app.post("/docs/search", response_model=SearchResponse, response_model_exclude_none=True)
-async def docs_search(req: SearchRequest) -> SearchResponse:
+async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_auth)) -> SearchResponse:
     if not search_engine.is_ready():
         log.error("Search index missing; run ingestion CLI to create datastore/%s/index.sqlite", DEFAULT_VERSION)
         raise HTTPException(
@@ -542,12 +665,16 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
     expand_neighbors = int(expand.get("neighbors", 0) or 0)
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
 
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    search_k = int(req.k)
+    buffer_k = min(max(search_k * 5, search_k + 10), 200)
+
     try:
         debug: dict[str, Any] | None = {} if bool(getattr(req, "debug", False)) else None
         async with _search_lock:
             results = await search_engine.search(
                 req.query,
-                k=req.k,
+                k=buffer_k,
                 mode=mode,
                 mmr_enabled=mmr_enabled,
                 mmr_lambda=mmr_lambda,
@@ -571,6 +698,7 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+    results = [r for r in results if _doc_allowed(r.get("doc_id"), allow, deny)][:search_k]
     chunks = [
         {
             "doc_id": r["doc_id"],
@@ -586,8 +714,19 @@ async def docs_search(req: SearchRequest) -> SearchResponse:
     return SearchResponse(chunks=chunks, citations=citations, images=images, debug=debug)
 
 
+def _assert_session_access(ctx: AuthContext, sess: dict[str, Any]) -> None:
+    owner = str(sess.get("owner_id") or "legacy")
+    if owner == "legacy":
+        if ctx.principal.role != "admin":
+            raise HTTPException(status_code=404, detail="Session not found")
+        return
+    if owner != ctx.principal.owner_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest) -> ChatResponse:
+async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(resolve_auth)) -> ChatResponse:
+    apply_auth_cookies(response, ctx)
     if not search_engine.is_ready():
         log.error("Chat requested but index missing; run ingestion CLI.")
         raise HTTPException(
@@ -600,9 +739,10 @@ async def chat(req: ChatRequest) -> ChatResponse:
         session = app_db.get_session(req.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        _assert_session_access(ctx, session)
         session_id = req.session_id
     else:
-        session = app_db.create_session(title=req.message[:60])
+        session = app_db.create_session(owner_id=ctx.principal.owner_id, title=req.message[:60])
         session_id = session["session_id"]
 
     settings = get_settings_bundle()["effective"]
@@ -657,11 +797,15 @@ async def chat(req: ChatRequest) -> ChatResponse:
     expand_neighbors = int(expand.get("neighbors", 0) or 0)
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
 
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    search_k = int(req.k)
+    buffer_k = min(max(search_k * 5, search_k + 10), 200)
+
     try:
         async with _search_lock:
             retrieval = await search_engine.search(
                 req.message,
-                k=req.k,
+                k=buffer_k,
                 mode=retrieval_mode,
                 mmr_enabled=mmr_enabled,
                 mmr_lambda=mmr_lambda,
@@ -684,9 +828,12 @@ async def chat(req: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+    retrieval = [r for r in retrieval if _doc_allowed(r.get("doc_id"), allow, deny)][:search_k]
 
     web_cfg = settings.get("web") if isinstance(settings.get("web"), dict) else {}
     web_enabled = bool(web_cfg.get("enabled", False))
+    if ctx.principal.role in ("anonymous", "client"):
+        web_enabled = False
     web_timeout_s = float(web_cfg.get("timeout_s", 15) or 15)
     web_max_bytes = int(web_cfg.get("max_bytes", 1_000_000) or 1_000_000)
     web_max_chars = int(web_cfg.get("max_chars", 20_000) or 20_000)
@@ -799,7 +946,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 
 @app.post("/chat/stream")
-async def chat_stream(req: ChatRequest) -> StreamingResponse:
+async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Depends(resolve_auth)) -> StreamingResponse:
     if not search_engine.is_ready():
         log.error("Chat requested but index missing; run ingestion CLI.")
         raise HTTPException(
@@ -812,9 +959,10 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         session = app_db.get_session(req.session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        _assert_session_access(ctx, session)
         session_id = req.session_id
     else:
-        session = app_db.create_session(title=req.message[:60])
+        session = app_db.create_session(owner_id=ctx.principal.owner_id, title=req.message[:60])
         session_id = session["session_id"]
 
     settings = get_settings_bundle()["effective"]
@@ -869,6 +1017,10 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     expand_neighbors = int(expand.get("neighbors", 0) or 0)
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
 
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    search_k = int(req.k)
+    buffer_k = min(max(search_k * 5, search_k + 10), 200)
+
     def sse(event: str, data: Any) -> bytes:
         if isinstance(data, str):
             payload = data
@@ -892,7 +1044,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 async with _search_lock:
                     retrieval = await search_engine.search(
                         req.message,
-                        k=req.k,
+                        k=buffer_k,
                         mode=retrieval_mode,
                         mmr_enabled=mmr_enabled,
                         mmr_lambda=mmr_lambda,
@@ -917,6 +1069,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             except RuntimeError as e:
                 yield sse("error", {"error": "Search unavailable", "detail": str(e)})
                 return
+            retrieval = [r for r in retrieval if _doc_allowed(r.get("doc_id"), allow, deny)][:search_k]
 
             yield sse(
                 "status",
@@ -929,6 +1082,8 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
 
             web_cfg = settings.get("web") if isinstance(settings.get("web"), dict) else {}
             web_enabled = bool(web_cfg.get("enabled", False))
+            if ctx.principal.role in ("anonymous", "client"):
+                web_enabled = False
             web_timeout_s = float(web_cfg.get("timeout_s", 15) or 15)
             web_max_bytes = int(web_cfg.get("max_bytes", 1_000_000) or 1_000_000)
             web_max_chars = int(web_cfg.get("max_chars", 20_000) or 20_000)
@@ -1141,7 +1296,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             log.exception("Chat stream error")
             yield sse("error", {"error": "Chat stream failed", "detail": str(e)})
 
-    return StreamingResponse(
+    resp = StreamingResponse(
         gen(),
         media_type="text/event-stream",
         headers={
@@ -1149,22 +1304,31 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+    apply_auth_cookies(resp, ctx)
+    return resp
 
 
 @app.get("/sessions", response_model=SessionsResponse)
-def sessions_list() -> SessionsResponse:
-    sessions = app_db.list_sessions(limit=100)
+def sessions_list(ctx: AuthContext = Depends(resolve_auth)) -> SessionsResponse:
+    if ctx.principal.role == "anonymous":
+        raise HTTPException(status_code=403, detail="Login required")
+    sessions = app_db.list_sessions(owner_id=ctx.principal.owner_id, limit=100)
     return SessionsResponse(sessions=sessions)
 
 
 @app.post("/sessions", response_model=dict)
-def sessions_create(req: SessionCreateRequest) -> dict[str, Any]:
-    return app_db.create_session(title=req.title)
+def sessions_create(req: SessionCreateRequest, ctx: AuthContext = Depends(resolve_auth)) -> dict[str, Any]:
+    if ctx.principal.role == "anonymous":
+        raise HTTPException(status_code=403, detail="Login required")
+    return app_db.create_session(owner_id=ctx.principal.owner_id, title=req.title)
 
 
 @app.get("/sessions/{session_id}/messages", response_model=MessagesResponse)
-def sessions_messages(session_id: str) -> MessagesResponse:
+def sessions_messages(session_id: str, ctx: AuthContext = Depends(resolve_auth)) -> MessagesResponse:
+    if ctx.principal.role == "anonymous":
+        raise HTTPException(status_code=403, detail="Login required")
     sess = app_db.get_session(session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
+    _assert_session_access(ctx, sess)
     return MessagesResponse(messages=app_db.list_messages(session_id, limit=500))

@@ -181,3 +181,45 @@ class DocPageResponse(BaseModel):
     source_path: str
     markdown: str
     images: list[PageImage]
+
+
+class AuthMeResponse(BaseModel):
+    authenticated: bool
+    role: Literal["admin", "redactor", "client", "anonymous"]
+    username: str | None = None
+    greeting: str | None = None
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+class LoginResponse(BaseModel):
+    user: AuthMeResponse
+
+
+class UserInfo(BaseModel):
+    user_id: str
+    username: str
+    role: Literal["admin", "redactor", "client"]
+    greeting: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class UsersResponse(BaseModel):
+    users: list[UserInfo]
+
+
+class UserCreateRequest(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=6)
+    role: Literal["admin", "redactor", "client"] = "client"
+    greeting: str | None = None
+
+
+class UserUpdateRequest(BaseModel):
+    role: Literal["admin", "redactor", "client"] | None = None
+    greeting: str | None = None
+    password: str | None = Field(default=None, min_length=6)
