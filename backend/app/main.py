@@ -1313,6 +1313,19 @@ def sessions_list(ctx: AuthContext = Depends(resolve_auth)) -> SessionsResponse:
     if ctx.principal.role == "anonymous":
         raise HTTPException(status_code=403, detail="Login required")
     sessions = app_db.list_sessions(owner_id=ctx.principal.owner_id, limit=100)
+    if ctx.principal.role == "admin":
+        sessions.extend(app_db.list_sessions(owner_id="legacy", limit=100))
+        uniq: dict[str, dict[str, Any]] = {}
+        for s in sessions:
+            sid = str(s.get("session_id") or "")
+            if sid:
+                uniq[sid] = s
+        sessions = list(uniq.values())
+        sessions.sort(
+            key=lambda x: str(x.get("last_message_at") or x.get("created_at") or ""),
+            reverse=True,
+        )
+        sessions = sessions[:100]
     return SessionsResponse(sessions=sessions)
 
 
