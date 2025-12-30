@@ -465,18 +465,23 @@
     .list{
       max-height:360px;overflow:auto;padding-right:6px;
     }
-    .item{
-      border:1px solid var(--border);
-      border-radius:12px;
-      padding:10px;
-      margin-bottom:10px;
-      background:rgba(16,17,19,.35);
-      cursor:pointer;
-    }
-    .item .top{
-      display:flex;justify-content:space-between;gap:10px;align-items:center;
-      font-size:12px;
-    }
+	    .item{
+	      border:1px solid var(--border);
+	      border-radius:12px;
+	      padding:10px;
+	      margin-bottom:10px;
+	      background:rgba(16,17,19,.35);
+	      cursor:pointer;
+	    }
+	    .item.selected{
+	      border-color:rgba(63,163,124,.55);
+	      box-shadow:0 0 0 2px rgba(63,163,124,.16) inset;
+	    }
+	    .item.disabled{opacity:.65;}
+	    .item .top{
+	      display:flex;justify-content:space-between;gap:10px;align-items:center;
+	      font-size:12px;
+	    }
     .badge{
       padding:4px 8px;border-radius:999px;border:1px solid var(--border);
       font-size:11px;color:var(--muted);
@@ -741,29 +746,66 @@
 		        <div class="row"><span class="slash">/</span> LM Studio: <span class="kbd" id="adminLmstudioUrl">—</span></div>
 		      </div>
 
-		      <div class="card">
-		        <h3>Users</h3>
-		        <div class="tiny muted">Admin-only user management (username/password + role)</div>
-		        <label>New user</label>
-		        <div class="inline">
-		          <input id="adminNewUserUsername" type="text" placeholder="username" style="flex:1;min-width:160px;"/>
-		          <select id="adminNewUserRole" style="width:160px;">
-		            <option value="client" selected>client</option>
-		            <option value="redactor">redactor</option>
-		            <option value="admin">admin</option>
-		          </select>
-		        </div>
-		        <label>Password</label>
-		        <input id="adminNewUserPassword" type="password" placeholder="min 6 chars"/>
-		        <label>Greeting (optional)</label>
-		        <input id="adminNewUserGreeting" type="text" placeholder="Welcome message shown to the user"/>
-		        <div class="inline" style="margin-top:10px;">
-		          <button class="btn ghost small" id="adminUsersRefreshBtn">REFRESH</button>
-		          <button class="btn primary small" id="adminUsersCreateBtn">CREATE</button>
-		        </div>
-		        <div class="tiny muted" id="adminUsersStatus" style="margin-top:10px;"></div>
-		        <div class="list" id="adminUsersList" style="max-height:220px;"></div>
-		      </div>
+			      <div class="card">
+			        <h3>Users</h3>
+			        <div class="tiny muted">Admin-only user management (username/email/password + role)</div>
+			        <label>New user</label>
+			        <div class="inline">
+			          <input id="adminNewUserUsername" type="text" placeholder="username" style="flex:1;min-width:160px;"/>
+			          <select id="adminNewUserRole" style="width:160px;">
+			            <option value="client" selected>client</option>
+			            <option value="redactor">redactor</option>
+			            <option value="support">support specialist</option>
+			            <option value="admin">admin</option>
+			          </select>
+			        </div>
+			        <label>Email (optional)</label>
+			        <input id="adminNewUserEmail" type="text" placeholder="name@example.com"/>
+			        <label>Password</label>
+			        <input id="adminNewUserPassword" type="password" placeholder="min 6 chars"/>
+			        <label>Greeting (optional)</label>
+			        <input id="adminNewUserGreeting" type="text" placeholder="Welcome message shown to the user"/>
+			        <div class="inline" style="margin-top:10px;">
+			          <button class="btn ghost small" id="adminUsersRefreshBtn">REFRESH</button>
+			          <button class="btn primary small" id="adminUsersCreateBtn">CREATE</button>
+			        </div>
+			        <div class="tiny muted" id="adminUsersStatus" style="margin-top:10px;"></div>
+			        <div class="list" id="adminUsersList" style="max-height:220px;"></div>
+		
+			        <details class="log-details" id="adminUserEditDetails" style="margin-top:10px;">
+			          <summary>Edit selected user</summary>
+			          <div class="tiny muted" style="margin-top:10px;">Click a user in the list to edit role/email/greeting or reset password.</div>
+		
+			          <label style="margin-top:10px;">Username</label>
+			          <input id="adminEditUserUsername" type="text" disabled placeholder="—"/>
+		
+			          <label>Email</label>
+			          <input id="adminEditUserEmail" type="text" placeholder="name@example.com"/>
+		
+			        <label>Role</label>
+			        <select id="adminEditUserRole">
+			          <option value="client">client</option>
+			          <option value="support">support specialist</option>
+			          <option value="redactor">redactor</option>
+			          <option value="admin">admin</option>
+			        </select>
+		
+			        <label>Status</label>
+			        <span class="pill"><input id="adminEditUserDisabled" type="checkbox"> disabled</span>
+		
+			        <label>Greeting</label>
+			        <input id="adminEditUserGreeting" type="text" placeholder="Welcome message shown to the user"/>
+		
+			          <label>Reset password</label>
+			          <input id="adminEditUserPassword" type="password" placeholder="leave empty to keep"/>
+		
+			          <div class="inline" style="margin-top:10px;">
+			            <button class="btn primary small" id="adminEditUserSaveBtn">SAVE</button>
+			            <button class="btn ghost small" id="adminEditUserClearBtn">CLEAR</button>
+			          </div>
+			          <div class="tiny muted" id="adminEditUserStatus" style="margin-top:10px;"></div>
+			        </details>
+			      </div>
 
 		      <div class="card">
 		        <h3>Docs</h3>
@@ -893,18 +935,27 @@
 		        </details>
 		      </div>
 	
-	      <div class="card span2">
-	        <h3>System prompt (transparent)</h3>
-	        <div class="tiny muted">
-	          Required placeholder: <span class="kbd">{{context}}</span> (context is inserted at runtime)
-	        </div>
-	        <label>Prompt template</label>
-	        <textarea id="adminSystemPrompt" class="mono" style="height:220px;"></textarea>
-	
-	        <details class="err-details" style="margin-top:10px;">
-	          <summary>Show rendered preview (without doc context)</summary>
-	          <pre id="adminPromptPreview"></pre>
-	        </details>
+		      <div class="card span2">
+		        <h3>System prompt (transparent)</h3>
+		        <div class="tiny muted">
+		          Required placeholder: <span class="kbd">{{context}}</span> (context is inserted at runtime)
+		        </div>
+		        <label>Role</label>
+		        <select id="adminPromptRole">
+		          <option value="admin">admin</option>
+		          <option value="redactor">redactor</option>
+		          <option value="support">support specialist</option>
+		          <option value="client">client</option>
+		          <option value="anonymous">anonymous</option>
+		        </select>
+		        <label style="margin-top:10px;">Prompt template (for selected role)</label>
+		        <textarea id="adminSystemPrompt" class="mono" style="height:220px;"></textarea>
+		        <div class="tiny muted" style="margin-top:6px;">Tip: keep templates consistent across roles, but you can loosen tone/tool guidance for admin.</div>
+		
+		        <details class="err-details" style="margin-top:10px;">
+		          <summary>Show rendered preview (without doc context)</summary>
+		          <pre id="adminPromptPreview"></pre>
+		        </details>
 	
 	        <div class="tiny muted" id="adminSaveHint" style="margin-top:8px;"></div>
 	      </div>
@@ -947,13 +998,13 @@
 	        </div>
 	      </div>
 	
-	      <div class="card">
-	        <h3>Notes</h3>
-	        <div class="tiny muted">
-	          - No prompts are hardcoded in service code.<br/>
-	          - This template is stored in backend settings and used for every `/chat` call.
-	        </div>
-	      </div>
+		      <div class="card">
+		        <h3>Notes</h3>
+		        <div class="tiny muted">
+		          - No prompts are hardcoded in service code.<br/>
+		          - Role-based templates are stored in backend settings and selected per logged-in user.
+		        </div>
+		      </div>
 	    </div>
 	
 	    <div class="admin-actions">
@@ -1176,23 +1227,37 @@
   </div>
 
 	  <!-- User settings / login panel -->
-	  <div id="userSettings" class="user-settings">
-	    <div class="title">User</div>
-	    <div class="row2"><span class="slash">/</span> Status: <span class="kbd" id="authStatus">—</span></div>
-	    <div class="row2"><span class="slash">/</span> Role: <span class="kbd" id="authRole">—</span></div>
+		  <div id="userSettings" class="user-settings">
+		    <div class="title">User</div>
+		    <div class="row2"><span class="slash">/</span> Status: <span class="kbd" id="authStatus">—</span></div>
+		    <div class="row2"><span class="slash">/</span> Role: <span class="kbd" id="authRole">—</span></div>
+		    <div class="row2"><span class="slash">/</span> Email: <span class="kbd" id="authEmail">—</span></div>
 
-	    <div id="loginForm" style="margin-top:10px;">
-	      <label style="margin-top:10px;">Username</label>
-	      <input id="loginUsername" type="text" placeholder="admin"/>
-	      <label>Password</label>
-	      <input id="loginPassword" type="password" placeholder="••••••••"/>
-	      <div class="inline" style="margin-top:10px;justify-content:space-between;">
-	        <button class="btn primary small" id="loginBtn">LOGIN</button>
-	        <button class="btn ghost small" id="logoutBtn" style="display:none;">LOGOUT</button>
-	      </div>
-	      <div class="tiny muted" id="authHint" style="margin-top:10px;"></div>
-	    </div>
-	  </div>
+		    <div id="loginForm" style="margin-top:10px;">
+		      <label style="margin-top:10px;">Username or email</label>
+		      <input id="loginUsername" type="text" placeholder="admin / name@example.com"/>
+		      <label>Password</label>
+		      <input id="loginPassword" type="password" placeholder="••••••••"/>
+		      <div class="inline" style="margin-top:10px;justify-content:space-between;">
+		        <button class="btn primary small" id="loginBtn">LOGIN</button>
+		        <button class="btn ghost small" id="logoutBtn" style="display:none;">LOGOUT</button>
+		      </div>
+		      <div class="tiny muted" id="authHint" style="margin-top:10px;"></div>
+		    </div>
+		
+		    <div id="pwChangeForm" style="margin-top:12px;display:none;">
+		      <div class="hr"></div>
+		      <div class="tiny muted">Change password</div>
+		      <label style="margin-top:10px;">Current password</label>
+		      <input id="pwCurrent" type="password" placeholder="••••••••"/>
+		      <label>New password</label>
+		      <input id="pwNew" type="password" placeholder="min 6 chars"/>
+		      <div class="inline" style="margin-top:10px;justify-content:space-between;">
+		        <button class="btn ghost small" id="pwChangeBtn">CHANGE</button>
+		      </div>
+		      <div class="tiny muted" id="pwChangeHint" style="margin-top:10px;"></div>
+		    </div>
+		  </div>
 
 </div>
 
@@ -1244,16 +1309,22 @@
   const redactorBtn = document.getElementById('redactorBtn');
   const historyBtn = document.getElementById('historyBtn');
 
-	  const userToggle = document.getElementById('userToggle');
-	  const userSettings = document.getElementById('userSettings');
-	  const authStatusEl = document.getElementById('authStatus');
-	  const authRoleEl = document.getElementById('authRole');
-	  const authHintEl = document.getElementById('authHint');
-	  const loginFormEl = document.getElementById('loginForm');
-	  const loginUsernameEl = document.getElementById('loginUsername');
-	  const loginPasswordEl = document.getElementById('loginPassword');
-	  const loginBtnEl = document.getElementById('loginBtn');
-	  const logoutBtnEl = document.getElementById('logoutBtn');
+		  const userToggle = document.getElementById('userToggle');
+		  const userSettings = document.getElementById('userSettings');
+		  const authStatusEl = document.getElementById('authStatus');
+		  const authRoleEl = document.getElementById('authRole');
+		  const authEmailEl = document.getElementById('authEmail');
+		  const authHintEl = document.getElementById('authHint');
+		  const loginFormEl = document.getElementById('loginForm');
+		  const loginUsernameEl = document.getElementById('loginUsername');
+		  const loginPasswordEl = document.getElementById('loginPassword');
+		  const loginBtnEl = document.getElementById('loginBtn');
+		  const logoutBtnEl = document.getElementById('logoutBtn');
+		  const pwChangeFormEl = document.getElementById('pwChangeForm');
+		  const pwCurrentEl = document.getElementById('pwCurrent');
+		  const pwNewEl = document.getElementById('pwNew');
+		  const pwChangeBtnEl = document.getElementById('pwChangeBtn');
+		  const pwChangeHintEl = document.getElementById('pwChangeHint');
 
   // Redactor fields
   const scoreEl = document.getElementById('score');
@@ -1343,12 +1414,13 @@
 	  // ---------- Admin settings UI ----------
 	  const adminApiBaseEl = document.getElementById('adminApiBase');
 	  const adminDocsVersionEl = document.getElementById('adminDocsVersion');
-	  const adminDatastoreReadyEl = document.getElementById('adminDatastoreReady');
-	  const adminLmstudioUrlEl = document.getElementById('adminLmstudioUrl');
+		  const adminDatastoreReadyEl = document.getElementById('adminDatastoreReady');
+		  const adminLmstudioUrlEl = document.getElementById('adminLmstudioUrl');
 
-	  const adminSystemPromptEl = document.getElementById('adminSystemPrompt');
-	  const adminPromptPreviewEl = document.getElementById('adminPromptPreview');
-	  const adminSaveHintEl = document.getElementById('adminSaveHint');
+		  const adminPromptRoleEl = document.getElementById('adminPromptRole');
+		  const adminSystemPromptEl = document.getElementById('adminSystemPrompt');
+		  const adminPromptPreviewEl = document.getElementById('adminPromptPreview');
+		  const adminSaveHintEl = document.getElementById('adminSaveHint');
 
 		  const adminRetrievalModeEl = document.getElementById('adminRetrievalMode');
 		  const adminRetrievalKEl = document.getElementById('adminRetrievalK');
@@ -1392,15 +1464,26 @@
 		  const adminWebMaxUrlsEl = document.getElementById('adminWebMaxUrls');
 		  const adminWebSearchKEl = document.getElementById('adminWebSearchK');
 
-		  // Admin: users
-		  const adminNewUserUsernameEl = document.getElementById('adminNewUserUsername');
-		  const adminNewUserRoleEl = document.getElementById('adminNewUserRole');
-		  const adminNewUserPasswordEl = document.getElementById('adminNewUserPassword');
-		  const adminNewUserGreetingEl = document.getElementById('adminNewUserGreeting');
-		  const adminUsersRefreshBtnEl = document.getElementById('adminUsersRefreshBtn');
-		  const adminUsersCreateBtnEl = document.getElementById('adminUsersCreateBtn');
-		  const adminUsersStatusEl = document.getElementById('adminUsersStatus');
-		  const adminUsersListEl = document.getElementById('adminUsersList');
+			  // Admin: users
+			  const adminNewUserUsernameEl = document.getElementById('adminNewUserUsername');
+			  const adminNewUserRoleEl = document.getElementById('adminNewUserRole');
+			  const adminNewUserEmailEl = document.getElementById('adminNewUserEmail');
+			  const adminNewUserPasswordEl = document.getElementById('adminNewUserPassword');
+			  const adminNewUserGreetingEl = document.getElementById('adminNewUserGreeting');
+			  const adminUsersRefreshBtnEl = document.getElementById('adminUsersRefreshBtn');
+			  const adminUsersCreateBtnEl = document.getElementById('adminUsersCreateBtn');
+			  const adminUsersStatusEl = document.getElementById('adminUsersStatus');
+			  const adminUsersListEl = document.getElementById('adminUsersList');
+			  const adminUserEditDetailsEl = document.getElementById('adminUserEditDetails');
+			  const adminEditUserUsernameEl = document.getElementById('adminEditUserUsername');
+			  const adminEditUserEmailEl = document.getElementById('adminEditUserEmail');
+			  const adminEditUserRoleEl = document.getElementById('adminEditUserRole');
+			  const adminEditUserDisabledEl = document.getElementById('adminEditUserDisabled');
+			  const adminEditUserGreetingEl = document.getElementById('adminEditUserGreeting');
+			  const adminEditUserPasswordEl = document.getElementById('adminEditUserPassword');
+			  const adminEditUserSaveBtnEl = document.getElementById('adminEditUserSaveBtn');
+			  const adminEditUserClearBtnEl = document.getElementById('adminEditUserClearBtn');
+			  const adminEditUserStatusEl = document.getElementById('adminEditUserStatus');
 
     // ---------- Docs reader UI ----------
     const docsGuideSelectEl = document.getElementById('docsGuideSelect');
@@ -1427,10 +1510,16 @@
     const debugResultsEl = document.getElementById('debugResults');
     const debugRawEl = document.getElementById('debugRaw');
 
-	  let adminBundle = null; // {defaults, settings, effective}
-	  let chatKDefault = 8;
-	  let reindexPollTimer = null;
-	  let lastReindex = null;
+			  let adminBundle = null; // {defaults, settings, effective}
+			  const PROMPT_ROLES = ['admin', 'redactor', 'support', 'client', 'anonymous'];
+			  let adminPromptTemplates = {};
+			  let adminActivePromptRole = 'admin';
+			  let adminUsersCache = [];
+			  let adminSelectedUserId = null;
+			  let adminSelectedUserDisabled = false;
+			  let chatKDefault = 8;
+		  let reindexPollTimer = null;
+		  let lastReindex = null;
 
 	  function _linesToList(text) {
 	    return String(text || '')
@@ -1439,16 +1528,18 @@
 	      .filter((x) => x.length);
 	  }
 
-	  function _renderPreview(template) {
-	    const retrievalMode = adminRetrievalModeEl.value || 'bm25';
-	    const retrievalK = adminRetrievalKEl.value || String(chatKDefault);
-	    const docPriority = _linesToList(adminDocPriorityEl.value).join(', ');
-	    const webEnabled = adminWebEnabledEl ? Boolean(adminWebEnabledEl.checked) : false;
-	    const vars = {
-	      docs_version: adminDocsVersionEl.textContent || '(unknown)',
-	      retrieval_mode: retrievalMode,
-	      retrieval_k: retrievalK,
-	      doc_priority: docPriority,
+		  function _renderPreview(template) {
+		    const retrievalMode = adminRetrievalModeEl.value || 'bm25';
+		    const retrievalK = adminRetrievalKEl.value || String(chatKDefault);
+		    const docPriority = _linesToList(adminDocPriorityEl.value).join(', ');
+		    const webEnabled = adminWebEnabledEl ? Boolean(adminWebEnabledEl.checked) : false;
+		    const vars = {
+		      user_role: adminActivePromptRole,
+		      username: (authState && authState.username) ? String(authState.username) : '(user)',
+		      docs_version: adminDocsVersionEl.textContent || '(unknown)',
+		      retrieval_mode: retrievalMode,
+		      retrieval_k: retrievalK,
+		      doc_priority: docPriority,
 	      web_enabled: String(webEnabled),
 	      web_context: '(external web context inserted at runtime)',
 	      context: '(documentation context inserted at runtime)'
@@ -1460,15 +1551,50 @@
 	    return out;
 	  }
 
-	  function _syncPromptPreview() {
-	    if (!adminPromptPreviewEl) return;
-	    adminPromptPreviewEl.textContent = _renderPreview(adminSystemPromptEl.value);
-	  }
+		  function _syncPromptPreview() {
+		    if (!adminPromptPreviewEl) return;
+		    adminPromptPreviewEl.textContent = _renderPreview(adminSystemPromptEl?.value || '');
+		  }
 
-	  adminSystemPromptEl.addEventListener('input', _syncPromptPreview);
-	  adminRetrievalModeEl.addEventListener('change', _syncPromptPreview);
-	  adminRetrievalKEl.addEventListener('input', _syncPromptPreview);
-	  adminDocPriorityEl.addEventListener('input', _syncPromptPreview);
+		  function _setPromptRole(role, { preserveCurrent = true } = {}) {
+		    const next = String(role || '').trim();
+		    const r = PROMPT_ROLES.includes(next) ? next : 'client';
+		    if (preserveCurrent && adminSystemPromptEl && adminActivePromptRole) {
+		      adminPromptTemplates[adminActivePromptRole] = String(adminSystemPromptEl.value || '');
+		    }
+		    adminActivePromptRole = r;
+		    if (adminPromptRoleEl) adminPromptRoleEl.value = r;
+		    if (adminSystemPromptEl) adminSystemPromptEl.value = String(adminPromptTemplates[r] ?? '');
+		    _syncPromptPreview();
+		  }
+
+		  function _loadPromptTemplates(source) {
+		    const effective = source || {};
+		    const base = typeof effective.system_prompt_template === 'string' ? effective.system_prompt_template : '';
+		    const raw = effective.system_prompt_templates;
+		    const out = {};
+		    if (raw && typeof raw === 'object') {
+		      PROMPT_ROLES.forEach((r) => {
+		        if (Object.prototype.hasOwnProperty.call(raw, r)) {
+		          out[r] = (typeof raw[r] === 'string') ? raw[r] : '';
+		        } else {
+		          out[r] = base;
+		        }
+		      });
+		    } else {
+		      PROMPT_ROLES.forEach((r) => { out[r] = base; });
+		    }
+		    adminPromptTemplates = out;
+		  }
+
+		  adminPromptRoleEl?.addEventListener('change', () => _setPromptRole(adminPromptRoleEl.value));
+		  adminSystemPromptEl?.addEventListener('input', () => {
+		    if (adminActivePromptRole) adminPromptTemplates[adminActivePromptRole] = String(adminSystemPromptEl.value || '');
+		    _syncPromptPreview();
+		  });
+		  adminRetrievalModeEl.addEventListener('change', _syncPromptPreview);
+		  adminRetrievalKEl.addEventListener('input', _syncPromptPreview);
+		  adminDocPriorityEl.addEventListener('input', _syncPromptPreview);
 
 	  function stopReindexPoll() {
 	    if (reindexPollTimer) {
@@ -1560,36 +1686,109 @@
 		  if (adminReindexBtnEl) adminReindexBtnEl.addEventListener('click', () => startReindex());
 		  if (adminReindexRefreshBtnEl) adminReindexRefreshBtnEl.addEventListener('click', () => fetchReindexStatus());
 
-		  function setAdminUsersStatus(text, { error = false } = {}) {
-		    if (!adminUsersStatusEl) return;
-		    adminUsersStatusEl.textContent = String(text || '');
-		    adminUsersStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
-		  }
+			  function setAdminUsersStatus(text, { error = false } = {}) {
+			    if (!adminUsersStatusEl) return;
+			    adminUsersStatusEl.textContent = String(text || '');
+			    adminUsersStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
+			  }
 
-		  function renderAdminUsers(users) {
-		    if (!adminUsersListEl) return;
-		    adminUsersListEl.innerHTML = '';
-		    (users || []).forEach((u) => {
-		      const item = document.createElement('div');
-		      item.className = 'item';
-		      const top = document.createElement('div');
-		      top.className = 'top';
-		      const left = document.createElement('div');
-		      left.textContent = u.username || u.user_id;
-		      const badge = document.createElement('div');
-		      badge.className = 'badge';
-		      badge.textContent = u.role || '—';
-		      top.appendChild(left);
-		      top.appendChild(badge);
-		      item.appendChild(top);
+			  function setAdminEditStatus(text, { error = false } = {}) {
+			    if (!adminEditUserStatusEl) return;
+			    adminEditUserStatusEl.textContent = String(text || '');
+			    adminEditUserStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
+			  }
 
-		      const sub = document.createElement('div');
-		      sub.className = 'tagline';
-		      sub.textContent = u.greeting ? `Greeting: ${u.greeting}` : `Created: ${u.created_at || '—'}`;
-		      item.appendChild(sub);
-		      adminUsersListEl.appendChild(item);
-		    });
-		    if (!(users || []).length) {
+			  function selectAdminUser(u) {
+			    if (!u) return;
+			    adminSelectedUserId = String(u.user_id || '');
+			    adminSelectedUserDisabled = Boolean(u.disabled_at);
+			    if (adminEditUserUsernameEl) adminEditUserUsernameEl.value = u.username || '';
+			    if (adminEditUserEmailEl) adminEditUserEmailEl.value = u.email || '';
+			    if (adminEditUserRoleEl) adminEditUserRoleEl.value = String(u.role || 'client');
+			    if (adminEditUserDisabledEl) adminEditUserDisabledEl.checked = adminSelectedUserDisabled;
+			    if (adminEditUserGreetingEl) adminEditUserGreetingEl.value = u.greeting || '';
+			    if (adminEditUserPasswordEl) adminEditUserPasswordEl.value = '';
+			    if (adminUserEditDetailsEl) adminUserEditDetailsEl.open = true;
+			    setAdminEditStatus(`Selected: ${u.username || u.user_id}`);
+			    renderAdminUsers(adminUsersCache);
+			  }
+
+			  function clearAdminUserSelection() {
+			    adminSelectedUserId = null;
+			    adminSelectedUserDisabled = false;
+			    if (adminEditUserUsernameEl) adminEditUserUsernameEl.value = '';
+			    if (adminEditUserEmailEl) adminEditUserEmailEl.value = '';
+			    if (adminEditUserRoleEl) adminEditUserRoleEl.value = 'client';
+			    if (adminEditUserDisabledEl) adminEditUserDisabledEl.checked = false;
+			    if (adminEditUserGreetingEl) adminEditUserGreetingEl.value = '';
+			    if (adminEditUserPasswordEl) adminEditUserPasswordEl.value = '';
+			    setAdminEditStatus('');
+			    renderAdminUsers(adminUsersCache);
+			  }
+
+			  async function saveAdminUserEdits() {
+			    if (!adminSelectedUserId) {
+			      setAdminEditStatus('Select a user first.', { error: true });
+			      return;
+			    }
+			    const emailRaw = String(adminEditUserEmailEl?.value || '').trim();
+			    const role = String(adminEditUserRoleEl?.value || 'client').trim();
+			    const desiredDisabled = Boolean(adminEditUserDisabledEl?.checked);
+			    const greetingRaw = String(adminEditUserGreetingEl?.value || '').trim();
+			    const password = String(adminEditUserPasswordEl?.value || '');
+			    const body = {
+			      email: emailRaw ? emailRaw : null,
+			      role,
+			      greeting: greetingRaw,
+			    };
+			    if (desiredDisabled !== adminSelectedUserDisabled) body.disabled = desiredDisabled;
+			    if (password) body.password = password;
+
+			    setAdminEditStatus('Saving…');
+			    try {
+			      await apiJson(`/auth/users/${encodeURIComponent(adminSelectedUserId)}`, { method: 'PATCH', body });
+			      if (adminEditUserPasswordEl) adminEditUserPasswordEl.value = '';
+			      await loadAdminUsers();
+			      setAdminEditStatus('Saved.');
+			    } catch (e) {
+			      const raw = e?.raw ? String(e.raw) : String(e);
+			      setAdminEditStatus(`Save failed: ${raw}`, { error: true });
+			    }
+			  }
+
+			  function renderAdminUsers(users) {
+			    if (!adminUsersListEl) return;
+			    adminUsersListEl.innerHTML = '';
+			    (users || []).forEach((u) => {
+			      const item = document.createElement('div');
+			      item.className = 'item';
+			      const uid = String(u.user_id || '');
+			      if (uid && adminSelectedUserId && uid === adminSelectedUserId) item.classList.add('selected');
+			      if (u.disabled_at) item.classList.add('disabled');
+			      item.addEventListener('click', () => selectAdminUser(u));
+			      const top = document.createElement('div');
+			      top.className = 'top';
+			      const left = document.createElement('div');
+			      left.textContent = u.username || u.user_id;
+			      const badge = document.createElement('div');
+			      badge.className = 'badge';
+			      badge.textContent = u.role || '—';
+			      top.appendChild(left);
+			      top.appendChild(badge);
+			      item.appendChild(top);
+
+			      const sub = document.createElement('div');
+			      sub.className = 'tagline';
+			      const parts = [];
+			      if (u.disabled_at) parts.push('DISABLED');
+			      if (u.email) parts.push(String(u.email));
+			      if (u.greeting) parts.push(`Greeting: ${u.greeting}`);
+			      if (!parts.length) parts.push(`Created: ${u.created_at || '—'}`);
+			      sub.textContent = parts.join(' · ');
+			      item.appendChild(sub);
+			      adminUsersListEl.appendChild(item);
+			    });
+			    if (!(users || []).length) {
 		      const empty = document.createElement('div');
 		      empty.className = 'tiny muted';
 		      empty.textContent = 'No users found.';
@@ -1597,42 +1796,52 @@
 		    }
 		  }
 
-		  async function loadAdminUsers() {
-		    setAdminUsersStatus('Loading users…');
-		    try {
-		      const data = await apiJson('/auth/users');
-		      renderAdminUsers(data.users || []);
-		      setAdminUsersStatus(`Loaded ${data.users?.length || 0} users.`);
-		    } catch (e) {
-		      const raw = e?.raw ? String(e.raw) : String(e);
-		      setAdminUsersStatus(`Failed to load users: ${raw}`, { error: true });
-		      renderAdminUsers([]);
-		    }
-		  }
+			  async function loadAdminUsers() {
+			    setAdminUsersStatus('Loading users…');
+			    try {
+			      const data = await apiJson('/auth/users');
+			      adminUsersCache = data.users || [];
+			      renderAdminUsers(adminUsersCache);
+			      if (adminSelectedUserId) {
+			        const u = adminUsersCache.find((x) => String(x.user_id || '') === String(adminSelectedUserId));
+			        if (u) selectAdminUser(u);
+			        else clearAdminUserSelection();
+			      }
+			      setAdminUsersStatus(`Loaded ${data.users?.length || 0} users.`);
+			    } catch (e) {
+			      const raw = e?.raw ? String(e.raw) : String(e);
+			      setAdminUsersStatus(`Failed to load users: ${raw}`, { error: true });
+			      renderAdminUsers([]);
+			    }
+			  }
 
-		  async function createAdminUser() {
-		    const username = String(adminNewUserUsernameEl?.value || '').trim();
-		    const password = String(adminNewUserPasswordEl?.value || '');
-		    const role = String(adminNewUserRoleEl?.value || 'client').trim();
-		    const greeting = String(adminNewUserGreetingEl?.value || '').trim();
-		    if (!username || !password) {
-		      setAdminUsersStatus('Username and password required.', { error: true });
+			  async function createAdminUser() {
+			    const username = String(adminNewUserUsernameEl?.value || '').trim();
+			    const email = String(adminNewUserEmailEl?.value || '').trim();
+			    const password = String(adminNewUserPasswordEl?.value || '');
+			    const role = String(adminNewUserRoleEl?.value || 'client').trim();
+			    const greeting = String(adminNewUserGreetingEl?.value || '').trim();
+			    if (!username || !password) {
+			      setAdminUsersStatus('Username and password required.', { error: true });
 		      return;
 		    }
-		    setAdminUsersStatus('Creating user…');
-		    try {
-		      await apiJson('/auth/users', { method: 'POST', body: { username, password, role, greeting: greeting || null } });
-		      if (adminNewUserPasswordEl) adminNewUserPasswordEl.value = '';
-		      await loadAdminUsers();
-		      setAdminUsersStatus(`Created user ${username}.`);
-		    } catch (e) {
-		      const raw = e?.raw ? String(e.raw) : String(e);
-		      setAdminUsersStatus(`Create failed: ${raw}`, { error: true });
-		    }
-		  }
+			    setAdminUsersStatus('Creating user…');
+			    try {
+			      await apiJson('/auth/users', { method: 'POST', body: { username, email: email || null, password, role, greeting: greeting || null } });
+			      if (adminNewUserPasswordEl) adminNewUserPasswordEl.value = '';
+			      if (adminNewUserEmailEl) adminNewUserEmailEl.value = '';
+			      await loadAdminUsers();
+			      setAdminUsersStatus(`Created user ${username}.`);
+			    } catch (e) {
+			      const raw = e?.raw ? String(e.raw) : String(e);
+			      setAdminUsersStatus(`Create failed: ${raw}`, { error: true });
+			    }
+			  }
 
-		  adminUsersRefreshBtnEl?.addEventListener('click', () => loadAdminUsers());
-		  adminUsersCreateBtnEl?.addEventListener('click', () => createAdminUser());
+			  adminUsersRefreshBtnEl?.addEventListener('click', () => loadAdminUsers());
+			  adminUsersCreateBtnEl?.addEventListener('click', () => createAdminUser());
+			  adminEditUserSaveBtnEl?.addEventListener('click', () => saveAdminUserEdits());
+			  adminEditUserClearBtnEl?.addEventListener('click', () => clearAdminUserSelection());
 
 		  async function loadAdminPanel() {
 		    adminSaveHintEl.textContent = '';
@@ -1686,17 +1895,19 @@
 		    adminWebEnabledEl.checked = Boolean(web.enabled ?? true);
 		    adminWebTimeoutSEl.value = web.timeout_s ?? 15;
 		    adminWebMaxCharsEl.value = web.max_chars ?? 20000;
-		    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
-		    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
-		    adminWebSearchKEl.value = web.search_k ?? 5;
+			    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
+			    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
+			    adminWebSearchKEl.value = web.search_k ?? 5;
 
-	    adminSystemPromptEl.value = effective.system_prompt_template || '';
+		    _loadPromptTemplates(effective);
+		    const preferredRole = PROMPT_ROLES.includes(String(authState?.role || '')) ? String(authState.role) : 'admin';
+		    _setPromptRole(preferredRole, { preserveCurrent: false });
 
-	    chatKDefault = Number(retrieval.k_default ?? 8);
-	    _syncPromptPreview();
+		    chatKDefault = Number(retrieval.k_default ?? 8);
+		    _syncPromptPreview();
 
-	    await fetchReindexStatus().catch(() => {});
-	  }
+		    await fetchReindexStatus().catch(() => {});
+		  }
 
 	  function applyDefaultsToForm() {
 	    if (!adminBundle?.defaults) return;
@@ -1735,25 +1946,38 @@
 		    adminWebTimeoutSEl.value = web.timeout_s ?? 15;
 		    adminWebMaxCharsEl.value = web.max_chars ?? 20000;
 		    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
-		    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
-		    adminWebSearchKEl.value = web.search_k ?? 5;
+			    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
+			    adminWebSearchKEl.value = web.search_k ?? 5;
 
-	    adminSystemPromptEl.value = d.system_prompt_template || '';
-	    adminSaveHintEl.textContent = 'Loaded defaults (not yet applied).';
-	    _syncPromptPreview();
-	  }
+		    _loadPromptTemplates(d);
+		    _setPromptRole(adminActivePromptRole || 'admin', { preserveCurrent: false });
+		    adminSaveHintEl.textContent = 'Loaded defaults (not yet applied).';
+		    _syncPromptPreview();
+		  }
 
-	  async function applyAdminSettings() {
-	    adminSaveHintEl.textContent = '';
-	    const tmpl = adminSystemPromptEl.value || '';
-	    if (!tmpl.includes('{{context}}')) {
-	      adminSaveHintEl.textContent = 'Error: prompt template must include {{context}}.';
-	      return;
-	    }
+		  async function applyAdminSettings() {
+		    adminSaveHintEl.textContent = '';
+		    if (adminActivePromptRole && adminSystemPromptEl) {
+		      adminPromptTemplates[adminActivePromptRole] = String(adminSystemPromptEl.value || '');
+		    }
+		    const templates = {};
+		    PROMPT_ROLES.forEach((r) => { templates[r] = String(adminPromptTemplates[r] ?? ''); });
+		    // Keep legacy single template for backward compatibility (client template is the safest default).
+		    const baseTmpl = (templates.client && templates.client.trim()) ? templates.client : String(adminSystemPromptEl?.value || '');
+		    if (!baseTmpl.includes('{{context}}')) {
+		      adminSaveHintEl.textContent = 'Error: base prompt template must include {{context}}.';
+		      return;
+		    }
+		    for (const [role, t] of Object.entries(templates)) {
+		      if (String(t || '').trim() && !String(t).includes('{{context}}')) {
+		        adminSaveHintEl.textContent = `Error: ${role} prompt must include {{context}}.`;
+		        return;
+		      }
+		    }
 
-		    const retrieval = {
-		      mode: adminRetrievalModeEl.value || 'bm25',
-		      k_default: Number(adminRetrievalKEl.value || 8),
+			    const retrieval = {
+			      mode: adminRetrievalModeEl.value || 'bm25',
+			      k_default: Number(adminRetrievalKEl.value || 8),
 		      max_citations: Number(adminMaxCitationsEl.value || 8),
 		      max_images: Number(adminMaxImagesEl.value || 6),
 		      doc_priority_boost: Number(adminDocPriorityBoostEl.value || 0),
@@ -1795,14 +2019,15 @@
 		      max_urls_per_message: Number(adminWebMaxUrlsEl.value || 2),
 		      search_k: Number(adminWebSearchKEl.value || 5)
 		    };
-	    const payload = {
-	      settings: {
-	        system_prompt_template: tmpl,
-	        retrieval,
-	        llm,
-	        web
-	      }
-	    };
+			    const payload = {
+			      settings: {
+			        system_prompt_template: baseTmpl,
+			        system_prompt_templates: templates,
+			        retrieval,
+			        llm,
+			        web
+			      }
+			    };
 
 	    try {
 	      adminBundle = await apiJson('/admin/settings', { method: 'POST', body: payload });
@@ -2297,7 +2522,7 @@
 	  }
 
 	  // ---------- Auth ----------
-	  let authState = { authenticated: false, role: 'anonymous', username: null, greeting: null };
+		  let authState = { authenticated: false, role: 'anonymous', username: null, email: null, greeting: null };
 
 	  function setActionVisible(el, visible) {
 	    if (!el) return;
@@ -2322,48 +2547,51 @@
 	    emptyState.textContent = 'Hi, I am ready to assist and learn.';
 	  }
 
-	  function applyRoleUI(a) {
-	    const role = String(a?.role || 'anonymous');
-	    const isAdmin = role === 'admin';
-	    const isRedactor = role === 'redactor';
-	    const isClient = role === 'client';
+		  function applyRoleUI(a) {
+		    const role = String(a?.role || 'anonymous');
+		    const isAdmin = role === 'admin';
+		    const isRedactor = role === 'redactor';
+		    const isSupport = role === 'support';
+		    const isClient = role === 'client';
 
-	    setActionVisible(toolsBtn, isAdmin);
-	    setActionVisible(redactorBtn, isAdmin || isRedactor);
-	    setActionVisible(debugBtn, isAdmin || isRedactor);
-	    setActionVisible(historyBtn, isAdmin || isRedactor || isClient);
+		    setActionVisible(toolsBtn, isAdmin);
+		    setActionVisible(redactorBtn, isAdmin || isRedactor);
+		    setActionVisible(debugBtn, isAdmin || isRedactor || isSupport);
+		    setActionVisible(historyBtn, isAdmin || isRedactor || isSupport || isClient);
 
-	    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
-	    if (!(isAdmin || isRedactor) && redactorPanel.classList.contains('visible')) closeAllModals();
-	    if (!(isAdmin || isRedactor) && debugPanel.classList.contains('visible')) closeAllModals();
-	    if (!(isAdmin || isRedactor || isClient) && historyPanel.classList.contains('visible')) historyPanel.classList.remove('visible');
+		    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
+		    if (!(isAdmin || isRedactor) && redactorPanel.classList.contains('visible')) closeAllModals();
+		    if (!(isAdmin || isRedactor || isSupport) && debugPanel.classList.contains('visible')) closeAllModals();
+		    if (!(isAdmin || isRedactor || isSupport || isClient) && historyPanel.classList.contains('visible')) historyPanel.classList.remove('visible');
 
-	    scheduleDockUpdate();
-	  }
+		    scheduleDockUpdate();
+		  }
 
-	  function renderAuthPanel(a) {
-	    const role = String(a?.role || 'anonymous');
-	    const status = a?.authenticated ? (a.username || 'user') : 'anonymous';
-	    if (authStatusEl) authStatusEl.textContent = status;
-	    if (authRoleEl) authRoleEl.textContent = role;
+		  function renderAuthPanel(a) {
+		    const role = String(a?.role || 'anonymous');
+		    const status = a?.authenticated ? (a.username || 'user') : 'anonymous';
+		    if (authStatusEl) authStatusEl.textContent = status;
+		    if (authRoleEl) authRoleEl.textContent = role;
+		    if (authEmailEl) authEmailEl.textContent = (a?.email ? String(a.email) : '—');
 
-	    const isAuthed = Boolean(a?.authenticated);
-	    if (logoutBtnEl) logoutBtnEl.style.display = isAuthed ? '' : 'none';
-	    if (loginBtnEl) loginBtnEl.style.display = isAuthed ? 'none' : '';
-	    if (loginUsernameEl) loginUsernameEl.disabled = isAuthed;
-	    if (loginPasswordEl) loginPasswordEl.disabled = isAuthed;
-	    if (authHintEl) {
-	      authHintEl.textContent = isAuthed ? 'Click LOGOUT to switch user.' : 'Enter username/password to login.';
-	      authHintEl.style.color = 'var(--muted)';
-	    }
-	  }
+		    const isAuthed = Boolean(a?.authenticated);
+		    if (logoutBtnEl) logoutBtnEl.style.display = isAuthed ? '' : 'none';
+		    if (loginBtnEl) loginBtnEl.style.display = isAuthed ? 'none' : '';
+		    if (loginUsernameEl) loginUsernameEl.disabled = isAuthed;
+		    if (loginPasswordEl) loginPasswordEl.disabled = isAuthed;
+		    if (pwChangeFormEl) pwChangeFormEl.style.display = isAuthed ? '' : 'none';
+		    if (authHintEl) {
+		      authHintEl.textContent = isAuthed ? 'Click LOGOUT to switch user.' : 'Enter username/email and password to login.';
+		      authHintEl.style.color = 'var(--muted)';
+		    }
+		  }
 
 	  async function refreshAuth() {
 	    try {
 	      const me = await apiJson('/auth/me');
 	      authState = me;
 	    } catch (e) {
-	      authState = { authenticated: false, role: 'anonymous', username: null, greeting: null };
+		      authState = { authenticated: false, role: 'anonymous', username: null, email: null, greeting: null };
 	    }
 	    if (userToggle) userToggle.textContent = formatUserLabel(authState);
 	    syncGreeting(authState);
@@ -2384,7 +2612,7 @@
 	    authHintEl.style.color = 'var(--muted)';
 	    try {
 	      const resp = await apiJson('/auth/login', { method: 'POST', body: { username, password } });
-	      authState = resp.user || { authenticated: true, role: 'client', username, greeting: null };
+		      authState = resp.user || { authenticated: true, role: 'client', username, email: null, greeting: null };
 	      loginPasswordEl.value = '';
 	      userSettings.classList.remove('visible');
 	      session.session_id = null;
@@ -2396,26 +2624,54 @@
 	    }
 	  }
 
-	  async function doLogout() {
-	    if (authHintEl) {
-	      authHintEl.textContent = 'Logging out…';
-	      authHintEl.style.color = 'var(--muted)';
-	    }
-	    try {
-	      await apiJson('/auth/logout', { method: 'POST' });
-	    } catch (e) {}
-	    session.session_id = null;
-	    await refreshAuth();
-	  }
+		  async function doLogout() {
+		    if (authHintEl) {
+		      authHintEl.textContent = 'Logging out…';
+		      authHintEl.style.color = 'var(--muted)';
+		    }
+		    try {
+		      await apiJson('/auth/logout', { method: 'POST' });
+		    } catch (e) {}
+		    session.session_id = null;
+		    await refreshAuth();
+		  }
+		
+		  async function doChangePassword() {
+		    if (!pwCurrentEl || !pwNewEl || !pwChangeHintEl) return;
+		    const current_password = String(pwCurrentEl.value || '');
+		    const new_password = String(pwNewEl.value || '');
+		    if (!current_password || !new_password) {
+		      pwChangeHintEl.textContent = 'Current and new password required.';
+		      pwChangeHintEl.style.color = 'var(--danger)';
+		      return;
+		    }
+		    pwChangeHintEl.textContent = 'Updating…';
+		    pwChangeHintEl.style.color = 'var(--muted)';
+		    try {
+		      await apiJson('/auth/password/change', { method: 'POST', body: { current_password, new_password } });
+		      pwCurrentEl.value = '';
+		      pwNewEl.value = '';
+		      pwChangeHintEl.textContent = 'Password updated.';
+		      pwChangeHintEl.style.color = 'var(--muted)';
+		    } catch (e) {
+		      const raw = e?.raw ? String(e.raw) : String(e);
+		      pwChangeHintEl.textContent = raw || 'Password update failed.';
+		      pwChangeHintEl.style.color = 'var(--danger)';
+		    }
+		  }
 
 	  loginBtnEl?.addEventListener('click', (e) => {
 	    e.preventDefault();
 	    doLogin();
 	  });
-	  logoutBtnEl?.addEventListener('click', (e) => {
-	    e.preventDefault();
-	    doLogout();
-	  });
+		  logoutBtnEl?.addEventListener('click', (e) => {
+		    e.preventDefault();
+		    doLogout();
+		  });
+		  pwChangeBtnEl?.addEventListener('click', (e) => {
+		    e.preventDefault();
+		    doChangePassword();
+		  });
 	  loginPasswordEl?.addEventListener('keydown', (e) => {
 	    if (e.key === 'Enter') {
 	      e.preventDefault();

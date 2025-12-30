@@ -48,6 +48,20 @@ In `Administrator tools → Web`, enable web tools, then:
 - Use `search: <query>` / `web: <query>` to include DuckDuckGo HTML search results in context.
 - The UI shows a “Web sources” section under answers when web context is used.
 
+## Authentication & roles
+
+- Default: `anonymous` (docs reader + chat; no chat history).
+- Bootstrap admin: if the DB has zero users, an `admin` user is created on startup. Set `LUXRIOT_ADMIN_USERNAME` / `LUXRIOT_ADMIN_PASSWORD` to control credentials; otherwise the password is generated and printed to server logs.
+- Reset/create admin without deleting the DB: set `LUXRIOT_ADMIN_PASSWORD_RESET=1` and `LUXRIOT_ADMIN_PASSWORD=...` for one restart.
+- Roles: `admin` (full access), `redactor` (redactor + debug + history), `support` (debug + history), `client` (history), `anonymous` (no history).
+- Login supports username or email.
+- Role-based system prompts are editable in `Administrator tools → System prompt` and are applied per logged-in user role.
+
+Auth endpoints:
+- `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`
+- Admin: `GET/POST/PATCH /auth/users` (supports `disabled: true/false`), `POST /auth/users/{id}/password/reset`
+- Self: `POST /auth/password/change`
+
 ## Environment variables
 
 - `LMSTUDIO_BASE_URL` (default `http://localhost:1234`)

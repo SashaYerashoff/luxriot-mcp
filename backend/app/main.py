@@ -54,6 +54,9 @@ from .schemas import (
     ReindexStatusResponse,
     LoginRequest,
     LoginResponse,
+    OkResponse,
+    PasswordChangeRequest,
+    PasswordResetRequest,
     SearchRequest,
     SearchResponse,
     SessionCreateRequest,
@@ -111,6 +114,7 @@ def auth_me(response: Response, ctx: AuthContext = Depends(resolve_auth)) -> Aut
         authenticated=bool(p.authenticated),
         role=p.role,
         username=p.username,
+        email=p.email,
         greeting=p.greeting,
     )
 
@@ -131,6 +135,7 @@ def auth_login(req: LoginRequest, response: Response) -> LoginResponse:
             authenticated=True,
             role=principal.role,
             username=principal.username,
+            email=principal.email,
             greeting=principal.greeting,
         )
     )
@@ -144,7 +149,36 @@ def auth_logout(request: Request, response: Response, ctx: AuthContext = Depends
     anon_ctx = resolve_auth(request)
     apply_auth_cookies(response, anon_ctx)
     p = anon_ctx.principal
-    return AuthMeResponse(authenticated=False, role=p.role, username=None, greeting=p.greeting)
+    return AuthMeResponse(authenticated=False, role=p.role, username=None, email=None, greeting=p.greeting)
+
+
+@app.post("/auth/password/change", response_model=OkResponse)
+def auth_change_password(req: PasswordChangeRequest, ctx: AuthContext = Depends(resolve_auth)) -> OkResponse:
+    if not ctx.principal.authenticated or not ctx.principal.user_id:
+        raise HTTPException(status_code=403, detail="Login required")
+    user = app_db.get_user(str(ctx.principal.user_id))
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    from .auth import hash_password, verify_password
+
+    if not verify_password(req.current_password, str(user.get("password_hash") or "")):
+        raise HTTPException(status_code=401, detail="Invalid current password")
+    app_db.update_user(user_id=str(user["user_id"]), password_hash=hash_password(req.new_password))
+    return OkResponse()
+
+
+@app.post("/auth/users/{user_id}/password/reset", response_model=OkResponse)
+def auth_reset_password(user_id: str, req: PasswordResetRequest, ctx: AuthContext = Depends(resolve_auth)) -> OkResponse:
+    require_role(ctx, {"admin"})
+    user = app_db.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from .auth import hash_password
+
+    app_db.update_user(user_id=str(user["user_id"]), password_hash=hash_password(req.new_password))
+    return OkResponse()
 
 
 @app.get("/auth/users", response_model=UsersResponse)
@@ -160,10 +194,19 @@ def auth_create_user(req: UserCreateRequest, ctx: AuthContext = Depends(resolve_
     from .auth import hash_password
 
     username = str(req.username).strip()
+    email = str(req.email).strip() if req.email is not None else None
+    if email == "":
+        email = None
     role = str(req.role)
     greeting = str(req.greeting).strip() if req.greeting is not None else None
     try:
-        rec = app_db.create_user(username=username, password_hash=hash_password(req.password), role=role, greeting=greeting)
+        rec = app_db.create_user(
+            username=username,
+            email=email or None,
+            password_hash=hash_password(req.password),
+            role=role,
+            greeting=greeting,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to create user: {e}") from e
     return UserInfo(**rec)
@@ -174,11 +217,51 @@ def auth_update_user(user_id: str, req: UserUpdateRequest, ctx: AuthContext = De
     require_role(ctx, {"admin"})
     from .auth import hash_password
 
+    target = app_db.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
     password_hash = hash_password(req.password) if req.password else None
-    rec = app_db.update_user(user_id=user_id, role=req.role, greeting=req.greeting, password_hash=password_hash)
+    update_kwargs: dict[str, Any] = {}
+    if "email" in req.model_fields_set:
+        email = str(req.email).strip() if req.email is not None else None
+        if email == "":
+            email = None
+        update_kwargs["email"] = email
+    if "disabled" in req.model_fields_set:
+        target_disabled = bool(str(target.get("disabled_at") or "").strip())
+        desired_disabled = bool(req.disabled)
+        if desired_disabled != target_disabled:
+            if desired_disabled and str(ctx.principal.user_id or "") == str(user_id):
+                raise HTTPException(status_code=400, detail="Cannot disable currently logged-in user")
+            if (
+                desired_disabled
+                and str(target.get("role") or "") == "admin"
+                and (not target_disabled)
+                and app_db.count_active_admins() <= 1
+            ):
+                raise HTTPException(status_code=400, detail="Cannot disable the last active admin")
+            update_kwargs["disabled_at"] = _utc_now() if desired_disabled else None
+
+    greeting = str(req.greeting).strip() if req.greeting is not None else None
+    if req.role is not None and req.role != "admin":
+        target_disabled = bool(str(target.get("disabled_at") or "").strip())
+        if (
+            str(target.get("role") or "") == "admin"
+            and (not target_disabled)
+            and app_db.count_active_admins() <= 1
+        ):
+            raise HTTPException(status_code=400, detail="Cannot remove the last active admin")
+
+    rec = app_db.update_user(user_id=user_id, role=req.role, greeting=greeting, password_hash=password_hash, **update_kwargs)
     if not rec:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserInfo(**{k: rec[k] for k in ("user_id", "username", "role", "greeting", "created_at", "updated_at")})
+    return UserInfo(
+        **{
+            k: rec[k]
+            for k in ("user_id", "username", "email", "role", "greeting", "disabled_at", "created_at", "updated_at")
+        }
+    )
 
 
 def _job_defaults() -> dict[str, Any]:
@@ -459,6 +542,22 @@ def admin_update_settings(req: AdminSettingsUpdateRequest, ctx: AuthContext = De
                 raise HTTPException(status_code=400, detail="system_prompt_template must be a non-empty string")
             if "{{context}}" not in tmpl:
                 raise HTTPException(status_code=400, detail="system_prompt_template must include required placeholder {{context}}")
+        if "system_prompt_templates" in req.settings:
+            tmpls = req.settings.get("system_prompt_templates")
+            if not isinstance(tmpls, dict):
+                raise HTTPException(status_code=400, detail="system_prompt_templates must be an object/dict")
+            for role, tmpl in tmpls.items():
+                if not isinstance(role, str) or not role.strip():
+                    raise HTTPException(status_code=400, detail="system_prompt_templates keys must be non-empty strings")
+                if not isinstance(tmpl, str):
+                    raise HTTPException(
+                        status_code=400, detail=f"system_prompt_templates['{role}'] must be a string (or empty to inherit)"
+                    )
+                if tmpl.strip() and "{{context}}" not in tmpl:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"system_prompt_templates['{role}'] must include required placeholder {{context}}",
+                    )
         return update_settings(req.settings)
     except SettingsError as e:
         log.exception("Settings error")
@@ -498,6 +597,19 @@ def _doc_allowed(doc_id: str, allow: set[str] | None, deny: set[str]) -> bool:
     if did in deny:
         return False
     return True
+
+
+def _select_system_prompt_template(settings: dict[str, Any], *, role: str) -> str:
+    role = str(role or "").strip() or "anonymous"
+    tmpls = settings.get("system_prompt_templates")
+    if isinstance(tmpls, dict):
+        t = tmpls.get(role)
+        if isinstance(t, str) and t.strip():
+            return t
+    t = settings.get("system_prompt_template")
+    if isinstance(t, str) and t.strip():
+        return t
+    raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
 
 
 @app.get("/docs/catalog", response_model=DocsCatalogResponse)
@@ -750,9 +862,7 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
     if not isinstance(required_placeholders, list):
         required_placeholders = ["context"]
 
-    template = settings.get("system_prompt_template")
-    if not isinstance(template, str) or not template.strip():
-        raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
+    template = _select_system_prompt_template(settings, role=ctx.principal.role)
 
     retrieval_cfg = settings.get("retrieval") if isinstance(settings.get("retrieval"), dict) else {}
     retrieval_mode = str(retrieval_cfg.get("mode", "bm25"))
@@ -911,6 +1021,8 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
         system_prompt = render_template(
             template,
             variables={
+                "user_role": str(ctx.principal.role),
+                "username": str(ctx.principal.username or ""),
                 "docs_version": DEFAULT_VERSION,
                 "retrieval_mode": retrieval_mode,
                 "retrieval_k": str(req.k),
@@ -970,9 +1082,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
     if not isinstance(required_placeholders, list):
         required_placeholders = ["context"]
 
-    template = settings.get("system_prompt_template")
-    if not isinstance(template, str) or not template.strip():
-        raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
+    template = _select_system_prompt_template(settings, role=ctx.principal.role)
 
     retrieval_cfg = settings.get("retrieval") if isinstance(settings.get("retrieval"), dict) else {}
     retrieval_mode = str(retrieval_cfg.get("mode", "bm25"))
@@ -1192,6 +1302,8 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                 system_prompt = render_template(
                     template,
                     variables={
+                        "user_role": str(ctx.principal.role),
+                        "username": str(ctx.principal.username or ""),
                         "docs_version": DEFAULT_VERSION,
                         "retrieval_mode": retrieval_mode,
                         "retrieval_k": str(req.k),

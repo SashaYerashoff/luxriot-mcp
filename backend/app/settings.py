@@ -41,6 +41,21 @@ def load_defaults() -> dict[str, Any]:
     system_prompt_template = prompt_path.read_text(encoding="utf-8")
     defaults = dict(raw)
     defaults["system_prompt_template"] = system_prompt_template
+
+    prompt_files = raw.get("system_prompt_templates_files")
+    if isinstance(prompt_files, dict):
+        templates: dict[str, str] = {}
+        for role, rel_path in prompt_files.items():
+            if not isinstance(role, str) or not role.strip():
+                continue
+            if not isinstance(rel_path, str) or not rel_path.strip():
+                continue
+            p = (REPO_ROOT / rel_path).resolve()
+            if not p.exists():
+                raise SettingsError(f"System prompt template file not found: {p}")
+            templates[str(role).strip()] = p.read_text(encoding="utf-8")
+        if templates:
+            defaults["system_prompt_templates"] = templates
     return defaults
 
 
@@ -65,9 +80,21 @@ def ensure_defaults() -> None:
     to_set: dict[str, Any] = {}
 
     # Only seed keys that are missing.
-    for key in ("required_placeholders", "system_prompt_template", "llm", "retrieval"):
+    for key in ("required_placeholders", "system_prompt_template", "system_prompt_templates", "llm", "retrieval"):
         if key not in settings and key in defaults:
             to_set[key] = defaults[key]
+
+    # If we just introduced role-based prompts, preserve any existing single prompt template.
+    if "system_prompt_templates" not in settings and "system_prompt_template" in settings:
+        base = settings.get("system_prompt_template")
+        if isinstance(base, str) and base.strip():
+            to_set["system_prompt_templates"] = {
+                "admin": base,
+                "redactor": base,
+                "support": base,
+                "client": base,
+                "anonymous": base,
+            }
 
     def merge_missing(dst: Any, src: Any) -> tuple[Any, bool]:
         if not isinstance(dst, dict) or not isinstance(src, dict):

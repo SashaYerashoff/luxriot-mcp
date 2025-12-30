@@ -15,7 +15,7 @@ from .logging_utils import get_logger
 
 log = get_logger(__name__)
 
-Role = Literal["admin", "redactor", "client", "anonymous"]
+Role = Literal["admin", "redactor", "support", "client", "anonymous"]
 
 AUTH_COOKIE = "luxriot_session"
 ANON_COOKIE = "luxriot_anon"
@@ -35,6 +35,7 @@ class Principal:
     owner_id: str
     user_id: str | None = None
     username: str | None = None
+    email: str | None = None
     greeting: str | None = None
 
 
@@ -196,6 +197,17 @@ def resolve_auth(request: Request) -> AuthContext:
             app_db.touch_auth_session(th)
         except Exception:
             pass
+        if str(sess.get("disabled_at") or "").strip():
+            try:
+                app_db.delete_auth_session(th)
+            except Exception:
+                pass
+            anon_principal, anon_cookie = _anonymous_principal(request, new_cookie=True)
+            return AuthContext(
+                principal=anon_principal,
+                set_anon_cookie=anon_cookie,
+                clear_auth_cookie=True,
+            )
 
         principal = Principal(
             authenticated=True,
@@ -203,6 +215,7 @@ def resolve_auth(request: Request) -> AuthContext:
             owner_id=str(sess.get("user_id") or ""),
             user_id=str(sess.get("user_id") or ""),
             username=str(sess.get("username") or ""),
+            email=str(sess.get("email") or "") or None,
             greeting=str(sess.get("greeting") or "") or None,
         )
         return AuthContext(principal=principal)
@@ -242,11 +255,16 @@ def require_role(ctx: AuthContext, allowed: set[Role]) -> None:
 
 
 def create_login_session(*, username: str, password: str) -> tuple[Principal, str]:
-    rec = app_db.get_user_by_username(str(username or "").strip())
+    ident = str(username or "").strip()
+    rec = app_db.get_user_by_username(ident)
+    if not rec and "@" in ident:
+        rec = app_db.get_user_by_email(ident)
     if not rec:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not verify_password(password, str(rec.get("password_hash") or "")):
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    if str(rec.get("disabled_at") or "").strip():
+        raise HTTPException(status_code=403, detail="User is disabled")
 
     token = secrets.token_urlsafe(32)
     th = _token_hash(token)
@@ -263,6 +281,7 @@ def create_login_session(*, username: str, password: str) -> tuple[Principal, st
         owner_id=str(rec["user_id"]),
         user_id=str(rec["user_id"]),
         username=str(rec["username"]),
+        email=str(rec.get("email") or "") or None,
         greeting=str(rec.get("greeting") or "") or None,
     )
     return principal, token
@@ -280,7 +299,7 @@ def logout_session(request: Request) -> None:
 
 def docs_allowed_for_role(role: Role) -> tuple[set[str] | None, set[str]]:
     # allowlist=None means "all docs allowed"
-    if role in ("admin", "redactor"):
+    if role in ("admin", "redactor", "support"):
         return None, set()
     # client + anonymous: exclude API docs by default
     deny = {"luxriot-evo-monitor-http-api"}

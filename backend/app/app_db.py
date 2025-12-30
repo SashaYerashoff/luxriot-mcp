@@ -12,6 +12,8 @@ from .logging_utils import get_logger
 
 log = get_logger(__name__)
 
+_UNSET = object()
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -58,9 +60,11 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS users (
               user_id TEXT PRIMARY KEY,
               username TEXT NOT NULL UNIQUE,
+              email TEXT UNIQUE,
               password_hash TEXT NOT NULL,
-              role TEXT NOT NULL CHECK(role IN ('admin','redactor','client')),
+              role TEXT NOT NULL CHECK(role IN ('admin','redactor','support','client')),
               greeting TEXT,
+              disabled_at TEXT,
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
@@ -97,6 +101,99 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         "UPDATE sessions SET owner_id = COALESCE(NULLIF(owner_id,''), 'legacy') WHERE owner_id IS NULL OR owner_id = ''"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_owner_created ON sessions(owner_id, created_at);")
+    _migrate_users(conn)
+
+
+def _migrate_users(conn: sqlite3.Connection) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users' LIMIT 1"
+    ).fetchone()
+    if not row:
+        return
+    users_sql = str(row["sql"] or "")
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    need_email = "email" not in cols
+    need_support_role = "support" not in users_sql
+    need_disabled_at = "disabled_at" not in cols
+    if not need_email and not need_support_role and not need_disabled_at:
+        return
+    if not need_email and not need_support_role and need_disabled_at:
+        conn.execute("ALTER TABLE users ADD COLUMN disabled_at TEXT")
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF;")
+    has_auth = bool(
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='auth_sessions' LIMIT 1"
+        ).fetchone()
+    )
+    if has_auth:
+        conn.execute("ALTER TABLE auth_sessions RENAME TO auth_sessions_old;")
+    conn.execute("ALTER TABLE users RENAME TO users_old;")
+
+    conn.execute(
+        """
+        CREATE TABLE users (
+          user_id TEXT PRIMARY KEY,
+          username TEXT NOT NULL UNIQUE,
+          email TEXT UNIQUE,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL CHECK(role IN ('admin','redactor','support','client')),
+          greeting TEXT,
+          disabled_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        """
+    )
+
+    old_cols = [r["name"] for r in conn.execute("PRAGMA table_info(users_old)").fetchall()]
+    email_expr = "NULLIF(LOWER(TRIM(email)), '')" if "email" in old_cols else "NULL"
+    disabled_expr = "disabled_at" if "disabled_at" in old_cols else "NULL"
+    conn.execute(
+        f"""
+        INSERT INTO users(user_id, username, email, password_hash, role, greeting, disabled_at, created_at, updated_at)
+        SELECT user_id,
+               username,
+               {email_expr},
+               password_hash,
+               CASE
+                 WHEN role IN ('admin','redactor','support','client') THEN role
+                 ELSE 'client'
+               END AS role,
+               greeting,
+               {disabled_expr},
+               created_at,
+               updated_at
+        FROM users_old
+        """
+    )
+    conn.execute("DROP TABLE users_old;")
+
+    conn.execute(
+        """
+        CREATE TABLE auth_sessions (
+          token_hash TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        """
+    )
+    if has_auth:
+        conn.execute(
+            """
+            INSERT INTO auth_sessions(token_hash, user_id, created_at, expires_at, last_seen_at)
+            SELECT token_hash, user_id, created_at, expires_at, last_seen_at
+            FROM auth_sessions_old
+            """
+        )
+        conn.execute("DROP TABLE auth_sessions_old;")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);")
+    conn.execute("PRAGMA foreign_keys=ON;")
 
 
 def create_session(*, owner_id: str, title: str | None = None) -> dict[str, Any]:
@@ -264,17 +361,27 @@ def count_users() -> int:
         conn.close()
 
 
-def create_user(*, username: str, password_hash: str, role: str, greeting: str | None = None) -> dict[str, Any]:
+def create_user(
+    *,
+    username: str,
+    password_hash: str,
+    role: str,
+    email: str | None = None,
+    greeting: str | None = None,
+    disabled_at: str | None = None,
+) -> dict[str, Any]:
     user_id = str(uuid.uuid4())
     now = _utc_now()
+    email = str(email or "").strip().lower() or None
+    disabled_at = str(disabled_at or "").strip() or None
     conn = _connect()
     try:
         conn.execute(
             """
-            INSERT INTO users(user_id, username, password_hash, role, greeting, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?)
+            INSERT INTO users(user_id, username, email, password_hash, role, greeting, disabled_at, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
             """,
-            (user_id, username, password_hash, role, greeting, now, now),
+            (user_id, username, email, password_hash, role, greeting, disabled_at, now, now),
         )
         conn.commit()
     finally:
@@ -282,8 +389,10 @@ def create_user(*, username: str, password_hash: str, role: str, greeting: str |
     return {
         "user_id": user_id,
         "username": username,
+        "email": email,
         "role": role,
         "greeting": greeting,
+        "disabled_at": disabled_at,
         "created_at": now,
         "updated_at": now,
     }
@@ -294,7 +403,7 @@ def list_users(limit: int = 200) -> list[dict[str, Any]]:
     try:
         rows = conn.execute(
             """
-            SELECT user_id, username, role, greeting, created_at, updated_at
+            SELECT user_id, username, email, role, greeting, disabled_at, created_at, updated_at
             FROM users
             ORDER BY created_at ASC
             LIMIT ?
@@ -307,15 +416,37 @@ def list_users(limit: int = 200) -> list[dict[str, Any]]:
 
 
 def get_user_by_username(username: str) -> dict[str, Any] | None:
+    username = str(username or "").strip()
+    if not username:
+        return None
     conn = _connect()
     try:
         row = conn.execute(
             """
-            SELECT user_id, username, password_hash, role, greeting, created_at, updated_at
+            SELECT user_id, username, email, password_hash, role, greeting, disabled_at, created_at, updated_at
             FROM users
             WHERE username = ?
             """,
             (username,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    email = str(email or "").strip().lower()
+    if not email:
+        return None
+    conn = _connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT user_id, username, email, password_hash, role, greeting, disabled_at, created_at, updated_at
+            FROM users
+            WHERE email = ?
+            """,
+            (email,),
         ).fetchone()
         return dict(row) if row else None
     finally:
@@ -327,7 +458,7 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     try:
         row = conn.execute(
             """
-            SELECT user_id, username, password_hash, role, greeting, created_at, updated_at
+            SELECT user_id, username, email, password_hash, role, greeting, disabled_at, created_at, updated_at
             FROM users
             WHERE user_id = ?
             """,
@@ -341,12 +472,20 @@ def get_user(user_id: str) -> dict[str, Any] | None:
 def update_user(
     *,
     user_id: str,
+    email: str | None | object = _UNSET,
     role: str | None = None,
     greeting: str | None = None,
     password_hash: str | None = None,
+    disabled_at: str | None | object = _UNSET,
 ) -> dict[str, Any] | None:
     updates: list[str] = []
     params: list[Any] = []
+    if email is not _UNSET:
+        normalized_email = None
+        if email is not None:
+            normalized_email = str(email).strip().lower() or None
+        updates.append("email = ?")
+        params.append(normalized_email)
     if role is not None:
         updates.append("role = ?")
         params.append(role)
@@ -356,6 +495,12 @@ def update_user(
     if password_hash is not None:
         updates.append("password_hash = ?")
         params.append(password_hash)
+    if disabled_at is not _UNSET:
+        normalized_disabled_at = None
+        if disabled_at is not None:
+            normalized_disabled_at = str(disabled_at).strip() or None
+        updates.append("disabled_at = ?")
+        params.append(normalized_disabled_at)
     if not updates:
         return get_user(user_id)
 
@@ -395,7 +540,7 @@ def get_auth_session(token_hash: str) -> dict[str, Any] | None:
         row = conn.execute(
             """
             SELECT s.token_hash, s.user_id, s.created_at, s.expires_at, s.last_seen_at,
-                   u.username, u.role, u.greeting
+                   u.username, u.email, u.role, u.greeting, u.disabled_at
             FROM auth_sessions s
             JOIN users u ON u.user_id = s.user_id
             WHERE s.token_hash = ?
@@ -403,6 +548,17 @@ def get_auth_session(token_hash: str) -> dict[str, Any] | None:
             (token_hash,),
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def count_active_admins() -> int:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(1) AS c FROM users WHERE role = 'admin' AND (disabled_at IS NULL OR disabled_at = '')"
+        ).fetchone()
+        return int(row["c"] or 0) if row else 0
     finally:
         conn.close()
 

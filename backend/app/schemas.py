@@ -185,8 +185,9 @@ class DocPageResponse(BaseModel):
 
 class AuthMeResponse(BaseModel):
     authenticated: bool
-    role: Literal["admin", "redactor", "client", "anonymous"]
+    role: Literal["admin", "redactor", "support", "client", "anonymous"]
     username: str | None = None
+    email: str | None = None
     greeting: str | None = None
 
 
@@ -202,8 +203,10 @@ class LoginResponse(BaseModel):
 class UserInfo(BaseModel):
     user_id: str
     username: str
-    role: Literal["admin", "redactor", "client"]
+    email: str | None = None
+    role: Literal["admin", "redactor", "support", "client"]
     greeting: str | None = None
+    disabled_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -214,12 +217,28 @@ class UsersResponse(BaseModel):
 
 class UserCreateRequest(BaseModel):
     username: str = Field(min_length=1)
+    email: str | None = None
     password: str = Field(min_length=6)
-    role: Literal["admin", "redactor", "client"] = "client"
+    role: Literal["admin", "redactor", "support", "client"] = "client"
     greeting: str | None = None
 
 
 class UserUpdateRequest(BaseModel):
-    role: Literal["admin", "redactor", "client"] | None = None
+    email: str | None = None
+    role: Literal["admin", "redactor", "support", "client"] | None = None
     greeting: str | None = None
+    disabled: bool | None = None
     password: str | None = Field(default=None, min_length=6)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=6)
+
+
+class PasswordResetRequest(BaseModel):
+    new_password: str = Field(min_length=6)
+
+
+class OkResponse(BaseModel):
+    ok: bool = True

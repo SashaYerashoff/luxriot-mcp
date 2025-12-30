@@ -1,6 +1,13 @@
 {
   "required_placeholders": ["context"],
   "system_prompt_template_file": "backend/prompts/system_prompt.md",
+  "system_prompt_templates_files": {
+    "admin": "backend/prompts/system_prompt_admin.md",
+    "redactor": "backend/prompts/system_prompt_staff.md",
+    "support": "backend/prompts/system_prompt_staff.md",
+    "client": "backend/prompts/system_prompt.md",
+    "anonymous": "backend/prompts/system_prompt.md"
+  },
   "llm": {
     "model": "",
     "timeout_s": 180,
