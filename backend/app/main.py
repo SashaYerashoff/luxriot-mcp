@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -44,6 +44,11 @@ from .schemas import (
     ChatResponse,
     Citation,
     DocCatalogDetailResponse,
+    DocEditInfo,
+    DocEditDeleteRequest,
+    DocEditRequest,
+    DocEditResponse,
+    DocAssetUploadResponse,
     DocPageResponse,
     DocsCatalogResponse,
     ImageResult,
@@ -668,6 +673,15 @@ def docs_page(doc_id: str, page_id: str, ctx: AuthContext = Depends(resolve_auth
         log.exception("Docs page error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+    try:
+        published = app_db.get_doc_edit(
+            version=DEFAULT_VERSION, doc_id=page.doc_id, page_id=page.page_id, status="published"
+        )
+        if published and str(published.get("content_md") or "").strip():
+            md_text = str(published["content_md"])
+    except Exception:
+        log.exception("Failed to load published doc edit")
+
     images: list[PageImage] = []
     for img in page.images:
         if not isinstance(img, dict):
@@ -691,6 +705,182 @@ def docs_page(doc_id: str, page_id: str, ctx: AuthContext = Depends(resolve_auth
         markdown=md_text,
         images=images,
     )
+
+
+def _assert_edit_role(ctx: AuthContext) -> None:
+    if ctx.principal.role not in ("admin", "redactor", "support"):
+        raise HTTPException(status_code=403, detail="Editing requires admin/redactor/support role")
+
+
+def _select_edit_version(version: str | None) -> str:
+    ver = str(version or DEFAULT_VERSION).strip() or DEFAULT_VERSION
+    if ver != DEFAULT_VERSION:
+        raise HTTPException(status_code=400, detail="Editing is only supported for the current docs version")
+    return ver
+
+
+def _to_doc_edit_info(rec: dict[str, Any] | None) -> DocEditInfo | None:
+    if not rec:
+        return None
+    return DocEditInfo(
+        edit_id=str(rec.get("edit_id") or ""),
+        status=str(rec.get("status") or "draft"),  # type: ignore[arg-type]
+        content_md=str(rec.get("content_md") or ""),
+        author_id=str(rec.get("author_id") or ""),
+        created_at=str(rec.get("created_at") or ""),
+        updated_at=str(rec.get("updated_at") or ""),
+    )
+
+
+@app.get("/docs/page/{doc_id}/{page_id}/edit", response_model=DocEditResponse)
+def docs_page_edit(doc_id: str, page_id: str, ctx: AuthContext = Depends(resolve_auth)) -> DocEditResponse:
+    _assert_edit_role(ctx)
+    if not docs_store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+        )
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    if not _doc_allowed(doc_id, allow, deny):
+        raise HTTPException(status_code=403, detail="Doc is not available for this user")
+    try:
+        page = docs_store.get_page(doc_id, page_id)
+        base_md = docs_store.read_markdown(page)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Page not found") from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        log.exception("Docs page edit error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    version = _select_edit_version(None)
+    draft = app_db.get_doc_edit(version=version, doc_id=page.doc_id, page_id=page.page_id, status="draft")
+    published = app_db.get_doc_edit(version=version, doc_id=page.doc_id, page_id=page.page_id, status="published")
+    effective_md = str(published.get("content_md")) if published else base_md
+    can_edit = ctx.principal.role in ("admin", "redactor", "support")
+    can_publish = ctx.principal.role in ("admin", "redactor")
+
+    return DocEditResponse(
+        version=version,
+        doc_id=page.doc_id,
+        doc_title=page.doc_title,
+        page_id=page.page_id,
+        page_title=page.page_title,
+        heading_path=page.heading_path,
+        base_markdown=base_md,
+        effective_markdown=effective_md,
+        draft=_to_doc_edit_info(draft),
+        published=_to_doc_edit_info(published),
+        can_edit=bool(can_edit),
+        can_publish=bool(can_publish),
+    )
+
+
+@app.post("/docs/page/{doc_id}/{page_id}/edit", response_model=DocEditResponse)
+def docs_page_edit_save(
+    doc_id: str, page_id: str, req: DocEditRequest, ctx: AuthContext = Depends(resolve_auth)
+) -> DocEditResponse:
+    _assert_edit_role(ctx)
+    if not docs_store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+        )
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    if not _doc_allowed(doc_id, allow, deny):
+        raise HTTPException(status_code=403, detail="Doc is not available for this user")
+    version = _select_edit_version(req.version)
+    status = str(req.status or "draft").strip()
+    if status not in ("draft", "published"):
+        raise HTTPException(status_code=400, detail="Invalid edit status")
+    if status == "published" and ctx.principal.role not in ("admin", "redactor"):
+        raise HTTPException(status_code=403, detail="Publishing requires admin or redactor role")
+    content = str(req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Content is empty")
+    try:
+        page = docs_store.get_page(doc_id, page_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail="Page not found") from e
+    rec = app_db.upsert_doc_edit(
+        version=version,
+        doc_id=page.doc_id,
+        page_id=page.page_id,
+        status=status,
+        content_md=content,
+        author_id=str(ctx.principal.user_id or "unknown"),
+    )
+    # Return latest edit view
+    return docs_page_edit(doc_id, page_id, ctx)
+
+
+@app.post("/docs/page/{doc_id}/{page_id}/edit/delete", response_model=DocEditResponse)
+def docs_page_edit_delete(
+    doc_id: str, page_id: str, req: DocEditDeleteRequest, ctx: AuthContext = Depends(resolve_auth)
+) -> DocEditResponse:
+    _assert_edit_role(ctx)
+    status = str(req.status or "draft").strip()
+    if status not in ("draft", "published"):
+        raise HTTPException(status_code=400, detail="Invalid edit status")
+    if status == "published" and ctx.principal.role not in ("admin", "redactor"):
+        raise HTTPException(status_code=403, detail="Publishing requires admin or redactor role")
+    version = _select_edit_version(req.version)
+    app_db.delete_doc_edit(version=version, doc_id=doc_id, page_id=page_id, status=status)
+    return docs_page_edit(doc_id, page_id, ctx)
+
+
+def _safe_slug(value: str) -> str:
+    import re
+
+    s = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip())
+    s = re.sub(r"-+", "-", s).strip("-")
+    return s or "item"
+
+
+@app.post("/docs/assets/upload", response_model=DocAssetUploadResponse)
+async def docs_asset_upload(
+    file: UploadFile = File(...),
+    doc_id: str = Form(""),
+    page_id: str = Form(""),
+    version: str | None = Form(None),
+    ctx: AuthContext = Depends(resolve_auth),
+) -> DocAssetUploadResponse:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(version)
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+    if not str(file.content_type or "").lower().startswith("image/"):
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    safe_doc = _safe_slug(doc_id)
+    safe_page = _safe_slug(page_id)
+    safe_name = _safe_slug(Path(file.filename or "image").stem) + ext
+
+    assets_dir = DATASTORE_DIR / ver / "assets" / "user" / safe_doc / safe_page
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    out_name = f"{ts}_{safe_name}"
+    out_path = assets_dir / out_name
+
+    max_bytes = 5 * 1024 * 1024
+    size = 0
+    try:
+        with out_path.open("wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(status_code=400, detail="File too large (max 5MB)")
+                f.write(chunk)
+    finally:
+        await file.close()
+
+    url = f"/assets/{ver}/user/{safe_doc}/{safe_page}/{out_name}"
+    return DocAssetUploadResponse(url=url, filename=out_name, version=ver)
 
 
 def _build_citations(results: list[dict[str, Any]], version: str, max_citations: int) -> list[Citation]:

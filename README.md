@@ -57,6 +57,12 @@ In `Administrator tools → Web`, enable web tools, then:
 - Login supports username or email.
 - Role-based system prompts are editable in `Administrator tools → System prompt` and are applied per logged-in user role.
 
+## Docs editor (alpha)
+
+- Open `Documentation` → select a page → click the pencil icon to enter edit mode.
+- Roles: `admin` + `redactor` can publish; `support` can save drafts; `client` + `anonymous` are read-only.
+- Upload screenshots in edit mode (Image button) to store under `datastore/<version>/assets/user/...`.
+
 Auth endpoints:
 - `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`
 - Admin: `GET/POST/PATCH /auth/users` (supports `disabled: true/false`), `POST /auth/users/{id}/password/reset`

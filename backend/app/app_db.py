@@ -78,11 +78,29 @@ def init_db() -> None:
               FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS doc_edits (
+              edit_id TEXT PRIMARY KEY,
+              version TEXT NOT NULL,
+              doc_id TEXT NOT NULL,
+              page_id TEXT NOT NULL,
+              status TEXT NOT NULL CHECK(status IN ('draft','published')),
+              content_md TEXT NOT NULL,
+              author_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_created
               ON messages(session_id, created_at);
 
             CREATE INDEX IF NOT EXISTS idx_users_role
               ON users(role);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_edits_key
+              ON doc_edits(version, doc_id, page_id, status);
+
+            CREATE INDEX IF NOT EXISTS idx_doc_edits_page
+              ON doc_edits(version, doc_id, page_id);
             """
         )
         _migrate_db(conn)
@@ -578,6 +596,75 @@ def delete_auth_session(token_hash: str) -> None:
     try:
         conn.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_doc_edit(*, version: str, doc_id: str, page_id: str, status: str) -> dict[str, Any] | None:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT edit_id, version, doc_id, page_id, status, content_md, author_id, created_at, updated_at
+            FROM doc_edits
+            WHERE version = ? AND doc_id = ? AND page_id = ? AND status = ?
+            """,
+            (str(version), str(doc_id), str(page_id), str(status)),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def upsert_doc_edit(
+    *,
+    version: str,
+    doc_id: str,
+    page_id: str,
+    status: str,
+    content_md: str,
+    author_id: str,
+) -> dict[str, Any]:
+    edit_id = str(uuid.uuid4())
+    now = _utc_now()
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO doc_edits(edit_id, version, doc_id, page_id, status, content_md, author_id, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(version, doc_id, page_id, status)
+            DO UPDATE SET content_md=excluded.content_md,
+                          author_id=excluded.author_id,
+                          updated_at=excluded.updated_at
+            """,
+            (edit_id, version, doc_id, page_id, status, content_md, author_id, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_doc_edit(version=version, doc_id=doc_id, page_id=page_id, status=status) or {
+        "edit_id": edit_id,
+        "version": version,
+        "doc_id": doc_id,
+        "page_id": page_id,
+        "status": status,
+        "content_md": content_md,
+        "author_id": author_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def delete_doc_edit(*, version: str, doc_id: str, page_id: str, status: str) -> bool:
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "DELETE FROM doc_edits WHERE version = ? AND doc_id = ? AND page_id = ? AND status = ?",
+            (str(version), str(doc_id), str(page_id), str(status)),
+        )
+        conn.commit()
+        return bool(cur.rowcount)
     finally:
         conn.close()
 

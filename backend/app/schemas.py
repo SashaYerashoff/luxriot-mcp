@@ -183,6 +183,47 @@ class DocPageResponse(BaseModel):
     images: list[PageImage]
 
 
+class DocEditInfo(BaseModel):
+    edit_id: str
+    status: Literal["draft", "published"]
+    content_md: str
+    author_id: str
+    created_at: str
+    updated_at: str
+
+
+class DocEditResponse(BaseModel):
+    version: str
+    doc_id: str
+    doc_title: str
+    page_id: str
+    page_title: str
+    heading_path: list[str]
+    base_markdown: str
+    effective_markdown: str
+    draft: DocEditInfo | None = None
+    published: DocEditInfo | None = None
+    can_edit: bool
+    can_publish: bool
+
+
+class DocEditRequest(BaseModel):
+    content: str = Field(min_length=1)
+    status: Literal["draft", "published"] = "draft"
+    version: str | None = None
+
+
+class DocEditDeleteRequest(BaseModel):
+    status: Literal["draft", "published"] = "draft"
+    version: str | None = None
+
+
+class DocAssetUploadResponse(BaseModel):
+    url: str
+    filename: str
+    version: str
+
+
 class AuthMeResponse(BaseModel):
     authenticated: bool
     role: Literal["admin", "redactor", "support", "client", "anonymous"]
