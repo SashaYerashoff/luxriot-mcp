@@ -9,6 +9,8 @@ backend/data/*.sqlite-journal
 
 node_modules/
 dist/
+netclient
+netclient/
 
 datastore/
 docs/
