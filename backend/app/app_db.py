@@ -90,6 +90,22 @@ def init_db() -> None:
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS doc_pages (
+              version TEXT NOT NULL,
+              doc_id TEXT NOT NULL,
+              page_id TEXT NOT NULL,
+              doc_title TEXT NOT NULL,
+              page_title TEXT NOT NULL,
+              heading_path_json TEXT NOT NULL,
+              source_path TEXT NOT NULL,
+              anchor TEXT,
+              base_markdown TEXT NOT NULL,
+              author_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(version, doc_id, page_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_created
               ON messages(session_id, created_at);
 
@@ -101,6 +117,9 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_doc_edits_page
               ON doc_edits(version, doc_id, page_id);
+
+            CREATE INDEX IF NOT EXISTS idx_doc_pages_doc
+              ON doc_pages(version, doc_id);
             """
         )
         _migrate_db(conn)
@@ -667,6 +686,129 @@ def delete_doc_edit(*, version: str, doc_id: str, page_id: str, status: str) -> 
         return bool(cur.rowcount)
     finally:
         conn.close()
+
+
+def _decode_heading_path(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(x) for x in data if str(x).strip()]
+
+
+def _row_to_doc_page(row: sqlite3.Row) -> dict[str, Any]:
+    rec = dict(row)
+    rec["heading_path"] = _decode_heading_path(rec.get("heading_path_json"))
+    return rec
+
+
+def list_doc_pages(*, version: str, doc_id: str | None = None) -> list[dict[str, Any]]:
+    conn = _connect()
+    try:
+        if doc_id:
+            rows = conn.execute(
+                """
+                SELECT version, doc_id, page_id, doc_title, page_title, heading_path_json,
+                       source_path, anchor, base_markdown, author_id, created_at, updated_at
+                FROM doc_pages
+                WHERE version = ? AND doc_id = ?
+                ORDER BY page_title
+                """,
+                (str(version), str(doc_id)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT version, doc_id, page_id, doc_title, page_title, heading_path_json,
+                       source_path, anchor, base_markdown, author_id, created_at, updated_at
+                FROM doc_pages
+                WHERE version = ?
+                ORDER BY doc_id, page_title
+                """,
+                (str(version),),
+            ).fetchall()
+        return [_row_to_doc_page(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_doc_page(*, version: str, doc_id: str, page_id: str) -> dict[str, Any] | None:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT version, doc_id, page_id, doc_title, page_title, heading_path_json,
+                   source_path, anchor, base_markdown, author_id, created_at, updated_at
+            FROM doc_pages
+            WHERE version = ? AND doc_id = ? AND page_id = ?
+            """,
+            (str(version), str(doc_id), str(page_id)),
+        ).fetchone()
+        return _row_to_doc_page(row) if row else None
+    finally:
+        conn.close()
+
+
+def create_doc_page(
+    *,
+    version: str,
+    doc_id: str,
+    page_id: str,
+    doc_title: str,
+    page_title: str,
+    heading_path: list[str],
+    source_path: str,
+    base_markdown: str,
+    author_id: str,
+    anchor: str | None = None,
+) -> dict[str, Any]:
+    now = _utc_now()
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO doc_pages(
+              version, doc_id, page_id, doc_title, page_title, heading_path_json,
+              source_path, anchor, base_markdown, author_id, created_at, updated_at
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                str(version),
+                str(doc_id),
+                str(page_id),
+                str(doc_title),
+                str(page_title),
+                json.dumps(heading_path or []),
+                str(source_path),
+                str(anchor) if anchor else None,
+                str(base_markdown),
+                str(author_id),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_doc_page(version=version, doc_id=doc_id, page_id=page_id) or {
+        "version": str(version),
+        "doc_id": str(doc_id),
+        "page_id": str(page_id),
+        "doc_title": str(doc_title),
+        "page_title": str(page_title),
+        "heading_path": list(heading_path or []),
+        "source_path": str(source_path),
+        "anchor": str(anchor) if anchor else None,
+        "base_markdown": str(base_markdown),
+        "author_id": str(author_id),
+        "created_at": now,
+        "updated_at": now,
+    }
 
 
 def delete_expired_auth_sessions(now_iso: str) -> int:

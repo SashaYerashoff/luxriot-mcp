@@ -5,6 +5,7 @@ import contextlib
 import json
 import secrets
 import shutil
+import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -44,13 +45,17 @@ from .schemas import (
     ChatResponse,
     Citation,
     DocCatalogDetailResponse,
+    DocCreateResponse,
     DocEditInfo,
     DocEditDeleteRequest,
     DocEditRequest,
     DocEditResponse,
+    DocGuideCreateRequest,
     DocAssetUploadResponse,
     DocPageResponse,
     DocsCatalogResponse,
+    DocsVersionsResponse,
+    DocSectionCreateRequest,
     ImageResult,
     MessagesResponse,
     PageImage,
@@ -84,13 +89,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-search_engine = SearchEngine(version=DEFAULT_VERSION, datastore_dir=DATASTORE_DIR)
-docs_store = DocsStore(version=DEFAULT_VERSION, datastore_dir=DATASTORE_DIR)
+_search_engines: dict[str, SearchEngine] = {}
+_docs_stores: dict[str, DocsStore] = {}
 
 _search_lock = asyncio.Lock()
 _reindex_lock = asyncio.Lock()
 _reindex_job: dict[str, Any] | None = None
 _reindex_task: asyncio.Task[None] | None = None
+
+
+def _available_versions() -> list[str]:
+    versions: list[str] = []
+    if DATASTORE_DIR.exists():
+        for entry in DATASTORE_DIR.iterdir():
+            if not entry.is_dir():
+                continue
+            name = entry.name
+            if name.startswith("."):
+                continue
+            if (entry / "pages.jsonl").exists():
+                versions.append(name)
+    versions = sorted(set(versions))
+    if DEFAULT_VERSION in versions:
+        versions = [DEFAULT_VERSION] + [v for v in versions if v != DEFAULT_VERSION]
+    return versions
+
+
+def _require_version(version: str | None) -> str:
+    ver = str(version or DEFAULT_VERSION).strip() or DEFAULT_VERSION
+    versions = _available_versions()
+    if ver not in versions:
+        raise HTTPException(status_code=404, detail=f"Unknown docs version '{ver}'")
+    return ver
+
+
+def _get_docs_store(version: str) -> DocsStore:
+    store = _docs_stores.get(version)
+    if not store:
+        store = DocsStore(version=version, datastore_dir=DATASTORE_DIR)
+        _docs_stores[version] = store
+    return store
+
+
+def _get_search_engine(version: str) -> SearchEngine:
+    engine = _search_engines.get(version)
+    if not engine:
+        engine = SearchEngine(version=version, datastore_dir=DATASTORE_DIR)
+        _search_engines[version] = engine
+    return engine
 
 
 def _safe_resolve(base: Path, unsafe_path: str) -> Path:
@@ -412,7 +458,7 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
     job["updated_at"] = _utc_now()
 
     async with _search_lock:
-        search_engine.close()
+        _get_search_engine(version).close()
         try:
             if not build_dir.exists():
                 raise RuntimeError(f"Build output missing: {build_dir}")
@@ -424,7 +470,7 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
                 target_dir.rename(backup_dir)
 
             build_dir.rename(target_dir)
-            docs_store.invalidate()
+            _get_docs_store(version).invalidate()
             if backup_dir and backup_dir.exists():
                 pass
         except Exception as e:
@@ -451,11 +497,12 @@ def health() -> dict[str, Any]:
         retrieval_mode = str(retrieval.get("mode", "bm25"))
     except Exception:
         retrieval_mode = "unknown"
+    engine = _get_search_engine(DEFAULT_VERSION)
     return {
         "status": "ok",
         "docs_version": DEFAULT_VERSION,
-        "datastore_ready": search_engine.is_ready(),
-        "embeddings_ready": search_engine.embeddings_ready() if search_engine.is_ready() else False,
+        "datastore_ready": engine.is_ready(),
+        "embeddings_ready": engine.embeddings_ready() if engine.is_ready() else False,
         "retrieval_mode": retrieval_mode,
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
     }
@@ -604,6 +651,95 @@ def _doc_allowed(doc_id: str, allow: set[str] | None, deny: set[str]) -> bool:
     return True
 
 
+def _get_doc_title(version: str, doc_id: str) -> str | None:
+    store = _get_docs_store(version)
+    if store.is_ready():
+        try:
+            data = store.list_pages(doc_id)
+            return str(data.get("doc_title") or doc_id)
+        except KeyError:
+            pass
+    pages = app_db.list_doc_pages(version=version, doc_id=doc_id)
+    if pages:
+        return str(pages[0].get("doc_title") or doc_id)
+    return None
+
+
+def _resolve_doc_page(version: str, doc_id: str, page_id: str) -> tuple[dict[str, Any], str, list[PageImage]]:
+    store = _get_docs_store(version)
+    if store.is_ready():
+        try:
+            page = store.get_page(doc_id, page_id)
+            md_text = store.read_markdown(page)
+            images: list[PageImage] = []
+            for img in page.images:
+                if not isinstance(img, dict):
+                    continue
+                url = str(img.get("url") or "").strip()
+                if not url:
+                    continue
+                original = str(img.get("original") or "").strip()
+                alt = str(img.get("alt") or "").strip() or None
+                images.append(PageImage(original=original, url=url, alt=alt))
+            return (
+                {
+                    "doc_id": page.doc_id,
+                    "doc_title": page.doc_title,
+                    "page_id": page.page_id,
+                    "page_title": page.page_title,
+                    "heading_path": page.heading_path,
+                    "anchor": page.anchor,
+                    "source_path": page.source_path,
+                },
+                md_text,
+                images,
+            )
+        except KeyError:
+            pass
+
+    custom = app_db.get_doc_page(version=version, doc_id=doc_id, page_id=page_id)
+    if not custom:
+        raise HTTPException(status_code=404, detail="Page not found")
+    doc_title = _get_doc_title(version, doc_id) or str(custom.get("doc_title") or doc_id)
+    page_title = str(custom.get("page_title") or page_id)
+    heading_path = custom.get("heading_path") or [doc_title, page_title]
+    return (
+        {
+            "doc_id": doc_id,
+            "doc_title": doc_title,
+            "page_id": page_id,
+            "page_title": page_title,
+            "heading_path": heading_path,
+            "anchor": custom.get("anchor"),
+            "source_path": str(custom.get("source_path") or ""),
+        },
+        str(custom.get("base_markdown") or ""),
+        [],
+    )
+
+
+def _doc_exists(version: str, doc_id: str) -> bool:
+    store = _get_docs_store(version)
+    if store.is_ready():
+        try:
+            store.list_pages(doc_id)
+            return True
+        except KeyError:
+            pass
+    return bool(app_db.list_doc_pages(version=version, doc_id=doc_id))
+
+
+def _page_exists(version: str, doc_id: str, page_id: str) -> bool:
+    store = _get_docs_store(version)
+    if store.is_ready():
+        try:
+            store.get_page(doc_id, page_id)
+            return True
+        except KeyError:
+            pass
+    return bool(app_db.get_doc_page(version=version, doc_id=doc_id, page_id=page_id))
+
+
 def _select_system_prompt_template(settings: dict[str, Any], *, role: str) -> str:
     role = str(role or "").strip() or "anonymous"
     tmpls = settings.get("system_prompt_templates")
@@ -617,91 +753,142 @@ def _select_system_prompt_template(settings: dict[str, Any], *, role: str) -> st
     raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
 
 
+@app.get("/docs/versions", response_model=DocsVersionsResponse)
+def docs_versions(ctx: AuthContext = Depends(resolve_auth)) -> DocsVersionsResponse:
+    versions = _available_versions()
+    if not versions:
+        raise HTTPException(status_code=503, detail="Docs catalog is not available. Run ingestion first.")
+    return DocsVersionsResponse(default_version=DEFAULT_VERSION, versions=versions)
+
+
 @app.get("/docs/catalog", response_model=DocsCatalogResponse)
-def docs_catalog(ctx: AuthContext = Depends(resolve_auth)) -> DocsCatalogResponse:
-    if not docs_store.is_ready():
+def docs_catalog(version: str | None = None, ctx: AuthContext = Depends(resolve_auth)) -> DocsCatalogResponse:
+    ver = _require_version(version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
         raise HTTPException(
             status_code=503,
-            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
         )
     try:
         allow, deny = docs_allowed_for_role(ctx.principal.role)
-        docs = [d for d in docs_store.list_docs() if _doc_allowed(d.get("doc_id"), allow, deny)]
-        return DocsCatalogResponse(docs=docs)
+        docs = [d for d in store.list_docs() if _doc_allowed(d.get("doc_id"), allow, deny)]
+        custom_pages = app_db.list_doc_pages(version=ver)
+        doc_map: dict[str, dict[str, Any]] = {d["doc_id"]: dict(d) for d in docs}
+        ordered = [d["doc_id"] for d in docs]
+        for page in custom_pages:
+            doc_id = str(page.get("doc_id") or "")
+            if not _doc_allowed(doc_id, allow, deny):
+                continue
+            if doc_id in doc_map:
+                doc_map[doc_id]["page_count"] = int(doc_map[doc_id].get("page_count") or 0) + 1
+            else:
+                doc_map[doc_id] = {
+                    "doc_id": doc_id,
+                    "doc_title": str(page.get("doc_title") or doc_id),
+                    "page_count": 1,
+                }
+        custom_only = [d for d in doc_map.keys() if d not in ordered]
+        custom_only.sort(key=lambda d: str(doc_map[d].get("doc_title") or d).lower())
+        docs_out = [doc_map[d] for d in ordered if d in doc_map] + [doc_map[d] for d in custom_only]
+        return DocsCatalogResponse(docs=docs_out)
     except Exception as e:
         log.exception("Docs catalog error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/docs/catalog/{doc_id}", response_model=DocCatalogDetailResponse)
-def docs_catalog_doc(doc_id: str, ctx: AuthContext = Depends(resolve_auth)) -> dict[str, Any]:
-    if not docs_store.is_ready():
+def docs_catalog_doc(doc_id: str, version: str | None = None, ctx: AuthContext = Depends(resolve_auth)) -> dict[str, Any]:
+    ver = _require_version(version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
         raise HTTPException(
             status_code=503,
-            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
         )
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     if not _doc_allowed(doc_id, allow, deny):
         raise HTTPException(status_code=403, detail="Doc is not available for this user")
     try:
-        return docs_store.list_pages(doc_id)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail="Doc not found") from e
+        pages: list[dict[str, Any]] = []
+        doc_title = None
+        try:
+            data = store.list_pages(doc_id)
+            doc_title = data.get("doc_title")
+            pages.extend(data.get("pages") or [])
+        except KeyError:
+            pass
+
+        custom_pages = app_db.list_doc_pages(version=ver, doc_id=doc_id)
+        if not doc_title and custom_pages:
+            doc_title = str(custom_pages[0].get("doc_title") or doc_id)
+
+        existing_ids = {p.get("page_id") for p in pages}
+        for page in custom_pages:
+            pid = str(page.get("page_id") or "")
+            if pid in existing_ids:
+                continue
+            heading_path = page.get("heading_path") or [doc_title or doc_id, page.get("page_title") or pid]
+            pages.append(
+                {
+                    "page_id": pid,
+                    "page_title": page.get("page_title") or pid,
+                    "heading_path": heading_path,
+                    "source_path": page.get("source_path") or "",
+                    "anchor": page.get("anchor"),
+                }
+            )
+
+        if not pages:
+            raise HTTPException(status_code=404, detail="Doc not found")
+        return {"doc_id": doc_id, "doc_title": doc_title or doc_id, "pages": pages}
     except Exception as e:
         log.exception("Docs catalog doc error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/docs/page/{doc_id}/{page_id}", response_model=DocPageResponse)
-def docs_page(doc_id: str, page_id: str, ctx: AuthContext = Depends(resolve_auth)) -> DocPageResponse:
-    if not docs_store.is_ready():
+def docs_page(
+    doc_id: str, page_id: str, version: str | None = None, ctx: AuthContext = Depends(resolve_auth)
+) -> DocPageResponse:
+    ver = _require_version(version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
         raise HTTPException(
             status_code=503,
-            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
         )
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     if not _doc_allowed(doc_id, allow, deny):
         raise HTTPException(status_code=403, detail="Doc is not available for this user")
     try:
-        page = docs_store.get_page(doc_id, page_id)
-        md_text = docs_store.read_markdown(page)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail="Page not found") from e
+        page_meta, md_text, images = _resolve_doc_page(ver, doc_id, page_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception("Docs page error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     try:
         published = app_db.get_doc_edit(
-            version=DEFAULT_VERSION, doc_id=page.doc_id, page_id=page.page_id, status="published"
+            version=ver, doc_id=page_meta["doc_id"], page_id=page_meta["page_id"], status="published"
         )
         if published and str(published.get("content_md") or "").strip():
             md_text = str(published["content_md"])
     except Exception:
         log.exception("Failed to load published doc edit")
 
-    images: list[PageImage] = []
-    for img in page.images:
-        if not isinstance(img, dict):
-            continue
-        url = str(img.get("url") or "").strip()
-        if not url:
-            continue
-        original = str(img.get("original") or "").strip()
-        alt = str(img.get("alt") or "").strip() or None
-        images.append(PageImage(original=original, url=url, alt=alt))
-
     return DocPageResponse(
-        version=DEFAULT_VERSION,
-        doc_id=page.doc_id,
-        doc_title=page.doc_title,
-        page_id=page.page_id,
-        page_title=page.page_title,
-        heading_path=page.heading_path,
-        anchor=page.anchor,
-        source_path=page.source_path,
+        version=ver,
+        doc_id=page_meta["doc_id"],
+        doc_title=page_meta["doc_title"],
+        page_id=page_meta["page_id"],
+        page_title=page_meta["page_title"],
+        heading_path=page_meta["heading_path"],
+        anchor=page_meta.get("anchor"),
+        source_path=page_meta.get("source_path") or "",
         markdown=md_text,
         images=images,
     )
@@ -713,10 +900,7 @@ def _assert_edit_role(ctx: AuthContext) -> None:
 
 
 def _select_edit_version(version: str | None) -> str:
-    ver = str(version or DEFAULT_VERSION).strip() or DEFAULT_VERSION
-    if ver != DEFAULT_VERSION:
-        raise HTTPException(status_code=400, detail="Editing is only supported for the current docs version")
-    return ver
+    return _require_version(version)
 
 
 def _to_doc_edit_info(rec: dict[str, Any] | None) -> DocEditInfo | None:
@@ -733,41 +917,45 @@ def _to_doc_edit_info(rec: dict[str, Any] | None) -> DocEditInfo | None:
 
 
 @app.get("/docs/page/{doc_id}/{page_id}/edit", response_model=DocEditResponse)
-def docs_page_edit(doc_id: str, page_id: str, ctx: AuthContext = Depends(resolve_auth)) -> DocEditResponse:
+def docs_page_edit(
+    doc_id: str, page_id: str, version: str | None = None, ctx: AuthContext = Depends(resolve_auth)
+) -> DocEditResponse:
     _assert_edit_role(ctx)
-    if not docs_store.is_ready():
+    ver = _select_edit_version(version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
         raise HTTPException(
             status_code=503,
-            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
         )
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     if not _doc_allowed(doc_id, allow, deny):
         raise HTTPException(status_code=403, detail="Doc is not available for this user")
     try:
-        page = docs_store.get_page(doc_id, page_id)
-        base_md = docs_store.read_markdown(page)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail="Page not found") from e
+        page_meta, base_md, _ = _resolve_doc_page(ver, doc_id, page_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception("Docs page edit error")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    version = _select_edit_version(None)
-    draft = app_db.get_doc_edit(version=version, doc_id=page.doc_id, page_id=page.page_id, status="draft")
-    published = app_db.get_doc_edit(version=version, doc_id=page.doc_id, page_id=page.page_id, status="published")
+    draft = app_db.get_doc_edit(version=ver, doc_id=page_meta["doc_id"], page_id=page_meta["page_id"], status="draft")
+    published = app_db.get_doc_edit(
+        version=ver, doc_id=page_meta["doc_id"], page_id=page_meta["page_id"], status="published"
+    )
     effective_md = str(published.get("content_md")) if published else base_md
     can_edit = ctx.principal.role in ("admin", "redactor", "support")
     can_publish = ctx.principal.role in ("admin", "redactor")
 
     return DocEditResponse(
-        version=version,
-        doc_id=page.doc_id,
-        doc_title=page.doc_title,
-        page_id=page.page_id,
-        page_title=page.page_title,
-        heading_path=page.heading_path,
+        version=ver,
+        doc_id=page_meta["doc_id"],
+        doc_title=page_meta["doc_title"],
+        page_id=page_meta["page_id"],
+        page_title=page_meta["page_title"],
+        heading_path=page_meta["heading_path"],
         base_markdown=base_md,
         effective_markdown=effective_md,
         draft=_to_doc_edit_info(draft),
@@ -782,15 +970,16 @@ def docs_page_edit_save(
     doc_id: str, page_id: str, req: DocEditRequest, ctx: AuthContext = Depends(resolve_auth)
 ) -> DocEditResponse:
     _assert_edit_role(ctx)
-    if not docs_store.is_ready():
+    ver = _select_edit_version(req.version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
         raise HTTPException(
             status_code=503,
-            detail=f"Docs catalog not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
         )
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     if not _doc_allowed(doc_id, allow, deny):
         raise HTTPException(status_code=403, detail="Doc is not available for this user")
-    version = _select_edit_version(req.version)
     status = str(req.status or "draft").strip()
     if status not in ("draft", "published"):
         raise HTTPException(status_code=400, detail="Invalid edit status")
@@ -800,19 +989,21 @@ def docs_page_edit_save(
     if not content:
         raise HTTPException(status_code=400, detail="Content is empty")
     try:
-        page = docs_store.get_page(doc_id, page_id)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail="Page not found") from e
-    rec = app_db.upsert_doc_edit(
-        version=version,
-        doc_id=page.doc_id,
-        page_id=page.page_id,
+        page_meta, _, _ = _resolve_doc_page(ver, doc_id, page_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except HTTPException:
+        raise
+    app_db.upsert_doc_edit(
+        version=ver,
+        doc_id=page_meta["doc_id"],
+        page_id=page_meta["page_id"],
         status=status,
         content_md=content,
         author_id=str(ctx.principal.user_id or "unknown"),
     )
     # Return latest edit view
-    return docs_page_edit(doc_id, page_id, ctx)
+    return docs_page_edit(doc_id, page_id, version=ver, ctx=ctx)
 
 
 @app.post("/docs/page/{doc_id}/{page_id}/edit/delete", response_model=DocEditResponse)
@@ -825,9 +1016,9 @@ def docs_page_edit_delete(
         raise HTTPException(status_code=400, detail="Invalid edit status")
     if status == "published" and ctx.principal.role not in ("admin", "redactor"):
         raise HTTPException(status_code=403, detail="Publishing requires admin or redactor role")
-    version = _select_edit_version(req.version)
-    app_db.delete_doc_edit(version=version, doc_id=doc_id, page_id=page_id, status=status)
-    return docs_page_edit(doc_id, page_id, ctx)
+    ver = _select_edit_version(req.version)
+    app_db.delete_doc_edit(version=ver, doc_id=doc_id, page_id=page_id, status=status)
+    return docs_page_edit(doc_id, page_id, version=ver, ctx=ctx)
 
 
 def _safe_slug(value: str) -> str:
@@ -836,6 +1027,120 @@ def _safe_slug(value: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip())
     s = re.sub(r"-+", "-", s).strip("-")
     return s or "item"
+
+
+def _unique_doc_id(version: str, base: str) -> str:
+    root = _safe_slug(base)
+    candidate = root
+    idx = 1
+    while _doc_exists(version, candidate):
+        candidate = f"{root}-{idx}"
+        idx += 1
+    return candidate
+
+
+def _unique_page_id(version: str, doc_id: str, base: str) -> str:
+    root = _safe_slug(base)
+    candidate = root
+    idx = 1
+    while _page_exists(version, doc_id, candidate):
+        candidate = f"{root}-{idx}"
+        idx += 1
+    return candidate
+
+
+@app.post("/docs/guide", response_model=DocCreateResponse)
+def docs_guide_create(req: DocGuideCreateRequest, ctx: AuthContext = Depends(resolve_auth)) -> DocCreateResponse:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(req.version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
+        )
+
+    doc_title = str(req.doc_title or "").strip()
+    if not doc_title:
+        raise HTTPException(status_code=400, detail="doc_title is required")
+    doc_id = _unique_doc_id(ver, doc_title)
+    page_title = str(req.page_title or "").strip() or "Overview"
+    page_id = _unique_page_id(ver, doc_id, page_title)
+    base_md = f"# {page_title}\n\n"
+    heading_path = [doc_title, page_title]
+    source_path = f"custom/{doc_id}/{page_id}.md"
+
+    try:
+        rec = app_db.create_doc_page(
+            version=ver,
+            doc_id=doc_id,
+            page_id=page_id,
+            doc_title=doc_title,
+            page_title=page_title,
+            heading_path=heading_path,
+            source_path=source_path,
+            base_markdown=base_md,
+            author_id=str(ctx.principal.user_id or "unknown"),
+        )
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(status_code=409, detail="Guide already exists") from e
+
+    return DocCreateResponse(
+        version=ver,
+        doc_id=doc_id,
+        doc_title=doc_title,
+        page_id=rec.get("page_id") or page_id,
+        page_title=rec.get("page_title") or page_title,
+    )
+
+
+@app.post("/docs/section", response_model=DocCreateResponse)
+def docs_section_create(req: DocSectionCreateRequest, ctx: AuthContext = Depends(resolve_auth)) -> DocCreateResponse:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(req.version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
+        )
+    doc_id = str(req.doc_id or "").strip()
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="doc_id is required")
+    doc_title = _get_doc_title(ver, doc_id)
+    if not doc_title:
+        raise HTTPException(status_code=404, detail="Doc not found")
+
+    page_title = str(req.page_title or "").strip()
+    if not page_title:
+        raise HTTPException(status_code=400, detail="page_title is required")
+    page_id = _unique_page_id(ver, doc_id, page_title)
+    base_md = f"# {page_title}\n\n"
+    heading_path = [doc_title, page_title]
+    source_path = f"custom/{doc_id}/{page_id}.md"
+
+    try:
+        rec = app_db.create_doc_page(
+            version=ver,
+            doc_id=doc_id,
+            page_id=page_id,
+            doc_title=doc_title,
+            page_title=page_title,
+            heading_path=heading_path,
+            source_path=source_path,
+            base_markdown=base_md,
+            author_id=str(ctx.principal.user_id or "unknown"),
+        )
+    except sqlite3.IntegrityError as e:
+        raise HTTPException(status_code=409, detail="Section already exists") from e
+
+    return DocCreateResponse(
+        version=ver,
+        doc_id=doc_id,
+        doc_title=doc_title,
+        page_id=rec.get("page_id") or page_id,
+        page_title=rec.get("page_title") or page_title,
+    )
 
 
 @app.post("/docs/assets/upload", response_model=DocAssetUploadResponse)
@@ -931,11 +1236,13 @@ def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageR
 
 @app.post("/docs/search", response_model=SearchResponse, response_model_exclude_none=True)
 async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_auth)) -> SearchResponse:
-    if not search_engine.is_ready():
-        log.error("Search index missing; run ingestion CLI to create datastore/%s/index.sqlite", DEFAULT_VERSION)
+    ver = _require_version(req.version)
+    engine = _get_search_engine(ver)
+    if not engine.is_ready():
+        log.error("Search index missing; run ingestion CLI to create datastore/%s/index.sqlite", ver)
         raise HTTPException(
             status_code=503,
-            detail=f"Search index not found for version '{DEFAULT_VERSION}'. Run the ingestion CLI first.",
+            detail=f"Search index not found for version '{ver}'. Run the ingestion CLI first.",
         )
 
     settings = get_settings_bundle()["effective"]
@@ -974,7 +1281,7 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
     try:
         debug: dict[str, Any] | None = {} if bool(getattr(req, "debug", False)) else None
         async with _search_lock:
-            results = await search_engine.search(
+            results = await engine.search(
                 req.query,
                 k=buffer_k,
                 mode=mode,
@@ -1011,7 +1318,7 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
         }
         for r in results
     ]
-    citations = _build_citations(results, DEFAULT_VERSION, max_citations=max_citations)
+    citations = _build_citations(results, ver, max_citations=max_citations)
     images = _build_images(results, max_images=max_images)
     return SearchResponse(chunks=chunks, citations=citations, images=images, debug=debug)
 
@@ -1029,7 +1336,8 @@ def _assert_session_access(ctx: AuthContext, sess: dict[str, Any]) -> None:
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(resolve_auth)) -> ChatResponse:
     apply_auth_cookies(response, ctx)
-    if not search_engine.is_ready():
+    engine = _get_search_engine(DEFAULT_VERSION)
+    if not engine.is_ready():
         log.error("Chat requested but index missing; run ingestion CLI.")
         raise HTTPException(
             status_code=503,
@@ -1103,7 +1411,7 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
 
     try:
         async with _search_lock:
-            retrieval = await search_engine.search(
+            retrieval = await engine.search(
                 req.message,
                 k=buffer_k,
                 mode=retrieval_mode,
@@ -1249,7 +1557,8 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Depends(resolve_auth)) -> StreamingResponse:
-    if not search_engine.is_ready():
+    engine = _get_search_engine(DEFAULT_VERSION)
+    if not engine.is_ready():
         log.error("Chat requested but index missing; run ingestion CLI.")
         raise HTTPException(
             status_code=503,
@@ -1342,7 +1651,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
             )
             try:
                 async with _search_lock:
-                    retrieval = await search_engine.search(
+                    retrieval = await engine.search(
                         req.message,
                         k=buffer_k,
                         mode=retrieval_mode,
