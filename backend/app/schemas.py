@@ -32,6 +32,7 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     k: int = Field(default=8, ge=1, le=25)
     debug: bool = False
+    version: str | None = None
 
 
 class SearchResponse(BaseModel):
@@ -150,6 +151,11 @@ class DocsCatalogResponse(BaseModel):
     docs: list[DocCatalogEntry]
 
 
+class DocsVersionsResponse(BaseModel):
+    default_version: str
+    versions: list[str]
+
+
 class DocPageInfo(BaseModel):
     page_id: str
     page_title: str
@@ -181,6 +187,67 @@ class DocPageResponse(BaseModel):
     source_path: str
     markdown: str
     images: list[PageImage]
+
+
+class DocEditInfo(BaseModel):
+    edit_id: str
+    status: Literal["draft", "published"]
+    content_md: str
+    author_id: str
+    created_at: str
+    updated_at: str
+
+
+class DocEditResponse(BaseModel):
+    version: str
+    doc_id: str
+    doc_title: str
+    page_id: str
+    page_title: str
+    heading_path: list[str]
+    base_markdown: str
+    effective_markdown: str
+    draft: DocEditInfo | None = None
+    published: DocEditInfo | None = None
+    can_edit: bool
+    can_publish: bool
+
+
+class DocEditRequest(BaseModel):
+    content: str = Field(min_length=1)
+    status: Literal["draft", "published"] = "draft"
+    version: str | None = None
+
+
+class DocEditDeleteRequest(BaseModel):
+    status: Literal["draft", "published"] = "draft"
+    version: str | None = None
+
+
+class DocAssetUploadResponse(BaseModel):
+    url: str
+    filename: str
+    version: str
+
+
+class DocGuideCreateRequest(BaseModel):
+    version: str | None = None
+    doc_title: str = Field(min_length=1)
+    page_title: str | None = None
+
+
+class DocSectionCreateRequest(BaseModel):
+    version: str | None = None
+    doc_id: str = Field(min_length=1)
+    page_title: str = Field(min_length=1)
+
+
+class DocCreateResponse(BaseModel):
+    version: str
+    doc_id: str
+    doc_title: str
+    page_id: str
+    page_title: str
 
 
 class AuthMeResponse(BaseModel):

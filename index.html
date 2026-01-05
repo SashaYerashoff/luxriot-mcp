@@ -241,6 +241,24 @@
       border-color:rgba(0,0,0,.12);
     }
     #docsPanel.light .docsPage th{background:rgba(0,0,0,.04);}
+    #docsPanel.light .docs-edit-preview{
+      background:rgba(255,255,255,.82);
+    }
+    #docsPanel.light .docs-edit-text{
+      background:rgba(255,255,255,.92);
+      border-color:rgba(0,0,0,.12);
+      color:var(--text);
+    }
+    #docsPanel.light .docs-edit-preview code{
+      background:rgba(0,0,0,.05);
+      border-color:rgba(0,0,0,.12);
+      color:var(--text);
+    }
+    #docsPanel.light .docs-edit-preview pre{
+      background:rgba(0,0,0,.04);
+      border-color:rgba(0,0,0,.12);
+    }
+    #docsPanel.light .docs-edit-preview th{background:rgba(0,0,0,.04);}
     #docsPanel.fullscreen{
       left:24px;
       right:24px;
@@ -258,13 +276,25 @@
       min-height:0;
       padding:4px 6px 10px;
     }
-		    .docs-nav{
-		      display:flex;
-		      flex-direction:column;
-		      min-width:0;
-		      min-height:0;
-		      overflow:hidden;
-		    }
+	    .docs-nav{
+	      display:flex;
+	      flex-direction:column;
+	      min-width:0;
+	      min-height:0;
+	      overflow:hidden;
+	    }
+	    .docs-version-row{
+	      display:flex;
+	      align-items:center;
+	      gap:8px;
+	    }
+	    .docs-version-row select{flex:1;}
+	    .docs-actions{
+	      display:flex;
+	      flex-wrap:wrap;
+	      gap:8px;
+	      margin:8px 0 6px;
+	    }
     .docs-list{
       flex:1;
       min-height:0;
@@ -359,10 +389,32 @@
     .docsPage a{color:var(--accent);text-decoration:none;}
     .docsPage a:hover{text-decoration:underline;}
     .docsPage hr{border:none;border-top:1px solid var(--border);margin:12px 0;}
-	    .docsPage img{max-width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
-	    .docsPage table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;table-layout:fixed;}
-	    .docsPage th,.docsPage td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;word-break:break-word;}
+		    .docsPage img{max-width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
+		    .docsPage table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;table-layout:fixed;}
+		    .docsPage th,.docsPage td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;word-break:break-word;}
     .docsPage th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
+    .docsPage blockquote{
+      margin:10px 0;
+      padding:8px 12px;
+      border-left:3px solid rgba(214,217,223,.35);
+      background:rgba(255,255,255,.04);
+      border-radius:10px;
+      color:var(--muted);
+    }
+    .docsPage blockquote p{margin:0 0 6px;}
+    .docsPage blockquote p:last-child{margin-bottom:0;}
+    .docsPage .admonition{
+      margin:12px 0;
+      padding:10px 12px;
+      border-left:3px solid rgba(63,163,124,.45);
+      border-radius:12px;
+      background:rgba(63,163,124,.08);
+    }
+    .docsPage .admonition.warning{border-left-color:rgba(216,92,92,.55);background:rgba(216,92,92,.08);}
+    .docsPage .admonition.info{border-left-color:rgba(88,155,219,.55);background:rgba(88,155,219,.08);}
+    .docsPage .admonition-title{font-weight:600;margin-bottom:6px;}
+    .docsPage .admonition-body p{margin:0 0 6px;}
+    .docsPage .admonition-body p:last-child{margin-bottom:0;}
     .docsPage h1,.docsPage h2,.docsPage h3,.docsPage h4,.docsPage h5,.docsPage h6{scroll-margin-top:16px;}
     .docsPage .anchor-hit{
       box-shadow:0 0 0 2px rgba(63,163,124,.55);
@@ -370,6 +422,64 @@
       border-radius:12px;
       padding:2px 6px;
     }
+
+    .docs-content.editing .docsPage{display:none;}
+    .docs-editor{
+      display:none;
+      flex:1;
+      min-height:0;
+      flex-direction:column;
+      gap:12px;
+    }
+    .docs-content.editing .docs-editor{display:flex;}
+    .docs-edit-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+    .docs-edit-body{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:12px;
+      flex:1;
+      min-height:0;
+    }
+    .docs-edit-text{
+      min-height:0;
+      height:100%;
+      resize:none;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      font-size:12px;
+      line-height:1.4;
+    }
+    .docs-edit-preview{
+      min-height:0;
+      overflow:auto;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:rgba(16,17,19,.35);
+    }
+    .docs-edit-preview p{margin:0 0 10px;}
+    .docs-edit-preview p:last-child{margin-bottom:0;}
+    .docs-edit-preview ul,.docs-edit-preview ol{margin:6px 0 10px 20px;padding:0;}
+    .docs-edit-preview li{margin:4px 0;}
+    .docs-edit-preview code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;background:rgba(255,255,255,.06);padding:2px 5px;border-radius:8px;border:1px solid var(--border);}
+    .docs-edit-preview pre{margin:10px 0;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:rgba(0,0,0,.25);overflow:auto;}
+    .docs-edit-preview pre code{display:block;padding:0;border:none;background:transparent;}
+    .docs-edit-preview a{color:var(--accent);text-decoration:none;}
+    .docs-edit-preview a:hover{text-decoration:underline;}
+    .docs-edit-preview hr{border:none;border-top:1px solid var(--border);margin:12px 0;}
+    .docs-edit-preview table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;table-layout:fixed;}
+    .docs-edit-preview th,.docs-edit-preview td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;word-break:break-word;}
+    .docs-edit-preview th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
+    .docs-edit-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+    .docs-edit-status{font-size:11px;color:var(--muted);}
+    .docs-edit-preview h1,.docs-edit-preview h2,.docs-edit-preview h3,.docs-edit-preview h4,.docs-edit-preview h5,.docs-edit-preview h6{margin:10px 0 8px;line-height:1.25;}
+    .docs-edit-preview img{max-width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
+    .docs-edit-preview blockquote{margin:10px 0;padding:8px 12px;border-left:3px solid rgba(214,217,223,.35);background:rgba(255,255,255,.04);border-radius:10px;color:var(--muted);}
+    .docs-edit-preview .admonition{margin:12px 0;padding:10px 12px;border-left:3px solid rgba(63,163,124,.45);border-radius:12px;background:rgba(63,163,124,.08);}
+    .docs-edit-preview .admonition.warning{border-left-color:rgba(216,92,92,.55);background:rgba(216,92,92,.08);}
+    .docs-edit-preview .admonition.info{border-left-color:rgba(88,155,219,.55);background:rgba(88,155,219,.08);}
+    .docs-edit-preview .admonition-title{font-weight:600;margin-bottom:6px;}
+    .docs-edit-preview .admonition-body p{margin:0 0 6px;}
+    .docs-edit-preview .admonition-body p:last-child{margin-bottom:0;}
 
 	    /* Retrieval debug modal internal scroll */
 	    .debug-body{
@@ -661,14 +771,15 @@
 	        width:auto;
 	        transform:none;
 	      }
-	      #docsPanel.fullscreen{
-	        left:0;
-	        right:0;
-	        top:0;
-	        bottom:0;
-	      }
-	      .docs-grid{grid-template-columns: 1fr;}
-	    }
+      #docsPanel.fullscreen{
+        left:0;
+        right:0;
+        top:0;
+        bottom:0;
+      }
+      .docs-grid{grid-template-columns: 1fr;}
+      .docs-edit-body{grid-template-columns: 1fr;}
+    }
 
     @media (max-width: 380px){
       :root{--action-size:38px;}
@@ -1131,6 +1242,16 @@
     <div class="docs-grid">
       <div class="card docs-nav">
         <h3>Guides</h3>
+        <label>Version</label>
+        <div class="docs-version-row">
+          <select id="docsVersionSelect"></select>
+        </div>
+
+        <div class="docs-actions" id="docsEditActions">
+          <button class="btn ghost small" id="docsNewGuideBtn">NEW GUIDE</button>
+          <button class="btn ghost small" id="docsNewSectionBtn">NEW SECTION</button>
+        </div>
+
         <label>Guide</label>
         <select id="docsGuideSelect"></select>
 
@@ -1151,27 +1272,65 @@
 	      <div class="card docs-content">
 	        <div class="docs-toolbar">
 	          <div class="tiny muted" id="docsBreadcrumb">Select a page…</div>
-	          <div class="docs-controls">
-	            <button class="icon-btn" id="docsFullscreenBtn" title="Toggle fullscreen" aria-label="Toggle fullscreen">
+          <div class="docs-controls">
+            <button class="icon-btn" id="docsFullscreenBtn" title="Toggle fullscreen" aria-label="Toggle fullscreen">
 	              <svg class="icon icon-enter" viewBox="0 0 24 24" aria-hidden="true">
 	                <path d="M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 9h-3v2h5v-5h-2v3zm0-14V5h-5v2h3v3h2V5z"/>
 	              </svg>
 	              <svg class="icon icon-exit" viewBox="0 0 24 24" aria-hidden="true">
 	                <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
 	              </svg>
-	            </button>
-	            <button class="icon-btn" id="docsThemeBtn" title="Toggle theme" aria-label="Toggle theme">
+            </button>
+            <button class="icon-btn" id="docsThemeBtn" title="Toggle theme" aria-label="Toggle theme">
 	              <svg class="icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
 	                <path d="M6.76 4.84l-1.8-1.79L3.55 4.46l1.79 1.8 1.42-1.42zM1 13h3v-2H1v2zm10 10h2v-3h-2v3zm9-10v-2h3v2h-3zM18.36 6.26l1.79-1.8-1.41-1.41-1.8 1.79 1.42 1.42zM17.24 19.16l1.8 1.79 1.41-1.41-1.79-1.8-1.42 1.42zM4.46 20.95l1.8-1.79-1.42-1.42-1.79 1.8 1.41 1.41zM12 6a6 6 0 100 12 6 6 0 000-12z"/>
 	              </svg>
 	              <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
 	                <path d="M12.74 2a9 9 0 008.26 12.6A8 8 0 1112.74 2z"/>
 	              </svg>
-	            </button>
-	          </div>
-	        </div>
-	        <div id="docsPage" class="docsPage"></div>
-	      </div>
+            </button>
+            <button class="icon-btn" id="docsEditBtn" title="Edit page" aria-label="Edit page">
+              <svg class="icon icon-edit" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 17.25V21h3.75l11-11-3.75-3.75-11 11zm17.71-10.04a1.003 1.003 0 000-1.42l-2.5-2.5a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.99-1.66z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="docsPage" class="docsPage"></div>
+        <div id="docsEditor" class="docs-editor">
+          <div class="docs-edit-tools">
+            <div class="tiny muted" id="docsEditMeta">Edit mode</div>
+            <button class="btn ghost small" data-insert="h1">H1</button>
+            <button class="btn ghost small" data-insert="h2">H2</button>
+            <button class="btn ghost small" data-insert="h3">H3</button>
+            <button class="btn ghost small" data-insert="h4">H4</button>
+            <button class="btn ghost small" data-insert="h5">H5</button>
+            <button class="btn ghost small" data-insert="ul">List</button>
+            <button class="btn ghost small" data-insert="ol">Steps</button>
+            <button class="btn ghost small" data-insert="table">Table</button>
+            <button class="btn ghost small" data-insert="tip">Tip</button>
+            <button class="btn ghost small" data-insert="warn">Warning</button>
+            <button class="btn ghost small" data-insert="info">Info</button>
+            <button class="btn ghost small" id="docsInsertLinkBtn">Link</button>
+            <button class="btn ghost small" id="docsInsertImageBtn">Image</button>
+            <input id="docsImageInput" type="file" accept="image/*" style="display:none;">
+          </div>
+          <div class="docs-edit-body">
+            <textarea id="docsEditText" class="docs-edit-text mono" placeholder="Edit markdown..."></textarea>
+            <div id="docsEditPreview" class="docs-edit-preview"></div>
+          </div>
+          <div class="docs-edit-actions">
+            <div class="docs-edit-status" id="docsEditStatus">Draft: none · Published: none</div>
+            <div class="inline">
+              <button class="btn ghost small" id="docsEditResetBaseBtn">RESET TO BASE</button>
+              <button class="btn ghost small" id="docsEditResetPublishedBtn">RESET TO PUBLISHED</button>
+              <button class="btn ghost small" id="docsEditDiscardBtn">DISCARD DRAFT</button>
+              <button class="btn small" id="docsEditSaveDraftBtn">SAVE DRAFT</button>
+              <button class="btn primary small" id="docsEditPublishBtn">PUBLISH</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="admin-actions">
@@ -1486,18 +1645,37 @@
 			  const adminEditUserStatusEl = document.getElementById('adminEditUserStatus');
 
     // ---------- Docs reader UI ----------
+    const docsVersionSelectEl = document.getElementById('docsVersionSelect');
     const docsGuideSelectEl = document.getElementById('docsGuideSelect');
+    const docsEditActionsEl = document.getElementById('docsEditActions');
+    const docsNewGuideBtn = document.getElementById('docsNewGuideBtn');
+    const docsNewSectionBtn = document.getElementById('docsNewSectionBtn');
     const docsSearchInputEl = document.getElementById('docsSearchInput');
     const docsSearchBtn = document.getElementById('docsSearchBtn');
     const docsSearchClearBtn = document.getElementById('docsSearchClearBtn');
     const docsSearchResultsEl = document.getElementById('docsSearchResults');
-	    const docsPageListEl = document.getElementById('docsPageList');
-	    const docsPageEl = document.getElementById('docsPage');
-	    const docsBreadcrumbEl = document.getElementById('docsBreadcrumb');
-	    const docsStatusEl = document.getElementById('docsStatus');
-	    const docsFullscreenBtn = document.getElementById('docsFullscreenBtn');
-	    const docsThemeBtn = document.getElementById('docsThemeBtn');
-	    const docsOkBtn = document.getElementById('docsOkBtn');
+    const docsPageListEl = document.getElementById('docsPageList');
+    const docsPageEl = document.getElementById('docsPage');
+    const docsBreadcrumbEl = document.getElementById('docsBreadcrumb');
+    const docsStatusEl = document.getElementById('docsStatus');
+    const docsFullscreenBtn = document.getElementById('docsFullscreenBtn');
+    const docsThemeBtn = document.getElementById('docsThemeBtn');
+    const docsEditBtn = document.getElementById('docsEditBtn');
+    const docsEditorEl = document.getElementById('docsEditor');
+    const docsEditTextEl = document.getElementById('docsEditText');
+    const docsEditPreviewEl = document.getElementById('docsEditPreview');
+    const docsEditMetaEl = document.getElementById('docsEditMeta');
+    const docsEditStatusEl = document.getElementById('docsEditStatus');
+    const docsEditSaveDraftBtn = document.getElementById('docsEditSaveDraftBtn');
+    const docsEditPublishBtn = document.getElementById('docsEditPublishBtn');
+    const docsEditDiscardBtn = document.getElementById('docsEditDiscardBtn');
+    const docsEditResetBaseBtn = document.getElementById('docsEditResetBaseBtn');
+    const docsEditResetPublishedBtn = document.getElementById('docsEditResetPublishedBtn');
+    const docsInsertLinkBtn = document.getElementById('docsInsertLinkBtn');
+    const docsInsertImageBtn = document.getElementById('docsInsertImageBtn');
+    const docsImageInputEl = document.getElementById('docsImageInput');
+    const docsOkBtn = document.getElementById('docsOkBtn');
+    const docsContentEl = document.querySelector('#docsPanel .docs-content');
 
     // ---------- Retrieval debug UI ----------
     const debugQueryEl = document.getElementById('debugQuery');
@@ -2140,6 +2318,7 @@
 		    let codeBuf = [];
 		    let paraBuf = [];
 		    let listTag = null; // 'ul' | 'ol' | null
+		    let quoteBuf = [];
 		    const usedHeadingIds = new Map();
 
 	    function splitTableRow(row) {
@@ -2159,17 +2338,40 @@
 	      });
 	    }
 
-	    function flushParagraph() {
-	      if (!paraBuf.length) return;
-	      html += `<p>${mdInline(paraBuf.join('\n'))}</p>`;
-	      paraBuf = [];
-	    }
+		    function flushParagraph() {
+		      if (!paraBuf.length) return;
+		      html += `<p>${mdInline(paraBuf.join('\n'))}</p>`;
+		      paraBuf = [];
+		    }
 
-	    function closeList() {
-	      if (!listTag) return;
-	      html += `</${listTag}>`;
-	      listTag = null;
-	    }
+		    function closeList() {
+		      if (!listTag) return;
+		      html += `</${listTag}>`;
+		      listTag = null;
+		    }
+
+		    function flushQuote() {
+		      if (!quoteBuf.length) return;
+		      const rawLines = quoteBuf.map((l) => l.replace(/^\s*>\s?/, ''));
+		      const first = (rawLines[0] || '').trim();
+		      const admon = first.match(/^\[!([A-Z]+)\]\s*(.*)$/i);
+		      if (admon) {
+		        const kind = String(admon[1] || 'note').toLowerCase();
+		        const title = (admon[2] || admon[1] || 'Note').trim();
+		        const bodyLines = rawLines.slice(1);
+		        const bodyHtml = bodyLines.length
+		          ? bodyLines.map((l) => `<p>${mdInline(l)}</p>`).join('')
+		          : '';
+		        html += `<div class="admonition ${escapeHtml(kind)}">`;
+		        html += `<div class="admonition-title">${escapeHtml(title)}</div>`;
+		        if (bodyHtml) html += `<div class="admonition-body">${bodyHtml}</div>`;
+		        html += `</div>`;
+		      } else {
+		        const bodyHtml = rawLines.map((l) => `<p>${mdInline(l)}</p>`).join('');
+		        html += `<blockquote>${bodyHtml}</blockquote>`;
+		      }
+		      quoteBuf = [];
+		    }
 
 	    for (let i = 0; i < lines.length; i++) {
 	      const line = lines[i];
@@ -2187,15 +2389,26 @@
 	        continue;
 	      }
 
-	      if (inCode) {
-	        codeBuf.push(line);
-	        continue;
-	      }
+		      if (inCode) {
+		        codeBuf.push(line);
+		        continue;
+		      }
+		
+		      const isQuote = /^\s*>\s?/.test(line);
+		      if (isQuote) {
+		        flushParagraph();
+		        closeList();
+		        quoteBuf.push(line);
+		        continue;
+		      }
+		      if (quoteBuf.length) {
+		        flushQuote();
+		      }
 
-	      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
-	        flushParagraph();
-	        closeList();
-	        html += '<hr>';
+		      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
+		        flushParagraph();
+		        closeList();
+		        html += '<hr>';
 	        continue;
 	      }
 
@@ -2262,22 +2475,23 @@
 	        continue;
 	      }
 
-	      if (/^\s*$/.test(line)) {
-	        flushParagraph();
-	        closeList();
-	        continue;
-	      }
+		      if (/^\s*$/.test(line)) {
+		        flushParagraph();
+		        closeList();
+		        continue;
+		      }
 
-	      paraBuf.push(line);
-	    }
+		      paraBuf.push(line);
+		    }
 
-	    if (inCode) {
-	      html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`;
-	    }
-	    flushParagraph();
-	    closeList();
-	    return html;
-	  }
+		    if (inCode) {
+		      html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`;
+		    }
+		    flushQuote();
+		    flushParagraph();
+		    closeList();
+		    return html;
+		  }
 
 	  function augmentWithInlineScreenshots(mdText, images, maxInline = 3) {
 	    const md = String(mdText || '');
@@ -2387,12 +2601,18 @@
         if (seen.has(key)) return;
         seen.add(key);
         const a = document.createElement('a');
-        a.href = docsHashFor(x.doc_id, x.page_id, x.anchor || null);
+        a.href = docsHashFor(x.doc_id, x.page_id, x.anchor || null, docsState.version);
         a.textContent = `${x.title} (${x.doc_id}/${x.page_id})`;
 	        a.addEventListener('click', (ev) => {
 	          if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return;
 	          ev.preventDefault();
-	          openDocsReader({ doc_id: x.doc_id, page_id: x.page_id, anchor: x.anchor || null, fullscreen: true });
+	          openDocsReader({
+	            doc_id: x.doc_id,
+	            page_id: x.page_id,
+	            anchor: x.anchor || null,
+	            fullscreen: true,
+	            version: docsState.version,
+	          });
 	        });
         c.appendChild(a);
       });
@@ -2446,8 +2666,12 @@
   async function apiJson(path, { method = 'GET', body = undefined } = {}) {
     const opts = { method, headers: {} };
     if (body !== undefined) {
-      opts.headers['content-type'] = 'application/json';
-      opts.body = JSON.stringify(body);
+      if (body instanceof FormData) {
+        opts.body = body;
+      } else {
+        opts.headers['content-type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
     }
     const resp = await fetch(apiBase + path, opts);
     if (!resp.ok) {
@@ -2558,6 +2782,11 @@
 		    setActionVisible(redactorBtn, isAdmin || isRedactor);
 		    setActionVisible(debugBtn, isAdmin || isRedactor || isSupport);
 		    setActionVisible(historyBtn, isAdmin || isRedactor || isSupport || isClient);
+		    const canEditDocs = isAdmin || isRedactor || isSupport;
+		    setActionVisible(docsEditBtn, canEditDocs);
+		    setActionVisible(docsNewGuideBtn, canEditDocs);
+		    setActionVisible(docsNewSectionBtn, canEditDocs);
+		    if (docsEditActionsEl) docsEditActionsEl.style.display = canEditDocs ? '' : 'none';
 
 		    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
 		    if (!(isAdmin || isRedactor) && redactorPanel.classList.contains('visible')) closeAllModals();
@@ -2680,15 +2909,20 @@
 	  });
 
 	  // ---------- Docs reader ----------
-	  const docsState = {
-	    catalog: null,
-	    selectedDocId: null,
+  const docsState = {
+    catalog: null,
+    versions: null,
+    version: null,
+    selectedDocId: null,
     selectedDocTitle: null,
     pages: [],
     page: null,
     htmlNameToPageId: new Map(),
     searchQuery: '',
     searchPack: null,
+    editing: false,
+    edit: null,
+    editDirty: false,
   };
 
   function setDocsStatus(text, { error = false } = {}) {
@@ -2702,9 +2936,10 @@
     docsBreadcrumbEl.textContent = String(text || 'Select a page…');
   }
 
-  function docsHashFor(docId, pageId, anchor) {
+  function docsHashFor(docId, pageId, anchor, version) {
     const p = new URLSearchParams();
     p.set('view', 'docs');
+    if (version) p.set('ver', String(version));
     if (docId) p.set('doc', String(docId));
     if (pageId) p.set('page', String(pageId));
     if (anchor) p.set('anchor', String(anchor));
@@ -2719,7 +2954,8 @@
 	    const docId = (p.get('doc') || '').trim();
 	    const pageId = (p.get('page') || '').trim();
 	    const anchor = (p.get('anchor') || '').trim();
-	    return { doc_id: docId || null, page_id: pageId || null, anchor: anchor || null };
+	    const ver = (p.get('ver') || '').trim();
+	    return { doc_id: docId || null, page_id: pageId || null, anchor: anchor || null, version: ver || null };
 	  }
 
 	  function _findByIdWithin(container, id) {
@@ -2785,10 +3021,50 @@
     return s.trim();
   }
 
+  function renderDocsVersionSelect(versions, selected) {
+    if (!docsVersionSelectEl) return;
+    docsVersionSelectEl.innerHTML = '';
+    (versions || []).forEach((v) => {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      docsVersionSelectEl.appendChild(opt);
+    });
+    if (selected && Array.from(docsVersionSelectEl.options).some((o) => o.value === selected)) {
+      docsVersionSelectEl.value = selected;
+    } else if (docsVersionSelectEl.options.length) {
+      docsVersionSelectEl.selectedIndex = 0;
+    }
+  }
+
+  function resetDocsForVersion(ver) {
+    docsState.version = ver;
+    docsState.catalog = null;
+    docsState.pages = [];
+    docsState.page = null;
+    docsState.selectedDocId = null;
+    docsState.selectedDocTitle = null;
+    docsState.htmlNameToPageId = new Map();
+    clearDocsSearch({ keepInput: false });
+  }
+
+  async function ensureDocsVersions() {
+    if (docsState.versions) return docsState.versions;
+    const data = await apiJson('/docs/versions');
+    const versions = Array.isArray(data?.versions) ? data.versions : [];
+    docsState.versions = versions;
+    const defaultVer = data?.default_version || null;
+    if (!docsState.version) docsState.version = defaultVer || versions[0] || null;
+    renderDocsVersionSelect(versions, docsState.version);
+    return versions;
+  }
+
   async function ensureDocsCatalog() {
     if (docsState.catalog) return docsState.catalog;
     setDocsStatus('Loading docs catalog…');
-    const data = await apiJson('/docs/catalog');
+    const ver = docsState.version || null;
+    const qs = ver ? `?version=${encodeURIComponent(ver)}` : '';
+    const data = await apiJson(`/docs/catalog${qs}`);
     docsState.catalog = data;
     return data;
   }
@@ -2856,7 +3132,7 @@
             setDocsStatus(`Failed to load page: ${e?.raw ? String(e.raw) : String(e)}`, { error: true });
           });
         } else {
-          openDocsReader({ doc_id: docId, page_id: pageId, anchor: null });
+          openDocsReader({ doc_id: docId, page_id: pageId, anchor: null, version: docsState.version });
         }
       });
 
@@ -2881,7 +3157,10 @@
     }
     try {
       const kk = Math.max(1, Math.min(25, Number(k || 12)));
-      const pack = await apiJson('/docs/search', { method: 'POST', body: { query: q, k: kk } });
+      const pack = await apiJson('/docs/search', {
+        method: 'POST',
+        body: { query: q, k: kk, version: docsState.version || null },
+      });
       docsState.searchPack = pack;
       renderDocsSearchResults(pack);
       const found = Array.isArray(pack?.chunks) ? pack.chunks.length : 0;
@@ -2910,7 +3189,9 @@
   }
 
   async function loadDocPages(docId) {
-    const data = await apiJson(`/docs/catalog/${encodeURIComponent(docId)}`);
+    const ver = docsState.version || null;
+    const qs = ver ? `?version=${encodeURIComponent(ver)}` : '';
+    const data = await apiJson(`/docs/catalog/${encodeURIComponent(docId)}${qs}`);
     docsState.selectedDocId = data.doc_id;
     docsState.selectedDocTitle = data.doc_title;
     docsState.pages = Array.isArray(data.pages) ? data.pages : [];
@@ -2954,7 +3235,7 @@
       item.addEventListener('click', async () => {
         try {
           await loadAndRenderDocsPage(docsState.selectedDocId, p.page_id, null);
-          const hash = docsHashFor(docsState.selectedDocId, p.page_id, null);
+          const hash = docsHashFor(docsState.selectedDocId, p.page_id, null, docsState.version);
           try {
             history.replaceState(null, '', location.pathname + location.search + hash);
           } catch (e) {
@@ -2993,7 +3274,12 @@
 	        a.addEventListener('click', (ev) => {
 	          ev.preventDefault();
 	          scrollDocsToAnchor(anchor);
-	          const hash = docsHashFor(docsState.selectedDocId, docsState.page?.page_id || null, anchor || null);
+	          const hash = docsHashFor(
+	            docsState.selectedDocId,
+	            docsState.page?.page_id || null,
+	            anchor || null,
+	            docsState.version
+	          );
 	          try {
 	            history.replaceState(null, '', location.pathname + location.search + hash);
 	          } catch (e) {
@@ -3019,14 +3305,244 @@
 	      a.removeAttribute('rel');
 	      a.addEventListener('click', (ev) => {
 	        ev.preventDefault();
-	        openDocsReader({ doc_id: docsState.selectedDocId, page_id: pid, anchor: anchor || null });
+	        openDocsReader({
+	          doc_id: docsState.selectedDocId,
+	          page_id: pid,
+	          anchor: anchor || null,
+	          version: docsState.version,
+	        });
 	      });
 	    });
 	  }
 
+	  function setDocsEditMode(enabled) {
+	    docsState.editing = Boolean(enabled);
+	    if (docsContentEl) docsContentEl.classList.toggle('editing', docsState.editing);
+	    if (!docsState.editing) {
+	      docsState.edit = null;
+	      docsState.editDirty = false;
+	      if (docsEditTextEl) docsEditTextEl.value = '';
+	      if (docsEditPreviewEl) docsEditPreviewEl.innerHTML = '';
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = '';
+	      if (docsEditMetaEl) docsEditMetaEl.textContent = 'Edit mode';
+	    }
+	  }
+
+	  function updateDocsEditPreview() {
+	    if (!docsEditTextEl || !docsEditPreviewEl) return;
+	    docsEditPreviewEl.innerHTML = renderMarkdown(docsEditTextEl.value || '', { addHeadingIds: false });
+	  }
+
+	  function updateDocsEditStatus(edit) {
+	    if (!docsEditStatusEl) return;
+	    const d = edit?.draft;
+	    const p = edit?.published;
+	    const dState = d?.updated_at ? `Draft: ${d.updated_at}` : 'Draft: none';
+	    const pState = p?.updated_at ? `Published: ${p.updated_at}` : 'Published: none';
+	    docsEditStatusEl.textContent = `${dState} · ${pState}`;
+	    if (docsEditSaveDraftBtn) docsEditSaveDraftBtn.disabled = !edit?.can_edit;
+	    if (docsEditPublishBtn) docsEditPublishBtn.disabled = !edit?.can_publish;
+	    if (docsEditDiscardBtn) docsEditDiscardBtn.disabled = !Boolean(edit?.draft);
+	    if (docsEditResetPublishedBtn) docsEditResetPublishedBtn.disabled = !Boolean(edit?.published);
+	  }
+
+	  async function loadDocsEdit(docId, pageId) {
+	    if (!docId || !pageId) return null;
+	    if (docsEditStatusEl) docsEditStatusEl.textContent = 'Loading edit…';
+	    const ver = docsState.version || null;
+	    const qs = ver ? `?version=${encodeURIComponent(ver)}` : '';
+	    const edit = await apiJson(
+	      `/docs/page/${encodeURIComponent(docId)}/${encodeURIComponent(pageId)}/edit${qs}`
+	    );
+	    docsState.edit = edit;
+	    docsState.editDirty = false;
+	    const draftText = edit?.draft?.content_md || '';
+	    const publishedText = edit?.published?.content_md || '';
+	    const baseText = edit?.base_markdown || '';
+	    const seed = draftText || publishedText || baseText;
+	    if (docsEditTextEl) docsEditTextEl.value = seed;
+	    if (docsEditMetaEl) {
+	      const role = authState?.role ? String(authState.role) : 'anonymous';
+	      docsEditMetaEl.textContent = `Version: ${edit?.version || '—'} · Role: ${role}`;
+	    }
+	    updateDocsEditPreview();
+	    updateDocsEditStatus(edit);
+	    return edit;
+	  }
+
+	  function insertAtCursor(textarea, text) {
+	    if (!textarea) return;
+	    const start = textarea.selectionStart ?? textarea.value.length;
+	    const end = textarea.selectionEnd ?? textarea.value.length;
+	    const before = textarea.value.slice(0, start);
+	    const after = textarea.value.slice(end);
+	    textarea.value = `${before}${text}${after}`;
+	    const pos = start + text.length;
+	    textarea.selectionStart = pos;
+	    textarea.selectionEnd = pos;
+	    textarea.focus();
+	    docsState.editDirty = true;
+	    updateDocsEditPreview();
+	  }
+
+	  function handleInsert(type) {
+	    if (!docsEditTextEl) return;
+	    switch (type) {
+	      case 'h1': insertAtCursor(docsEditTextEl, '# Heading 1\\n'); break;
+	      case 'h2': insertAtCursor(docsEditTextEl, '## Heading 2\\n'); break;
+	      case 'h3': insertAtCursor(docsEditTextEl, '### Heading 3\\n'); break;
+	      case 'h4': insertAtCursor(docsEditTextEl, '#### Heading 4\\n'); break;
+	      case 'h5': insertAtCursor(docsEditTextEl, '##### Heading 5\\n'); break;
+	      case 'ul': insertAtCursor(docsEditTextEl, '- Item 1\\n- Item 2\\n'); break;
+	      case 'ol': insertAtCursor(docsEditTextEl, '1. Step one\\n2. Step two\\n'); break;
+	      case 'table':
+	        insertAtCursor(docsEditTextEl, '| Column | Column |\\n| --- | --- |\\n| Value | Value |\\n');
+	        break;
+	      case 'tip':
+	        insertAtCursor(docsEditTextEl, '> [!TIP] Tip\\n> Add your tip here.\\n');
+	        break;
+	      case 'warn':
+	        insertAtCursor(docsEditTextEl, '> [!WARNING] Warning\\n> Add your warning here.\\n');
+	        break;
+	      case 'info':
+	        insertAtCursor(docsEditTextEl, '> [!INFO] Info\\n> Add your note here.\\n');
+	        break;
+	      default:
+	        break;
+	    }
+	  }
+
+	  docsEditorEl?.addEventListener('click', (e) => {
+	    const target = e.target;
+	    if (!(target instanceof HTMLElement)) return;
+	    const btn = target.closest('[data-insert]');
+	    if (!btn) return;
+	    const type = btn.getAttribute('data-insert');
+	    if (type) handleInsert(type);
+	  });
+
+	  docsEditTextEl?.addEventListener('input', () => {
+	    docsState.editDirty = true;
+	    updateDocsEditPreview();
+	  });
+
+	  async function saveDocsEdit(status) {
+	    const page = docsState.page;
+	    if (!page || !docsEditTextEl) return;
+	    const content = String(docsEditTextEl.value || '');
+	    if (!content.trim()) {
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = 'Content is empty.';
+	      return;
+	    }
+	    if (docsEditStatusEl) docsEditStatusEl.textContent = status === 'published' ? 'Publishing…' : 'Saving draft…';
+	    try {
+	      const payload = { content, status, version: docsState.version || null };
+	      const edit = await apiJson(`/docs/page/${encodeURIComponent(page.doc_id)}/${encodeURIComponent(page.page_id)}/edit`, {
+	        method: 'POST',
+	        body: payload,
+	      });
+	      docsState.edit = edit;
+	      docsState.editDirty = false;
+	      updateDocsEditStatus(edit);
+	      updateDocsEditPreview();
+	      if (status === 'published') {
+	        await loadAndRenderDocsPage(page.doc_id, page.page_id, null);
+	      }
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = `Save failed: ${raw}`;
+	    }
+	  }
+
+	  async function discardDocsDraft() {
+	    const page = docsState.page;
+	    if (!page) return;
+	    if (!confirm('Discard the current draft?')) return;
+	    if (docsEditStatusEl) docsEditStatusEl.textContent = 'Discarding draft…';
+	    try {
+	      const edit = await apiJson(
+	        `/docs/page/${encodeURIComponent(page.doc_id)}/${encodeURIComponent(page.page_id)}/edit/delete`,
+	        { method: 'POST', body: { status: 'draft', version: docsState.version || null } }
+	      );
+	      docsState.edit = edit;
+	      docsState.editDirty = false;
+	      const publishedText = edit?.published?.content_md || '';
+	      const baseText = edit?.base_markdown || '';
+	      if (docsEditTextEl) docsEditTextEl.value = publishedText || baseText;
+	      updateDocsEditPreview();
+	      updateDocsEditStatus(edit);
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = `Discard failed: ${raw}`;
+	    }
+	  }
+
+	  docsEditSaveDraftBtn?.addEventListener('click', () => saveDocsEdit('draft'));
+	  docsEditPublishBtn?.addEventListener('click', () => saveDocsEdit('published'));
+	  docsEditDiscardBtn?.addEventListener('click', () => discardDocsDraft());
+	  docsEditResetBaseBtn?.addEventListener('click', () => {
+	    const base = docsState.edit?.base_markdown || '';
+	    if (docsEditTextEl) docsEditTextEl.value = base;
+	    docsState.editDirty = true;
+	    updateDocsEditPreview();
+	  });
+	  docsEditResetPublishedBtn?.addEventListener('click', () => {
+	    const published = docsState.edit?.published?.content_md || '';
+	    if (!published) return;
+	    if (docsEditTextEl) docsEditTextEl.value = published;
+	    docsState.editDirty = true;
+	    updateDocsEditPreview();
+	  });
+
+	  docsInsertLinkBtn?.addEventListener('click', () => {
+	    if (!docsEditTextEl) return;
+	    const href = prompt('Link URL (https://...)', '');
+	    if (!href) return;
+	    const label = prompt('Link label', href) || href;
+	    insertAtCursor(docsEditTextEl, `[${label}](${href})`);
+	  });
+
+	  docsInsertImageBtn?.addEventListener('click', () => {
+	    if (docsImageInputEl) docsImageInputEl.click();
+	  });
+
+	  docsImageInputEl?.addEventListener('change', async () => {
+	    const files = docsImageInputEl.files;
+	    if (!files || !files.length) return;
+	    const page = docsState.page;
+	    if (!page) return;
+	    const file = files[0];
+	    const form = new FormData();
+	    form.append('file', file);
+	    form.append('doc_id', String(page.doc_id || ''));
+	    form.append('page_id', String(page.page_id || ''));
+	    if (docsState.version) form.append('version', String(docsState.version));
+	    if (docsEditStatusEl) docsEditStatusEl.textContent = 'Uploading image…';
+	    try {
+	      const res = await apiJson('/docs/assets/upload', { method: 'POST', body: form });
+	      const url = res?.url ? String(res.url) : '';
+	      if (url) {
+	        insertAtCursor(docsEditTextEl, `![screenshot](${url})\\n`);
+	      }
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = 'Image uploaded.';
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = `Upload failed: ${raw}`;
+	    } finally {
+	      docsImageInputEl.value = '';
+	    }
+	  });
+
 	  async function loadAndRenderDocsPage(docId, pageId, anchor = null) {
+	    if (docsState.editing && docsState.editDirty) {
+	      const ok = confirm('You have unsaved edits. Discard and load another page?');
+	      if (!ok) return;
+	      setDocsEditMode(false);
+	    }
 	    setDocsStatus('Loading page…');
-	    const page = await apiJson(`/docs/page/${encodeURIComponent(docId)}/${encodeURIComponent(pageId)}`);
+	    const ver = docsState.version || null;
+	    const qs = ver ? `?version=${encodeURIComponent(ver)}` : '';
+	    const page = await apiJson(`/docs/page/${encodeURIComponent(docId)}/${encodeURIComponent(pageId)}${qs}`);
 	    docsState.page = page;
 	    docsState.selectedDocId = page.doc_id;
 	    docsState.selectedDocTitle = page.doc_title;
@@ -3046,14 +3562,18 @@
     highlightDocsActivePage();
   }
 
-	  async function openDocsReader({ doc_id = null, page_id = null, anchor = null, fullscreen = null } = {}) {
-	    openModal(docsPanel);
-	    if (fullscreen === true) setDocsFullscreen(true);
-	    if (fullscreen === false) setDocsFullscreen(false);
-	    setDocsStatus('');
+		  async function openDocsReader({ doc_id = null, page_id = null, anchor = null, fullscreen = null, version = null } = {}) {
+		    openModal(docsPanel);
+		    setDocsEditMode(false);
+		    if (fullscreen === true) setDocsFullscreen(true);
+		    if (fullscreen === false) setDocsFullscreen(false);
+		    setDocsStatus('');
 	    // Keep prior search results, but don't auto-run.
 
     try {
+      await ensureDocsVersions();
+      if (version && version !== docsState.version) resetDocsForVersion(version);
+      if (docsVersionSelectEl && docsState.version) docsVersionSelectEl.value = docsState.version;
       const catalog = await ensureDocsCatalog();
       const docs = Array.isArray(catalog?.docs) ? catalog.docs : [];
       renderDocsGuideSelect(docs, doc_id);
@@ -3081,7 +3601,7 @@
         if (docsPageEl) docsPageEl.innerHTML = '';
       }
 
-      const hash = docsHashFor(selectedDocId, desiredPage, anchor);
+      const hash = docsHashFor(selectedDocId, desiredPage, anchor, docsState.version);
       if (location.hash !== hash) {
         try {
           history.replaceState(null, '', location.pathname + location.search + hash);
@@ -3095,16 +3615,23 @@
     }
   }
 
-	  docsGuideSelectEl?.addEventListener('change', async () => {
-	    const docId = docsGuideSelectEl.value;
-	    if (!docId) return;
-	    try {
-	      await loadDocPages(docId);
-	      docsState.page = null;
+  docsGuideSelectEl?.addEventListener('change', async () => {
+    const docId = docsGuideSelectEl.value;
+    if (!docId) return;
+    if (docsState.editing && docsState.editDirty) {
+      if (!confirm('You have unsaved edits. Discard and switch guide?')) {
+        docsGuideSelectEl.value = docsState.selectedDocId || '';
+        return;
+      }
+      setDocsEditMode(false);
+    }
+    try {
+      await loadDocPages(docId);
+      docsState.page = null;
 	      renderDocsPageList();
 	      setDocsBreadcrumb(`${docsState.selectedDocTitle} › Select a page…`);
 	      if (docsPageEl) docsPageEl.innerHTML = '';
-	      const hash = docsHashFor(docId, null, null);
+	      const hash = docsHashFor(docId, null, null, docsState.version);
       try {
         history.replaceState(null, '', location.pathname + location.search + hash);
       } catch (e) {
@@ -3115,6 +3642,93 @@
       setDocsStatus(`Failed to load guide: ${e?.raw ? String(e.raw) : String(e)}`, { error: true });
 	    }
 	  });
+
+  docsVersionSelectEl?.addEventListener('change', async () => {
+    const nextVer = docsVersionSelectEl.value;
+    if (!nextVer || nextVer === docsState.version) return;
+    if (docsState.editing && docsState.editDirty) {
+      if (!confirm('You have unsaved edits. Discard and switch version?')) {
+        docsVersionSelectEl.value = docsState.version || '';
+        return;
+      }
+      setDocsEditMode(false);
+    }
+    resetDocsForVersion(nextVer);
+    try {
+      await openDocsReader({ version: nextVer, doc_id: null, page_id: null, anchor: null });
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Failed to switch version: ${raw}`, { error: true });
+    }
+  });
+
+  async function createNewGuide() {
+    if (!docsState.version) {
+      setDocsStatus('Select a docs version first.', { error: true });
+      return;
+    }
+    if (docsState.editing && docsState.editDirty) {
+      if (!confirm('You have unsaved edits. Discard and create a new guide?')) return;
+      setDocsEditMode(false);
+    }
+    const title = prompt('New guide name', '');
+    if (!title) return;
+    setDocsStatus('Creating guide…');
+    try {
+      const res = await apiJson('/docs/guide', {
+        method: 'POST',
+        body: { doc_title: title, version: docsState.version },
+      });
+      docsState.catalog = null;
+      await openDocsReader({ version: docsState.version, doc_id: res.doc_id, page_id: res.page_id, anchor: null });
+      setDocsStatus('Guide created.');
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Create guide failed: ${raw}`, { error: true });
+    }
+  }
+
+  async function createNewSection() {
+    if (!docsState.version) {
+      setDocsStatus('Select a docs version first.', { error: true });
+      return;
+    }
+    const docId = docsState.selectedDocId;
+    if (!docId) {
+      setDocsStatus('Select a guide first.', { error: true });
+      return;
+    }
+    if (docsState.editing && docsState.editDirty) {
+      if (!confirm('You have unsaved edits. Discard and create a new section?')) return;
+      setDocsEditMode(false);
+    }
+    const title = prompt('New section title', '');
+    if (!title) return;
+    setDocsStatus('Creating section…');
+    try {
+      const res = await apiJson('/docs/section', {
+        method: 'POST',
+        body: { doc_id: docId, page_title: title, version: docsState.version },
+      });
+      docsState.catalog = null;
+      await loadDocPages(docId);
+      renderDocsPageList();
+      await loadAndRenderDocsPage(docId, res.page_id, null);
+      setDocsStatus('Section created.');
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Create section failed: ${raw}`, { error: true });
+    }
+  }
+
+  docsNewGuideBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    createNewGuide();
+  });
+  docsNewSectionBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    createNewSection();
+  });
 
 	  docsSearchBtn?.addEventListener('click', () => runDocsSearch(docsSearchInputEl?.value, { k: 12 }));
 	  docsSearchClearBtn?.addEventListener('click', () => {
@@ -3217,7 +3831,7 @@
       open.textContent = 'OPEN';
       open.addEventListener('click', () => {
         if (!s?.doc_id || !s?.page_id) return;
-        openDocsReader({ doc_id: s.doc_id, page_id: s.page_id, anchor: null });
+        openDocsReader({ doc_id: s.doc_id, page_id: s.page_id, anchor: null, version: docsState.version });
       });
       top.appendChild(open);
       row.appendChild(top);
@@ -3267,7 +3881,10 @@
     setDebugStatus('Running /docs/search (debug)…');
     debugResultsEl.innerHTML = `<div class="tiny muted">Loading…</div>`;
     try {
-      const pack = await apiJson('/docs/search', { method: 'POST', body: { query: q, k: kk, debug: true } });
+      const pack = await apiJson('/docs/search', {
+        method: 'POST',
+        body: { query: q, k: kk, debug: true, version: docsState.version || null },
+      });
       lastRetrievalPack = pack;
       renderRetrievalDebug(pack);
       setDebugStatus('OK');
@@ -3534,23 +4151,27 @@
     }
   });
 
-  // ---------- Modal control ----------
-	  function closeAllModals() {
-	    const wasDocs = docsPanel.classList.contains('visible');
-	    stopReindexPoll();
-	    historyPanel.classList.remove('visible');
-	    adminPanel.classList.remove('visible');
-	    redactorPanel.classList.remove('visible');
-	    docsPanel.classList.remove('visible');
-	    debugPanel.classList.remove('visible');
-	    userSettings.classList.remove('visible');
-	    overlay.classList.remove('visible');
-	    if (wasDocs && parseDocsHash()) {
-	      try {
-	        history.replaceState(null, '', location.pathname + location.search);
-	      } catch (e) {
-        location.hash = '';
-      }
+	  // ---------- Modal control ----------
+		  function closeAllModals() {
+		    const wasDocs = docsPanel.classList.contains('visible');
+		    if (wasDocs && docsState.editing && docsState.editDirty) {
+		      if (!confirm('You have unsaved edits. Close anyway?')) return;
+		    }
+		    stopReindexPoll();
+		    historyPanel.classList.remove('visible');
+		    adminPanel.classList.remove('visible');
+		    redactorPanel.classList.remove('visible');
+		    docsPanel.classList.remove('visible');
+		    debugPanel.classList.remove('visible');
+		    userSettings.classList.remove('visible');
+		    overlay.classList.remove('visible');
+		    setDocsEditMode(false);
+		    if (wasDocs && parseDocsHash()) {
+		      try {
+		        history.replaceState(null, '', location.pathname + location.search);
+		      } catch (e) {
+	        location.hash = '';
+	      }
     }
   }
   function openModal(which) {
@@ -3606,6 +4227,27 @@
     else {
       const deep = parseDocsHash();
       openDocsReader(deep || {});
+    }
+  });
+
+  docsEditBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!docsState.page) {
+      setDocsStatus('Select a page before editing.', { error: true });
+      return;
+    }
+    if (docsState.editing) {
+      if (docsState.editDirty && !confirm('You have unsaved edits. Exit edit mode?')) return;
+      setDocsEditMode(false);
+      return;
+    }
+    setDocsEditMode(true);
+    try {
+      await loadDocsEdit(docsState.page.doc_id, docsState.page.page_id);
+    } catch (e2) {
+      const raw = e2?.raw ? String(e2.raw) : String(e2);
+      if (docsEditStatusEl) docsEditStatusEl.textContent = `Edit load failed: ${raw}`;
+      setDocsEditMode(false);
     }
   });
 
