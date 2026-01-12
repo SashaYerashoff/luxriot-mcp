@@ -2685,7 +2685,8 @@
 	        ? img.parentElement
 	        : img;
 
-	      link.appendChild(img);
+	      const imgClone = img.cloneNode(true);
+	      link.appendChild(imgClone);
 	      figure.appendChild(link);
 
 	      const caption = document.createElement('figcaption');
