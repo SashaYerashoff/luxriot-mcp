@@ -28,6 +28,18 @@ class ImageResult(BaseModel):
     near_heading: str | None = None
 
 
+class ContextChunk(BaseModel):
+    index: int
+    chunk_id: str
+    doc_id: str
+    page_id: str
+    heading_path: list[str]
+    anchor: str | None = None
+    source_path: str
+    images: list[str] = Field(default_factory=list)
+    score: float | None = None
+
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     k: int = Field(default=8, ge=1, le=25)
@@ -63,6 +75,7 @@ class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
     images: list[ImageResult]
+    context_chunks: list[ContextChunk] = Field(default_factory=list)
     web_sources: list[WebSource] = Field(default_factory=list)
     session_id: str
 
@@ -114,6 +127,12 @@ class ReindexRequest(BaseModel):
     compute_embeddings: bool = True
     embedding_max_chars: int = Field(default=448, ge=256, le=8000)
     embedding_batch_size: int = Field(default=8, ge=1, le=64)
+    include_edits: bool = True
+    summary_enabled: bool | None = None
+    summary_model: str | None = None
+    summary_max_input_chars: int | None = None
+    summary_max_output_tokens: int | None = None
+    summary_unit_max_tokens: int | None = None
 
 
 class ReindexJob(BaseModel):
@@ -125,6 +144,12 @@ class ReindexJob(BaseModel):
     compute_embeddings: bool
     embedding_max_chars: int
     embedding_batch_size: int
+    include_edits: bool
+    summary_enabled: bool
+    summary_model: str | None = None
+    summary_max_input_chars: int
+    summary_max_output_tokens: int
+    summary_unit_max_tokens: int
     pid: int | None = None
     build_dir: str | None = None
     started_at: str

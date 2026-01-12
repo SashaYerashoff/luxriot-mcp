@@ -19,8 +19,8 @@
     "k_default": 8,
     "max_citations": 8,
     "max_images": 6,
-    "doc_priority_boost": 0.05,
-    "heading_boost": 0.6,
+    "doc_priority_boost": 0.0,
+    "heading_boost": 0.0,
     "mmr": {
       "enabled": true,
       "lambda": 0.8,
@@ -29,7 +29,21 @@
     },
     "expand": {
       "neighbors": 1,
-      "max_chars": 4200
+      "max_chars": 4200,
+      "include_images": false
+    },
+    "tool_calls": {
+      "enabled": true,
+      "max_calls": 12
+    },
+    "summary": {
+      "enabled": true,
+      "model": "qwen3-vl-4b",
+      "max_input_chars": 6000,
+      "max_output_tokens": 280,
+      "unit_max_tokens": 900,
+      "k": 12,
+      "max_pages": 20
     },
     "dedupe": {
       "max_per_page": 3,

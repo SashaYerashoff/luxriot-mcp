@@ -29,7 +29,7 @@ from .auth import (
     resolve_auth,
     require_role,
 )
-from .config import DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
+from .config import APP_DB_PATH, DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
 from .datastore_search import SearchEngine
 from .docs_store import DocsStore
 from .lmstudio import LMStudioError, chat_completion, chat_completion_stream
@@ -44,6 +44,7 @@ from .schemas import (
     ChatRequest,
     ChatResponse,
     Citation,
+    ContextChunk,
     DocCatalogDetailResponse,
     DocCreateResponse,
     DocEditInfo,
@@ -316,6 +317,13 @@ def auth_update_user(user_id: str, req: UserUpdateRequest, ctx: AuthContext = De
 
 
 def _job_defaults() -> dict[str, Any]:
+    summary = {}
+    try:
+        effective = get_settings_bundle()["effective"]
+        retrieval = effective.get("retrieval") if isinstance(effective.get("retrieval"), dict) else {}
+        summary = retrieval.get("summary") if isinstance(retrieval.get("summary"), dict) else {}
+    except Exception:
+        summary = {}
     return {
         "docs_dir": str(DOCS_DIR),
         "version": DEFAULT_VERSION,
@@ -323,6 +331,12 @@ def _job_defaults() -> dict[str, Any]:
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
         "embedding_max_chars": 448,
         "embedding_batch_size": 8,
+        "include_edits": True,
+        "summary_enabled": bool(summary.get("enabled", False)),
+        "summary_model": str(summary.get("model") or "") or None,
+        "summary_max_input_chars": int(summary.get("max_input_chars", 6000) or 6000),
+        "summary_max_output_tokens": int(summary.get("max_output_tokens", 280) or 280),
+        "summary_unit_max_tokens": int(summary.get("unit_max_tokens", 900) or 900),
     }
 
 
@@ -416,6 +430,22 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
     ]
     if not bool(job.get("compute_embeddings", True)):
         cmd.append("--no-embeddings")
+    if bool(job.get("include_edits", True)):
+        cmd.extend(["--include-edits", "--app-db", str(APP_DB_PATH)])
+    if bool(job.get("summary_enabled", False)):
+        cmd.append("--summary-enabled")
+        if job.get("summary_model"):
+            cmd.extend(["--summary-model", str(job.get("summary_model"))])
+        cmd.extend(
+            [
+                "--summary-max-input-chars",
+                str(int(job.get("summary_max_input_chars") or 6000)),
+                "--summary-max-output-tokens",
+                str(int(job.get("summary_max_output_tokens") or 280)),
+                "--summary-unit-max-tokens",
+                str(int(job.get("summary_unit_max_tokens") or 900)),
+            ]
+        )
 
     _append_log(job, f"Running: {' '.join(cmd)}")
     job["phase"] = "running_ingest"
@@ -468,6 +498,16 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
                 suffix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 backup_dir = target_dir.with_name(f"{target_dir.name}.bak_{suffix}")
                 target_dir.rename(backup_dir)
+
+            user_assets_src = None
+            if backup_dir and (backup_dir / "assets" / "user").exists():
+                user_assets_src = backup_dir / "assets" / "user"
+            elif target_dir.exists() and (target_dir / "assets" / "user").exists():
+                user_assets_src = target_dir / "assets" / "user"
+            if user_assets_src:
+                user_assets_dest = build_dir / "assets" / "user"
+                user_assets_dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(user_assets_src, user_assets_dest, dirs_exist_ok=True)
 
             build_dir.rename(target_dir)
             _get_docs_store(version).invalidate()
@@ -533,6 +573,19 @@ async def admin_reindex_start(req: ReindexRequest, ctx: AuthContext = Depends(re
         job_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(4)
         build_dir = (DATASTORE_DIR / f".build_{DEFAULT_VERSION}_{job_id}").resolve()
 
+        defaults = _job_defaults()
+        summary_enabled = bool(req.summary_enabled) if req.summary_enabled is not None else bool(defaults.get("summary_enabled"))
+        summary_model = req.summary_model if req.summary_model is not None else defaults.get("summary_model")
+        summary_max_input_chars = (
+            int(req.summary_max_input_chars) if req.summary_max_input_chars is not None else int(defaults.get("summary_max_input_chars") or 6000)
+        )
+        summary_max_output_tokens = (
+            int(req.summary_max_output_tokens) if req.summary_max_output_tokens is not None else int(defaults.get("summary_max_output_tokens") or 280)
+        )
+        summary_unit_max_tokens = (
+            int(req.summary_unit_max_tokens) if req.summary_unit_max_tokens is not None else int(defaults.get("summary_unit_max_tokens") or 900)
+        )
+
         job: dict[str, Any] = {
             "job_id": job_id,
             "status": "running",
@@ -542,6 +595,12 @@ async def admin_reindex_start(req: ReindexRequest, ctx: AuthContext = Depends(re
             "compute_embeddings": bool(req.compute_embeddings),
             "embedding_max_chars": int(req.embedding_max_chars),
             "embedding_batch_size": int(req.embedding_batch_size),
+            "include_edits": bool(req.include_edits),
+            "summary_enabled": summary_enabled,
+            "summary_model": summary_model,
+            "summary_max_input_chars": summary_max_input_chars,
+            "summary_max_output_tokens": summary_max_output_tokens,
+            "summary_unit_max_tokens": summary_unit_max_tokens,
             "started_at": _utc_now(),
             "updated_at": _utc_now(),
             "doc_total": int(doc_total),
@@ -1188,6 +1247,13 @@ async def docs_asset_upload(
     return DocAssetUploadResponse(url=url, filename=out_name, version=ver)
 
 
+def _doc_source_path(version: str, doc_id: str, page_id: str, source_rel: str | None) -> str:
+    source_rel = str(source_rel or "")
+    if source_rel and not source_rel.startswith("custom/"):
+        return f"/rawdocs/{version}/{source_rel}"
+    return f"/docs/page/{doc_id}/{page_id}?version={version}"
+
+
 def _build_citations(results: list[dict[str, Any]], version: str, max_citations: int) -> list[Citation]:
     seen: set[tuple[str, str]] = set()
     citations: list[Citation] = []
@@ -1197,14 +1263,14 @@ def _build_citations(results: list[dict[str, Any]], version: str, max_citations:
             continue
         seen.add(key)
         title = (r.get("heading_path") or [r["page_id"]])[-1]
-        source_rel = r.get("source_path") or ""
+        source_path = _doc_source_path(version, r["doc_id"], r["page_id"], r.get("source_path"))
         citations.append(
             Citation(
                 title=title,
                 doc_id=r["doc_id"],
                 page_id=r["page_id"],
                 anchor=r.get("anchor"),
-                source_path=f"/rawdocs/{version}/{source_rel}",
+                source_path=source_path,
             )
         )
         if len(citations) >= max_citations:
@@ -1232,6 +1298,112 @@ def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageR
             if len(urls) >= max_images:
                 return urls
     return urls
+
+
+def _build_context_chunks(results: list[dict[str, Any]], version: str) -> list[ContextChunk]:
+    out: list[ContextChunk] = []
+    for idx, r in enumerate(results, start=1):
+        out.append(
+            ContextChunk(
+                index=idx,
+                chunk_id=str(r.get("chunk_id") or ""),
+                doc_id=r["doc_id"],
+                page_id=r["page_id"],
+                heading_path=list(r.get("heading_path") or []),
+                anchor=r.get("anchor"),
+                source_path=_doc_source_path(version, r["doc_id"], r["page_id"], r.get("source_path")),
+                images=list(r.get("images") or []),
+                score=float(r["score"]) if r.get("score") is not None else None,
+            )
+        )
+    return out
+
+
+_REQUEST_MORE_CONTEXT = "REQUEST_MORE_CONTEXT"
+
+
+def _strip_json_fence(payload: str) -> str:
+    text = payload.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if len(lines) < 2:
+        return text
+    if not lines[-1].strip().startswith("```"):
+        return text
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _parse_context_request(text: str) -> dict[str, Any] | None:
+    if not text:
+        return None
+    lines = text.strip().splitlines()
+    if not lines:
+        return None
+    if lines[0].strip() != _REQUEST_MORE_CONTEXT:
+        return None
+    payload = "\n".join(lines[1:]).strip()
+    if not payload:
+        return None
+    payload = _strip_json_fence(payload)
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    query = str(data.get("query") or "").strip()
+    if not query:
+        return None
+    req: dict[str, Any] = {"query": query}
+    reason = str(data.get("reason") or "").strip()
+    if reason:
+        req["reason"] = reason
+    if "k" in data:
+        try:
+            req["k"] = int(data.get("k") or 0)
+        except (TypeError, ValueError):
+            req["k"] = 0
+    doc_ids = data.get("doc_ids")
+    if isinstance(doc_ids, str):
+        doc_ids = [doc_ids]
+    if isinstance(doc_ids, list):
+        req["doc_ids"] = [str(x).strip() for x in doc_ids if str(x).strip()]
+    page_ids = data.get("page_ids")
+    if isinstance(page_ids, str):
+        page_ids = [page_ids]
+    if isinstance(page_ids, list):
+        req["page_ids"] = [str(x).strip() for x in page_ids if str(x).strip()]
+    return req
+
+
+def _merge_retrieval_results(
+    dest: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+    seen: set[str],
+) -> int:
+    added = 0
+    for row in incoming:
+        cid = str(row.get("chunk_id") or "").strip()
+        key = cid or f"{row.get('doc_id')}:{row.get('page_id')}:{row.get('heading_path')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        dest.append(row)
+        added += 1
+    return added
+
+
+def _build_context_text(results: list[dict[str, Any]], web_context_blocks: list[str]) -> str:
+    context_blocks: list[str] = []
+    for i, r in enumerate(results, start=1):
+        hp = " > ".join(r.get("heading_path") or [])
+        source = f"{r['doc_id']}/{r['page_id']}"
+        context_blocks.append(f"[{i}] {source} | {hp}\n{r['text']}")
+    if web_context_blocks:
+        context_blocks.append("EXTERNAL WEB CONTEXT (not Luxriot EVO docs):")
+        context_blocks.extend(web_context_blocks)
+    return "\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)"
 
 
 @app.post("/docs/search", response_model=SearchResponse, response_model_exclude_none=True)
@@ -1273,6 +1445,11 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
     expand = retrieval.get("expand") if isinstance(retrieval.get("expand"), dict) else {}
     expand_neighbors = int(expand.get("neighbors", 0) or 0)
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
+    expand_include_images = bool(expand.get("include_images", False))
+    summary = retrieval.get("summary") if isinstance(retrieval.get("summary"), dict) else {}
+    summary_enabled = bool(summary.get("enabled", False))
+    summary_k = int(summary.get("k", 0) or 0)
+    summary_max_pages = int(summary.get("max_pages", 0) or 0)
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     search_k = int(req.k)
@@ -1291,6 +1468,7 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
                 mmr_use_embeddings=mmr_use_embeddings,
                 expand_neighbors=expand_neighbors,
                 expand_max_chars=expand_max_chars,
+                expand_include_images=expand_include_images,
                 heading_boost=heading_boost,
                 bm25_candidates=bm25_candidates,
                 embedding_candidates=embedding_candidates,
@@ -1299,6 +1477,9 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
                 embedding_weight=embedding_weight,
                 doc_priority=[str(x) for x in doc_priority],
                 doc_priority_boost=doc_priority_boost,
+                summary_enabled=summary_enabled,
+                summary_k=summary_k,
+                summary_max_pages=summary_max_pages,
                 max_per_page=max_per_page,
                 max_per_doc=max_per_doc,
                 debug_out=debug,
@@ -1404,39 +1585,17 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
     expand = retrieval_cfg.get("expand") if isinstance(retrieval_cfg.get("expand"), dict) else {}
     expand_neighbors = int(expand.get("neighbors", 0) or 0)
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
+    expand_include_images = bool(expand.get("include_images", False))
+    summary = retrieval_cfg.get("summary") if isinstance(retrieval_cfg.get("summary"), dict) else {}
+    summary_enabled = bool(summary.get("enabled", False))
+    summary_k = int(summary.get("k", 0) or 0)
+    summary_max_pages = int(summary.get("max_pages", 0) or 0)
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     search_k = int(req.k)
-    buffer_k = min(max(search_k * 5, search_k + 10), 200)
-
-    try:
-        async with _search_lock:
-            retrieval = await engine.search(
-                req.message,
-                k=buffer_k,
-                mode=retrieval_mode,
-                mmr_enabled=mmr_enabled,
-                mmr_lambda=mmr_lambda,
-                mmr_candidates=mmr_candidates,
-                mmr_use_embeddings=mmr_use_embeddings,
-                expand_neighbors=expand_neighbors,
-                expand_max_chars=expand_max_chars,
-                heading_boost=heading_boost,
-                bm25_candidates=bm25_candidates,
-                embedding_candidates=embedding_candidates,
-                rrf_k=rrf_k,
-                bm25_weight=bm25_weight,
-                embedding_weight=embedding_weight,
-                doc_priority=doc_priority_list,
-                doc_priority_boost=doc_priority_boost,
-                max_per_page=max_per_page,
-                max_per_doc=max_per_doc,
-            )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    retrieval = [r for r in retrieval if _doc_allowed(r.get("doc_id"), allow, deny)][:search_k]
+    tool_cfg = retrieval_cfg.get("tool_calls") if isinstance(retrieval_cfg.get("tool_calls"), dict) else {}
+    tool_calls_enabled = bool(tool_cfg.get("enabled", False))
+    tool_calls_limit = int(tool_cfg.get("max_calls", 0) or 0)
 
     web_cfg = settings.get("web") if isinstance(settings.get("web"), dict) else {}
     web_enabled = bool(web_cfg.get("enabled", False))
@@ -1498,61 +1657,157 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
                     snippet_part = f"\n{snippet}" if snippet else ""
                     web_context_blocks.append(f"[W{len(web_context_blocks)+1}] {url}{title_part}{snippet_part}")
                     web_sources.append(WebSource(kind="search", url=url, title=title or None, snippet=snippet or None))
+
+    async def run_retrieval(
+        query: str,
+        k: int,
+        *,
+        doc_ids: list[str] | None = None,
+        page_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        buffer_k = min(max(k * 5, k + 10), 200)
+        try:
+            async with _search_lock:
+                rows = await engine.search(
+                    query,
+                    k=buffer_k,
+                    mode=retrieval_mode,
+                    mmr_enabled=mmr_enabled,
+                    mmr_lambda=mmr_lambda,
+                    mmr_candidates=mmr_candidates,
+                    mmr_use_embeddings=mmr_use_embeddings,
+                    expand_neighbors=expand_neighbors,
+                    expand_max_chars=expand_max_chars,
+                    expand_include_images=expand_include_images,
+                    heading_boost=heading_boost,
+                    bm25_candidates=bm25_candidates,
+                    embedding_candidates=embedding_candidates,
+                    rrf_k=rrf_k,
+                    bm25_weight=bm25_weight,
+                    embedding_weight=embedding_weight,
+                    doc_priority=doc_priority_list,
+                    doc_priority_boost=doc_priority_boost,
+                    summary_enabled=summary_enabled,
+                    summary_k=summary_k,
+                    summary_max_pages=summary_max_pages,
+                    max_per_page=max_per_page,
+                    max_per_doc=max_per_doc,
+                )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        rows = [r for r in rows if _doc_allowed(r.get("doc_id"), allow, deny)]
+        if doc_ids:
+            allowed_docs = {str(x) for x in doc_ids}
+            rows = [r for r in rows if str(r.get("doc_id") or "") in allowed_docs]
+        if page_ids:
+            allowed_pages = {str(x) for x in page_ids}
+            rows = [r for r in rows if str(r.get("page_id") or "") in allowed_pages]
+        return rows[:k]
+
+    all_results: list[dict[str, Any]] = []
+    seen_results: set[str] = set()
+    tool_calls_used = 0
+    current_query = req.message
+    current_k = search_k
+    current_doc_ids: list[str] | None = None
+    current_page_ids: list[str] | None = None
+
+    while True:
+        retrieval = await run_retrieval(
+            current_query,
+            current_k,
+            doc_ids=current_doc_ids,
+            page_ids=current_page_ids,
+        )
+        log.info(
+            "chat retrieval pass query=%r k=%s results=%s",
+            current_query,
+            current_k,
+            len(retrieval),
+        )
+        _merge_retrieval_results(all_results, retrieval, seen_results)
+
+        context_text = _build_context_text(all_results, web_context_blocks)
+        try:
+            system_prompt = render_template(
+                template,
+                variables={
+                    "user_role": str(ctx.principal.role),
+                    "username": str(ctx.principal.username or ""),
+                    "docs_version": DEFAULT_VERSION,
+                    "retrieval_mode": retrieval_mode,
+                    "retrieval_k": str(req.k),
+                    "doc_priority": doc_priority_str,
+                    "web_enabled": str(web_enabled),
+                    "tool_call_limit": str(tool_calls_limit),
+                    "context": context_text,
+                },
+                required_placeholders=[str(x) for x in required_placeholders],
+            )
+        except PromptTemplateError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        for m in history[-10:]:
+            if m["role"] in ("user", "assistant"):
+                messages.append({"role": m["role"], "content": m["content"]})
+        messages.append({"role": "user", "content": req.message})
+
+        try:
+            answer = await chat_completion(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout_s=timeout_s,
+                model=llm_model_id,
+            )
+        except LMStudioError as e:
+            log.exception("LM Studio error")
+            raise HTTPException(status_code=502, detail=str(e)) from e
+
+        request = _parse_context_request(answer) if tool_calls_enabled else None
+        if not request:
+            break
+
+        tool_calls_used += 1
+        if tool_calls_limit > 0 and tool_calls_used >= tool_calls_limit:
+            log.warning("chat tool call limit reached (%s)", tool_calls_limit)
+            raise HTTPException(status_code=429, detail="Tool call limit reached for this request.")
+
+        log.info(
+            "chat model requested more context reason=%r query=%r k=%s doc_ids=%s page_ids=%s",
+            request.get("reason"),
+            request.get("query"),
+            request.get("k"),
+            request.get("doc_ids"),
+            request.get("page_ids"),
+        )
+        current_query = str(request.get("query") or req.message).strip() or req.message
+        requested_k = int(request.get("k") or 0)
+        if requested_k <= 0:
+            current_k = search_k
+        else:
+            current_k = max(1, min(25, requested_k))
+        current_doc_ids = request.get("doc_ids") or None
+        current_page_ids = request.get("page_ids") or None
+
     max_citations = int(retrieval_cfg.get("max_citations", 8))
     max_images = int(retrieval_cfg.get("max_images", 6))
-    citations = _build_citations(retrieval, DEFAULT_VERSION, max_citations=max_citations)
-    images = _build_images(retrieval, max_images=max_images)
-
-    context_blocks = []
-    for i, r in enumerate(retrieval, start=1):
-        hp = " > ".join(r.get("heading_path") or [])
-        source = f"{r['doc_id']}/{r['page_id']}"
-        context_blocks.append(f"[{i}] {source} | {hp}\n{r['text']}")
-
-    if web_context_blocks:
-        context_blocks.append("EXTERNAL WEB CONTEXT (not Luxriot EVO docs):")
-        context_blocks.extend(web_context_blocks)
-
-    context_text = "\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)"
-
-    try:
-        system_prompt = render_template(
-            template,
-            variables={
-                "user_role": str(ctx.principal.role),
-                "username": str(ctx.principal.username or ""),
-                "docs_version": DEFAULT_VERSION,
-                "retrieval_mode": retrieval_mode,
-                "retrieval_k": str(req.k),
-                "doc_priority": doc_priority_str,
-                "web_enabled": str(web_enabled),
-                "context": context_text,
-            },
-            required_placeholders=[str(x) for x in required_placeholders],
-        )
-    except PromptTemplateError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-    for m in history[-10:]:
-        if m["role"] in ("user", "assistant"):
-            messages.append({"role": m["role"], "content": m["content"]})
-    messages.append({"role": "user", "content": req.message})
-
-    try:
-        answer = await chat_completion(
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout_s=timeout_s,
-            model=llm_model_id,
-        )
-    except LMStudioError as e:
-        log.exception("LM Studio error")
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    citations = _build_citations(all_results, DEFAULT_VERSION, max_citations=max_citations)
+    images = _build_images(all_results, max_images=max_images)
+    context_chunks = _build_context_chunks(all_results, DEFAULT_VERSION)
 
     app_db.insert_message(session_id=session_id, role="assistant", content=answer)
-    return ChatResponse(answer=answer, citations=citations, images=images, web_sources=web_sources, session_id=session_id)
+    return ChatResponse(
+        answer=answer,
+        citations=citations,
+        images=images,
+        context_chunks=context_chunks,
+        web_sources=web_sources,
+        session_id=session_id,
+    )
 
 
 @app.post("/chat/stream")
@@ -1625,10 +1880,17 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
     expand = retrieval_cfg.get("expand") if isinstance(retrieval_cfg.get("expand"), dict) else {}
     expand_neighbors = int(expand.get("neighbors", 0) or 0)
     expand_max_chars = int(expand.get("max_chars", 0) or 0)
+    expand_include_images = bool(expand.get("include_images", False))
+    summary = retrieval_cfg.get("summary") if isinstance(retrieval_cfg.get("summary"), dict) else {}
+    summary_enabled = bool(summary.get("enabled", False))
+    summary_k = int(summary.get("k", 0) or 0)
+    summary_max_pages = int(summary.get("max_pages", 0) or 0)
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     search_k = int(req.k)
-    buffer_k = min(max(search_k * 5, search_k + 10), 200)
+    tool_cfg = retrieval_cfg.get("tool_calls") if isinstance(retrieval_cfg.get("tool_calls"), dict) else {}
+    tool_calls_enabled = bool(tool_cfg.get("enabled", False))
+    tool_calls_limit = int(tool_cfg.get("max_calls", 0) or 0)
 
     def sse(event: str, data: Any) -> bytes:
         if isinstance(data, str):
@@ -1640,54 +1902,6 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
     async def gen() -> Any:
         try:
             yield sse("status", {"phase": "starting", "session_id": session_id})
-
-            yield sse(
-                "status",
-                {
-                    "phase": "retrieving_docs",
-                    "message": f"Searching documentation ({retrieval_mode})…",
-                    "k": int(req.k),
-                },
-            )
-            try:
-                async with _search_lock:
-                    retrieval = await engine.search(
-                        req.message,
-                        k=buffer_k,
-                        mode=retrieval_mode,
-                        mmr_enabled=mmr_enabled,
-                        mmr_lambda=mmr_lambda,
-                        mmr_candidates=mmr_candidates,
-                        mmr_use_embeddings=mmr_use_embeddings,
-                        expand_neighbors=expand_neighbors,
-                        expand_max_chars=expand_max_chars,
-                        heading_boost=heading_boost,
-                        bm25_candidates=bm25_candidates,
-                        embedding_candidates=embedding_candidates,
-                        rrf_k=rrf_k,
-                        bm25_weight=bm25_weight,
-                        embedding_weight=embedding_weight,
-                        doc_priority=doc_priority_list,
-                        doc_priority_boost=doc_priority_boost,
-                        max_per_page=max_per_page,
-                        max_per_doc=max_per_doc,
-                    )
-            except ValueError as e:
-                yield sse("error", {"error": "Bad request", "detail": str(e)})
-                return
-            except RuntimeError as e:
-                yield sse("error", {"error": "Search unavailable", "detail": str(e)})
-                return
-            retrieval = [r for r in retrieval if _doc_allowed(r.get("doc_id"), allow, deny)][:search_k]
-
-            yield sse(
-                "status",
-                {
-                    "phase": "retrieved_docs",
-                    "message": f"Found {len(retrieval)} relevant sections.",
-                    "found": int(len(retrieval)),
-                },
-            )
 
             web_cfg = settings.get("web") if isinstance(settings.get("web"), dict) else {}
             web_enabled = bool(web_cfg.get("enabled", False))
@@ -1755,139 +1969,297 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                                 WebSource(kind="search", url=url, title=title or None, snippet=snippet or None)
                             )
 
-            max_citations = int(retrieval_cfg.get("max_citations", 8))
-            max_images = int(retrieval_cfg.get("max_images", 6))
-            citations = _build_citations(retrieval, DEFAULT_VERSION, max_citations=max_citations)
-            images = _build_images(retrieval, max_images=max_images)
+            async def run_retrieval(
+                query: str,
+                k: int,
+                *,
+                doc_ids: list[str] | None = None,
+                page_ids: list[str] | None = None,
+            ) -> list[dict[str, Any]]:
+                buffer_k = min(max(k * 5, k + 10), 200)
+                async with _search_lock:
+                    rows = await engine.search(
+                        query,
+                        k=buffer_k,
+                        mode=retrieval_mode,
+                        mmr_enabled=mmr_enabled,
+                        mmr_lambda=mmr_lambda,
+                        mmr_candidates=mmr_candidates,
+                        mmr_use_embeddings=mmr_use_embeddings,
+                        expand_neighbors=expand_neighbors,
+                        expand_max_chars=expand_max_chars,
+                        expand_include_images=expand_include_images,
+                        heading_boost=heading_boost,
+                        bm25_candidates=bm25_candidates,
+                        embedding_candidates=embedding_candidates,
+                        rrf_k=rrf_k,
+                        bm25_weight=bm25_weight,
+                        embedding_weight=embedding_weight,
+                        doc_priority=doc_priority_list,
+                        doc_priority_boost=doc_priority_boost,
+                        summary_enabled=summary_enabled,
+                        summary_k=summary_k,
+                        summary_max_pages=summary_max_pages,
+                        max_per_page=max_per_page,
+                        max_per_doc=max_per_doc,
+                    )
+                rows = [r for r in rows if _doc_allowed(r.get("doc_id"), allow, deny)]
+                if doc_ids:
+                    allowed_docs = {str(x) for x in doc_ids}
+                    rows = [r for r in rows if str(r.get("doc_id") or "") in allowed_docs]
+                if page_ids:
+                    allowed_pages = {str(x) for x in page_ids}
+                    rows = [r for r in rows if str(r.get("page_id") or "") in allowed_pages]
+                return rows[:k]
 
-            retrieval_pack = SearchResponse(
-                chunks=[
+            all_results: list[dict[str, Any]] = []
+            seen_results: set[str] = set()
+            tool_calls_used = 0
+            current_query = req.message
+            current_k = search_k
+            current_doc_ids: list[str] | None = None
+            current_page_ids: list[str] | None = None
+            pass_idx = 0
+            answer: str | None = None
+            citations: list[Citation] = []
+            images: list[ImageResult] = []
+            context_chunks: list[ContextChunk] = []
+
+            while True:
+                pass_idx += 1
+                yield sse(
+                    "status",
                     {
-                        "doc_id": r["doc_id"],
-                        "page_id": r["page_id"],
-                        "heading_path": r["heading_path"],
-                        "text": r["text"],
-                        "score": r["score"],
-                    }
-                    for r in retrieval
-                ],
-                citations=citations,
-                images=images,
-            ).model_dump()
-            retrieval_pack["meta"] = {
-                "docs_version": DEFAULT_VERSION,
-                "retrieval_mode": retrieval_mode,
-                "k": int(req.k),
-                "web_enabled": bool(web_enabled),
-            }
-            if web_sources:
-                retrieval_pack["web_sources"] = [ws.model_dump() for ws in web_sources]
-            yield sse("retrieval", retrieval_pack)
-
-            context_blocks: list[str] = []
-            for i, r in enumerate(retrieval, start=1):
-                hp = " > ".join(r.get("heading_path") or [])
-                source = f"{r['doc_id']}/{r['page_id']}"
-                context_blocks.append(f"[{i}] {source} | {hp}\n{r['text']}")
-
-            if web_context_blocks:
-                context_blocks.append("EXTERNAL WEB CONTEXT (not Luxriot EVO docs):")
-                context_blocks.extend(web_context_blocks)
-
-            context_text = "\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)"
-
-            yield sse("status", {"phase": "building_prompt", "message": "Building prompt…"})
-            try:
-                system_prompt = render_template(
-                    template,
-                    variables={
-                        "user_role": str(ctx.principal.role),
-                        "username": str(ctx.principal.username or ""),
-                        "docs_version": DEFAULT_VERSION,
-                        "retrieval_mode": retrieval_mode,
-                        "retrieval_k": str(req.k),
-                        "doc_priority": doc_priority_str,
-                        "web_enabled": str(web_enabled),
-                        "context": context_text,
+                        "phase": "retrieving_docs",
+                        "message": f"Searching documentation ({retrieval_mode})…",
+                        "k": int(current_k),
+                        "pass": int(pass_idx),
                     },
-                    required_placeholders=[str(x) for x in required_placeholders],
                 )
-            except PromptTemplateError as e:
-                yield sse("error", {"error": "Prompt template error", "detail": str(e)})
-                return
-
-            messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-            for m in history[-10:]:
-                if m["role"] in ("user", "assistant"):
-                    messages.append({"role": m["role"], "content": m["content"]})
-            messages.append({"role": "user", "content": req.message})
-
-            model_label = llm_model_id or "LM Studio (auto)"
-            yield sse("status", {"phase": "calling_llm", "message": f"Generating answer ({model_label})…"})
-
-            parts: list[str] = []
-            llm_started = time.monotonic()
-            q: asyncio.Queue[str] = asyncio.Queue()
-            done = asyncio.Event()
-            stream_err: Exception | None = None
-
-            async def reader() -> None:
-                nonlocal stream_err
                 try:
-                    async for delta in chat_completion_stream(
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        timeout_s=timeout_s,
-                        model=llm_model_id,
-                    ):
-                        await q.put(delta)
-                except Exception as e:
-                    stream_err = e
-                finally:
-                    done.set()
+                    retrieval = await run_retrieval(
+                        current_query,
+                        current_k,
+                        doc_ids=current_doc_ids,
+                        page_ids=current_page_ids,
+                    )
+                except ValueError as e:
+                    yield sse("error", {"error": "Bad request", "detail": str(e)})
+                    return
+                except RuntimeError as e:
+                    yield sse("error", {"error": "Search unavailable", "detail": str(e)})
+                    return
 
-            task = asyncio.create_task(reader())
-            try:
-                while True:
+                _merge_retrieval_results(all_results, retrieval, seen_results)
+                log.info(
+                    "chat stream retrieval pass query=%r k=%s results=%s total=%s",
+                    current_query,
+                    current_k,
+                    len(retrieval),
+                    len(all_results),
+                )
+                yield sse(
+                    "status",
+                    {
+                        "phase": "retrieved_docs",
+                        "message": f"Found {len(retrieval)} relevant sections (total {len(all_results)}).",
+                        "found": int(len(retrieval)),
+                        "total": int(len(all_results)),
+                        "pass": int(pass_idx),
+                    },
+                )
+
+                max_citations = int(retrieval_cfg.get("max_citations", 8))
+                max_images = int(retrieval_cfg.get("max_images", 6))
+                citations = _build_citations(all_results, DEFAULT_VERSION, max_citations=max_citations)
+                images = _build_images(all_results, max_images=max_images)
+                context_chunks = _build_context_chunks(all_results, DEFAULT_VERSION)
+
+                retrieval_pack = SearchResponse(
+                    chunks=[
+                        {
+                            "doc_id": r["doc_id"],
+                            "page_id": r["page_id"],
+                            "heading_path": r["heading_path"],
+                            "text": r["text"],
+                            "score": r["score"],
+                        }
+                        for r in all_results
+                    ],
+                    citations=citations,
+                    images=images,
+                ).model_dump()
+                retrieval_pack["context_chunks"] = [c.model_dump() for c in context_chunks]
+                retrieval_pack["meta"] = {
+                    "docs_version": DEFAULT_VERSION,
+                    "retrieval_mode": retrieval_mode,
+                    "k": int(req.k),
+                    "web_enabled": bool(web_enabled),
+                    "pass": int(pass_idx),
+                    "tool_calls_used": int(tool_calls_used),
+                }
+                if web_sources:
+                    retrieval_pack["web_sources"] = [ws.model_dump() for ws in web_sources]
+                yield sse("retrieval", retrieval_pack)
+
+                context_text = _build_context_text(all_results, web_context_blocks)
+
+                yield sse("status", {"phase": "building_prompt", "message": "Building prompt…"})
+                try:
+                    system_prompt = render_template(
+                        template,
+                        variables={
+                            "user_role": str(ctx.principal.role),
+                            "username": str(ctx.principal.username or ""),
+                            "docs_version": DEFAULT_VERSION,
+                            "retrieval_mode": retrieval_mode,
+                            "retrieval_k": str(req.k),
+                            "doc_priority": doc_priority_str,
+                            "web_enabled": str(web_enabled),
+                            "tool_call_limit": str(tool_calls_limit),
+                            "context": context_text,
+                        },
+                        required_placeholders=[str(x) for x in required_placeholders],
+                    )
+                except PromptTemplateError as e:
+                    yield sse("error", {"error": "Prompt template error", "detail": str(e)})
+                    return
+
+                messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+                for m in history[-10:]:
+                    if m["role"] in ("user", "assistant"):
+                        messages.append({"role": m["role"], "content": m["content"]})
+                messages.append({"role": "user", "content": req.message})
+
+                model_label = llm_model_id or "LM Studio (auto)"
+                request = None
+                if tool_calls_enabled:
+                    yield sse("status", {"phase": "preflight", "message": "Checking for more context…"})
                     try:
-                        delta = await asyncio.wait_for(q.get(), timeout=3.0)
+                        preflight = await chat_completion(
+                            messages=messages,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            timeout_s=timeout_s,
+                            model=llm_model_id,
+                        )
+                    except LMStudioError as e:
+                        log.exception("LM Studio error")
+                        yield sse("error", {"error": "LM Studio error", "detail": str(e)})
+                        return
+                    except Exception as e:
+                        log.exception("LM Studio error")
+                        yield sse("error", {"error": "LM Studio error", "detail": str(e)})
+                        return
+                    request = _parse_context_request(preflight)
+
+                if request:
+                    tool_calls_used += 1
+                    if tool_calls_limit > 0 and tool_calls_used >= tool_calls_limit:
+                        log.warning("chat stream tool call limit reached (%s)", tool_calls_limit)
+                        yield sse(
+                            "error",
+                            {"error": "Tool call limit reached", "detail": "Model requested more context too many times."},
+                        )
+                        return
+                    log.info(
+                        "chat stream model requested more context reason=%r query=%r k=%s doc_ids=%s page_ids=%s",
+                        request.get("reason"),
+                        request.get("query"),
+                        request.get("k"),
+                        request.get("doc_ids"),
+                        request.get("page_ids"),
+                    )
+                    reason = str(request.get("reason") or "").strip()
+                    msg = "Model requested more documentation context."
+                    if reason:
+                        msg = f"{msg} ({reason})"
+                    yield sse(
+                        "status",
+                        {
+                            "phase": "model_request",
+                            "message": msg,
+                            "tool_calls_used": int(tool_calls_used),
+                        },
+                    )
+                    current_query = str(request.get("query") or req.message).strip() or req.message
+                    requested_k = int(request.get("k") or 0)
+                    if requested_k <= 0:
+                        current_k = search_k
+                    else:
+                        current_k = max(1, min(25, requested_k))
+                    current_doc_ids = request.get("doc_ids") or None
+                    current_page_ids = request.get("page_ids") or None
+                    continue
+
+                yield sse("status", {"phase": "calling_llm", "message": f"Generating answer ({model_label})…"})
+                parts: list[str] = []
+                llm_started = time.monotonic()
+                q: asyncio.Queue[str] = asyncio.Queue()
+                done = asyncio.Event()
+                stream_err: Exception | None = None
+
+                async def reader() -> None:
+                    nonlocal stream_err
+                    try:
+                        async for delta in chat_completion_stream(
+                            messages=messages,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            timeout_s=timeout_s,
+                            model=llm_model_id,
+                        ):
+                            await q.put(delta)
+                    except Exception as e:
+                        stream_err = e
+                    finally:
+                        done.set()
+
+                task = asyncio.create_task(reader())
+                try:
+                    while True:
+                        try:
+                            delta = await asyncio.wait_for(q.get(), timeout=3.0)
+                            parts.append(delta)
+                            yield sse("delta", {"delta": delta})
+                        except asyncio.TimeoutError:
+                            if done.is_set():
+                                break
+                            elapsed_s = int(time.monotonic() - llm_started)
+                            yield sse("ping", {"phase": "calling_llm", "elapsed_s": elapsed_s})
+
+                    while not q.empty():
+                        try:
+                            delta = q.get_nowait()
+                        except Exception:
+                            break
                         parts.append(delta)
                         yield sse("delta", {"delta": delta})
-                    except asyncio.TimeoutError:
-                        if done.is_set():
-                            break
-                        elapsed_s = int(time.monotonic() - llm_started)
-                        yield sse("ping", {"phase": "calling_llm", "elapsed_s": elapsed_s})
 
-                # Drain any remaining queued deltas after completion.
-                while not q.empty():
-                    try:
-                        delta = q.get_nowait()
-                    except Exception:
-                        break
-                    parts.append(delta)
-                    yield sse("delta", {"delta": delta})
+                    if stream_err:
+                        raise stream_err
+                except asyncio.CancelledError:
+                    raise
+                except LMStudioError as e:
+                    log.exception("LM Studio error (stream)")
+                    yield sse("error", {"error": "LM Studio error", "detail": str(e)})
+                    return
+                except Exception as e:
+                    log.exception("LM Studio stream error")
+                    yield sse("error", {"error": "LM Studio stream error", "detail": str(e)})
+                    return
+                finally:
+                    if not task.done():
+                        task.cancel()
+                        with contextlib.suppress(Exception):
+                            await task
 
-                if stream_err:
-                    raise stream_err
-            except asyncio.CancelledError:
-                raise
-            except LMStudioError as e:
-                log.exception("LM Studio error (stream)")
-                yield sse("error", {"error": "LM Studio error", "detail": str(e)})
+                answer = "".join(parts)
+                break
+
+            if answer is None:
+                yield sse("error", {"error": "Chat stream failed", "detail": "No answer generated."})
                 return
-            except Exception as e:
-                log.exception("LM Studio stream error")
-                yield sse("error", {"error": "LM Studio stream error", "detail": str(e)})
-                return
-            finally:
-                if not task.done():
-                    task.cancel()
-                    with contextlib.suppress(Exception):
-                        await task
-
-            answer = "".join(parts)
             yield sse("status", {"phase": "saving", "message": "Saving answer to session…"})
             app_db.insert_message(session_id=session_id, role="assistant", content=answer)
 
@@ -1897,6 +2269,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                     answer=answer,
                     citations=citations,
                     images=images,
+                    context_chunks=context_chunks,
                     web_sources=web_sources,
                     session_id=session_id,
                 ).model_dump(),

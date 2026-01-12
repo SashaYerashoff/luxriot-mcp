@@ -23,6 +23,7 @@ from markdownify import markdownify as md
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _EMBED_H3_RE = re.compile(r"(?m)^([ \t]*)###(\s+)")
 _CONTROL_RE = re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
 
 def log(msg: str) -> None:
@@ -245,6 +246,185 @@ def chunk_markdown(md_text: str, max_chars: int = 1400) -> list[dict[str, Any]]:
     return chunks
 
 
+def _select_semantic_levels(headings: list[dict[str, Any]]) -> tuple[int | None, int | None]:
+    if not headings:
+        return (None, None)
+    levels = sorted({int(h.get("level") or 0) for h in headings if int(h.get("level") or 0) > 0})
+    if not levels:
+        return (None, None)
+    levels_gt1 = [l for l in levels if l > 1]
+    if levels_gt1:
+        topic_level = 2 if 2 in levels_gt1 else min(levels_gt1)
+    else:
+        topic_level = min(levels)
+    section_level = None
+    for lvl in levels_gt1:
+        if lvl > topic_level:
+            section_level = lvl
+            break
+    return (topic_level, section_level)
+
+
+def _sections_for_level_or_page(
+    lines: list[str],
+    headings: list[dict[str, Any]],
+    level: int | None,
+    *,
+    doc_title: str,
+    page_title: str,
+) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    if level is not None:
+        sections = _sections_for_level(lines, headings, level)
+    if sections:
+        return sections
+    text = "\n".join(lines).strip()
+    if not text:
+        return []
+    return [{"heading_path": [doc_title, page_title], "text": text}]
+
+
+def _chunks_from_sections(
+    sections: list[dict[str, Any]],
+    *,
+    max_chars: int,
+    granularity: str,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for sec in sections:
+        raw_text = str(sec.get("text") or "").strip()
+        if not raw_text:
+            continue
+        heading_path = sec.get("heading_path") or []
+        for chunk in chunk_markdown(raw_text, max_chars=max_chars):
+            out.append(
+                {
+                    "granularity": granularity,
+                    "heading_path": heading_path,
+                    "text": chunk.get("text") or "",
+                    "images": chunk.get("images") or [],
+                }
+            )
+    return out
+
+
+_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+
+
+def _split_text_on_images(text: str, heading_path: list[str]) -> list[dict[str, Any]]:
+    lines = (text or "").splitlines()
+    blocks: list[dict[str, Any]] = []
+    buf: list[str] = []
+
+    def flush(images: list[str]) -> None:
+        t = "\n".join(buf).strip()
+        if not t:
+            return
+        blocks.append({"text": t, "images": list(images)})
+        buf.clear()
+
+    for line in lines:
+        matches = _IMAGE_RE.findall(line)
+        if matches:
+            stripped = _IMAGE_RE.sub("", line).strip()
+            if stripped:
+                buf.append(stripped)
+            if buf:
+                flush(matches)
+            else:
+                if blocks:
+                    blocks[-1]["images"].extend(matches)
+                else:
+                    placeholder = " > ".join(heading_path or [])
+                    if placeholder:
+                        blocks.append({"text": placeholder, "images": list(matches)})
+            continue
+        buf.append(line)
+
+    if buf:
+        blocks.append({"text": "\n".join(buf).strip(), "images": []})
+
+    return [b for b in blocks if b.get("text") or b.get("images")]
+
+
+def _split_chunks_by_images(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for ch in chunks:
+        heading_path = ch.get("heading_path") or []
+        parts = _split_text_on_images(str(ch.get("text") or ""), heading_path)
+        if not parts:
+            continue
+        for part in parts:
+            out.append(
+                {
+                    "granularity": ch.get("granularity"),
+                    "heading_path": heading_path,
+                    "text": part.get("text") or "",
+                    "images": part.get("images") or [],
+                }
+            )
+    return out
+
+
+def semantic_chunk_markdown(
+    md_text: str,
+    *,
+    doc_title: str,
+    page_title: str,
+    max_chars_part: int = 900,
+    max_chars_section: int = 2600,
+    max_chars_topic: int = 5200,
+) -> list[dict[str, Any]]:
+    lines = (md_text or "").splitlines()
+    headings = _extract_headings(lines, doc_title=doc_title)
+    topic_level, section_level = _select_semantic_levels(headings)
+
+    topic_sections = _sections_for_level_or_page(
+        lines,
+        headings,
+        topic_level,
+        doc_title=doc_title,
+        page_title=page_title,
+    )
+    if not topic_sections:
+        return []
+
+    chunks: list[dict[str, Any]] = []
+    chunks.extend(
+        _chunks_from_sections(
+            topic_sections,
+            max_chars=max_chars_topic,
+            granularity="topic",
+        )
+    )
+
+    section_sections: list[dict[str, Any]] = []
+    if section_level is not None:
+        section_sections = _sections_for_level(lines, headings, section_level)
+        if not section_sections:
+            section_sections = []
+    if section_sections:
+        chunks.extend(
+            _chunks_from_sections(
+                section_sections,
+                max_chars=max_chars_section,
+                granularity="section",
+            )
+        )
+        part_sections = section_sections
+    else:
+        part_sections = topic_sections
+
+    chunks.extend(
+        _chunks_from_sections(
+            part_sections,
+            max_chars=max_chars_part,
+            granularity="part",
+        )
+    )
+    return _split_chunks_by_images(chunks)
+
+
 def init_index(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
@@ -288,6 +468,31 @@ def init_index(db_path: Path) -> sqlite3.Connection:
           dim INTEGER NOT NULL,
           vector BLOB NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS summary_chunks (
+          summary_id TEXT PRIMARY KEY,
+          doc_id TEXT NOT NULL,
+          page_id TEXT NOT NULL,
+          heading_path_json TEXT NOT NULL,
+          text TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          anchor TEXT,
+          length INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS summary_terms (
+          term TEXT PRIMARY KEY,
+          df INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS summary_postings (
+          term TEXT NOT NULL,
+          summary_id TEXT NOT NULL,
+          tf INTEGER NOT NULL,
+          PRIMARY KEY (term, summary_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_summary_postings_term ON summary_postings(term);
         """
     )
     conn.commit()
@@ -377,6 +582,214 @@ def _prepare_embedding_text(text: str, max_chars: int) -> str:
     if max_chars > 0 and len(t) > max_chars:
         t = t[:max_chars]
     return t
+
+
+def _summary_prompt() -> str:
+    return (
+        "You are summarizing Luxriot EVO documentation for retrieval routing.\n"
+        "Rules:\n"
+        "- Only use information from the provided text.\n"
+        "- Preserve exact UI/menu/button names as written.\n"
+        "- Keep it short and factual (1-3 sentences).\n"
+        "- Do not invent steps, settings, or requirements.\n"
+        "- Output plain text, no markdown lists."
+    )
+
+
+def _chat_completion(base_url: str, model_id: str, text: str, max_tokens: int, timeout_s: float = 120.0) -> str:
+    payload = {
+        "model": model_id,
+        "messages": [
+            {"role": "system", "content": _summary_prompt()},
+            {"role": "user", "content": text},
+        ],
+        "temperature": 0.1,
+        "max_tokens": int(max_tokens),
+    }
+    resp = httpx.post(f"{base_url}/v1/chat/completions", json=payload, timeout=timeout_s)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Summary HTTP {resp.status_code}: {resp.text[:1000]}")
+    data = resp.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("Summary response missing choices")
+    msg = choices[0].get("message") or {}
+    content = str(msg.get("content") or "").strip()
+    if not content:
+        raise RuntimeError("Summary response empty")
+    return content
+
+
+def _token_count(text: str) -> int:
+    return len(tokenize(text))
+
+
+def _strip_markdown_images(lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for line in lines:
+        if "![" in line and "](" in line:
+            continue
+        out.append(line)
+    return out
+
+
+def _extract_headings(lines: list[str], doc_title: str) -> list[dict[str, Any]]:
+    stack: list[tuple[int, str]] = []
+    headings: list[dict[str, Any]] = []
+    for idx, line in enumerate(lines):
+        m = _HEADING_RE.match(line.strip())
+        if not m:
+            continue
+        level = len(m.group(1))
+        title = m.group(2).strip()
+        if not title:
+            continue
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        stack.append((level, title))
+        path = [doc_title] + [t for _, t in stack]
+        headings.append({"line": idx, "level": level, "title": title, "path": path})
+    return headings
+
+
+def _sections_for_level(
+    lines: list[str], headings: list[dict[str, Any]], level: int
+) -> list[dict[str, Any]]:
+    items = [h for h in headings if int(h.get("level") or 0) == level]
+    if not items:
+        return []
+    sections: list[dict[str, Any]] = []
+    for h in items:
+        start = int(h["line"])
+        end = len(lines)
+        for nxt in headings:
+            if int(nxt.get("line")) <= start:
+                continue
+            if int(nxt.get("level") or 0) <= level:
+                end = int(nxt.get("line"))
+                break
+        text = "\n".join(lines[start:end]).strip()
+        if not text:
+            continue
+        sections.append({"heading_path": h["path"], "text": text})
+    return sections
+
+
+def split_markdown_for_summary(
+    md_text: str, *, doc_title: str, page_title: str, unit_max_tokens: int
+) -> list[dict[str, Any]]:
+    lines = md_text.splitlines()
+    lines = _strip_markdown_images(lines)
+    headings = _extract_headings(lines, doc_title=doc_title)
+    if not headings:
+        text = "\n".join(lines).strip()
+        return [{"heading_path": [doc_title, page_title], "text": text}] if text else []
+
+    levels = sorted({int(h["level"]) for h in headings})
+    chosen: list[dict[str, Any]] = []
+    for level in levels:
+        sections = _sections_for_level(lines, headings, level)
+        if not sections:
+            continue
+        max_tokens = max((_token_count(s["text"]) for s in sections), default=0)
+        if max_tokens <= unit_max_tokens:
+            chosen = sections
+            break
+    if not chosen:
+        chosen = _sections_for_level(lines, headings, max(levels))
+    return chosen
+
+
+def _load_published_edits(app_db: Path, version: str) -> dict[tuple[str, str], str]:
+    if not app_db.exists():
+        log(f"WARNING: app db not found at {app_db}; skipping published edits.")
+        return {}
+    conn = sqlite3.connect(str(app_db))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT doc_id, page_id, content_md
+            FROM doc_edits
+            WHERE version = ? AND status = 'published'
+            """,
+            (version,),
+        ).fetchall()
+    except sqlite3.Error as e:
+        log(f"WARNING: failed to read doc_edits: {e}")
+        return {}
+    finally:
+        conn.close()
+
+    out: dict[tuple[str, str], str] = {}
+    for r in rows:
+        doc_id = str(r["doc_id"] or "").strip()
+        page_id = str(r["page_id"] or "").strip()
+        if not doc_id or not page_id:
+            continue
+        content = str(r["content_md"] or "").strip()
+        if not content:
+            continue
+        out[(doc_id, page_id)] = content
+    if out:
+        log(f"Loaded {len(out)} published edits from app db.")
+    return out
+
+
+def _load_custom_pages(app_db: Path, version: str) -> list[dict[str, Any]]:
+    if not app_db.exists():
+        return []
+    conn = sqlite3.connect(str(app_db))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT doc_id, page_id, doc_title, page_title, heading_path_json, source_path, anchor, base_markdown
+            FROM doc_pages
+            WHERE version = ?
+            """,
+            (version,),
+        ).fetchall()
+    except sqlite3.Error as e:
+        log(f"WARNING: failed to read doc_pages: {e}")
+        return []
+    finally:
+        conn.close()
+
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        doc_id = str(r["doc_id"] or "").strip()
+        page_id = str(r["page_id"] or "").strip()
+        if not doc_id or not page_id:
+            continue
+        doc_title = str(r["doc_title"] or doc_id)
+        page_title = str(r["page_title"] or page_id)
+        heading_path: list[str] = []
+        raw_hp = str(r["heading_path_json"] or "").strip()
+        if raw_hp:
+            try:
+                parsed = json.loads(raw_hp)
+                if isinstance(parsed, list):
+                    heading_path = [str(x) for x in parsed if str(x).strip()]
+            except json.JSONDecodeError:
+                heading_path = []
+        if not heading_path:
+            heading_path = [doc_title, page_title]
+        out.append(
+            {
+                "doc_id": doc_id,
+                "page_id": page_id,
+                "doc_title": doc_title,
+                "page_title": page_title,
+                "heading_path": heading_path,
+                "source_path": str(r["source_path"] or f"custom/{doc_id}/{page_id}.md"),
+                "anchor": str(r["anchor"] or "pagetitle"),
+                "base_markdown": str(r["base_markdown"] or ""),
+            }
+        )
+    if out:
+        log(f"Loaded {len(out)} custom pages from app db.")
+    return out
 
 
 def _markdown_tables_to_text(text: str) -> str:
@@ -520,6 +933,25 @@ def main() -> int:
     ap.add_argument("--docs-dir", type=Path, default=Path("docs"), help="Input docs directory (HTML export root)")
     ap.add_argument("--out-dir", type=Path, default=Path("datastore/evo_1_32"), help="Output datastore directory")
     ap.add_argument("--version", type=str, default="evo_1_32", help="Version id used in /assets/{version}/ URLs")
+    ap.add_argument(
+        "--app-db",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / "backend" / "data" / "app.sqlite",
+        help="App SQLite db path (for published edits/custom pages)",
+    )
+    ap.add_argument(
+        "--include-edits",
+        action="store_true",
+        help="Include published edits + custom pages from the app database",
+    )
+    ap.add_argument("--summary-enabled", action="store_true", help="Build summary index for two-pass retrieval")
+    ap.add_argument("--summary-model", type=str, default="", help="LLM model id used to summarize sections")
+    ap.add_argument("--summary-max-input-chars", type=int, default=6000, help="Max chars per summary input")
+    ap.add_argument("--summary-max-output-tokens", type=int, default=280, help="Max tokens per summary output")
+    ap.add_argument("--summary-unit-max-tokens", type=int, default=900, help="Max tokens per summary unit (controls heading level)")
+    ap.add_argument("--chunk-max-chars-part", type=int, default=900, help="Max chars per fine-grained chunk (subsection)")
+    ap.add_argument("--chunk-max-chars-section", type=int, default=2600, help="Max chars per section chunk")
+    ap.add_argument("--chunk-max-chars-topic", type=int, default=5200, help="Max chars per topic chunk")
     ap.add_argument("--lmstudio-base-url", type=str, default="http://localhost:1234", help="LM Studio base URL")
     ap.add_argument("--embedding-model", type=str, default="", help="Embedding model id (defaults to first embedding model from /v1/models)")
     ap.add_argument("--embedding-max-chars", type=int, default=448, help="Max characters per chunk sent for embedding")
@@ -536,6 +968,16 @@ def main() -> int:
     embedding_max_chars: int = int(args.embedding_max_chars)
     embedding_batch_size: int = max(1, int(args.embedding_batch_size))
     compute_embeddings: bool = not bool(args.no_embeddings)
+    app_db_path: Path = Path(args.app_db)
+    include_edits: bool = bool(args.include_edits)
+    summary_enabled: bool = bool(args.summary_enabled)
+    summary_model: str = str(args.summary_model or "").strip()
+    summary_max_input_chars: int = int(args.summary_max_input_chars)
+    summary_max_output_tokens: int = int(args.summary_max_output_tokens)
+    summary_unit_max_tokens: int = int(args.summary_unit_max_tokens)
+    chunk_max_chars_part: int = int(args.chunk_max_chars_part)
+    chunk_max_chars_section: int = int(args.chunk_max_chars_section)
+    chunk_max_chars_topic: int = int(args.chunk_max_chars_topic)
 
     if not docs_dir.exists():
         log(f"ERROR: docs dir not found: {docs_dir}")
@@ -576,6 +1018,25 @@ def main() -> int:
     total_tokens = 0
     n_chunks = 0
 
+    summary_df_counter: Counter[str] = Counter()
+    summary_postings_rows: list[tuple[str, str, int]] = []
+    summary_rows: list[tuple[str, str, str, str, str, str, str | None, int]] = []
+    summary_units = 0
+    summary_total_tokens = 0
+    summary_active = summary_enabled and bool(summary_model)
+    summary_failed = False
+    if summary_enabled and not summary_model:
+        log("WARNING: summary enabled but --summary-model is empty; skipping summary index.")
+        summary_active = False
+
+    published_edits: dict[tuple[str, str], str] = {}
+    custom_pages: list[dict[str, Any]] = []
+    if include_edits:
+        published_edits = _load_published_edits(app_db_path, version)
+        custom_pages = _load_custom_pages(app_db_path, version)
+
+    seen_pages: set[tuple[str, str]] = set()
+
     for doc_dir in doc_dirs:
         doc_title = doc_dir.name
         doc_id = slugify(doc_title)
@@ -609,6 +1070,65 @@ def main() -> int:
                 doc_dir=doc_dir,
                 assets_out_dir=assets_out,
             )
+            edit_text = published_edits.get((doc_id, page_id))
+            if edit_text:
+                md_text = edit_text
+
+            if summary_active:
+                sections = split_markdown_for_summary(
+                    md_text,
+                    doc_title=doc_title,
+                    page_title=page_title,
+                    unit_max_tokens=summary_unit_max_tokens,
+                )
+                if sections:
+                    log(f"  Summarizing {doc_id}/{page_id} ({len(sections)} sections)...")
+                for s_idx, sec in enumerate(sections):
+                    raw_text = str(sec.get("text") or "").strip()
+                    if not raw_text:
+                        continue
+                    summary_input = raw_text[:summary_max_input_chars] if summary_max_input_chars > 0 else raw_text
+                    try:
+                        summary_text = _chat_completion(
+                            lmstudio_base_url,
+                            summary_model,
+                            summary_input,
+                            max_tokens=summary_max_output_tokens,
+                        ).strip()
+                    except Exception as e:
+                        log(f"WARNING: summary failed for {doc_id}/{page_id}: {e}")
+                        summary_active = False
+                        summary_failed = True
+                        break
+                    if not summary_text:
+                        continue
+                    summary_id = f"{doc_id}:{page_id}:s{s_idx:03d}"
+                    heading_path = sec.get("heading_path") or [doc_title, page_title]
+                    tokens = tokenize(summary_text)
+                    dl = len(tokens)
+                    if dl == 0:
+                        continue
+                    summary_units += 1
+                    summary_total_tokens += dl
+                    tf = Counter(tokens)
+                    for term, term_tf in tf.items():
+                        summary_postings_rows.append((term, summary_id, int(term_tf)))
+                    for term in tf.keys():
+                        summary_df_counter[term] += 1
+                    summary_rows.append(
+                        (
+                            summary_id,
+                            doc_id,
+                            page_id,
+                            json.dumps(heading_path, ensure_ascii=False),
+                            summary_text,
+                            html_rel,
+                            "pagetitle",
+                            dl,
+                        )
+                    )
+                if not summary_active:
+                    log("WARNING: summary disabled after failure; continuing without summary index.")
 
             md_path = pages_out / doc_id / f"{page_id}.md"
             md_path.parent.mkdir(parents=True, exist_ok=True)
@@ -628,11 +1148,24 @@ def main() -> int:
             }
             pages_jsonl.write(json.dumps(page_record, ensure_ascii=False) + "\n")
 
-            chunks = chunk_markdown(md_text)
-            for i, ch in enumerate(chunks):
-                chunk_id = f"{doc_id}:{page_id}:{i:03d}"
-                text = ch["text"]
-                images_urls = [u for u in ch.get("images") or [] if u.startswith("/assets/")]
+            chunks = semantic_chunk_markdown(
+                md_text,
+                doc_title=doc_title,
+                page_title=page_title,
+                max_chars_part=chunk_max_chars_part,
+                max_chars_section=chunk_max_chars_section,
+                max_chars_topic=chunk_max_chars_topic,
+            )
+            granularity_counts: dict[str, int] = {"topic": 0, "section": 0, "part": 0}
+            granularity_prefix = {"topic": "t", "section": "s", "part": "p"}
+            for ch in chunks:
+                granularity = str(ch.get("granularity") or "part")
+                prefix = granularity_prefix.get(granularity, "p")
+                idx = granularity_counts.get(granularity, 0)
+                granularity_counts[granularity] = idx + 1
+                chunk_id = f"{doc_id}:{page_id}:{prefix}{idx:03d}"
+                text = str(ch.get("text") or "")
+                images_urls = [u for u in ch.get("images") or [] if str(u).startswith("/assets/")]
                 tokens = tokenize(text)
                 dl = len(tokens)
                 if dl == 0:
@@ -652,7 +1185,7 @@ def main() -> int:
                         chunk_id,
                         doc_id,
                         page_id,
-                        json.dumps(heading_path, ensure_ascii=False),
+                        json.dumps(ch.get("heading_path") or heading_path, ensure_ascii=False),
                         text,
                         html_rel,
                         "pagetitle",
@@ -660,8 +1193,133 @@ def main() -> int:
                         dl,
                     )
                 )
+            seen_pages.add((doc_id, page_id))
 
         log(f"  Done: {doc_title}")
+
+    for custom in custom_pages:
+        doc_id = custom["doc_id"]
+        page_id = custom["page_id"]
+        if (doc_id, page_id) in seen_pages:
+            continue
+        doc_title = custom["doc_title"]
+        page_title = custom["page_title"]
+        heading_path = custom["heading_path"]
+        source_path = custom["source_path"]
+        anchor = custom["anchor"]
+        md_text = published_edits.get((doc_id, page_id)) or custom["base_markdown"]
+        if not md_text.strip():
+            md_text = f"# {page_title}\n\n"
+
+        if summary_active:
+            sections = split_markdown_for_summary(
+                md_text,
+                doc_title=doc_title,
+                page_title=page_title,
+                unit_max_tokens=summary_unit_max_tokens,
+            )
+            if sections:
+                log(f"  Summarizing {doc_id}/{page_id} ({len(sections)} sections)...")
+            for s_idx, sec in enumerate(sections):
+                raw_text = str(sec.get("text") or "").strip()
+                if not raw_text:
+                    continue
+                summary_input = raw_text[:summary_max_input_chars] if summary_max_input_chars > 0 else raw_text
+                try:
+                    summary_text = _chat_completion(
+                        lmstudio_base_url,
+                        summary_model,
+                        summary_input,
+                        max_tokens=summary_max_output_tokens,
+                    ).strip()
+                except Exception as e:
+                    log(f"WARNING: summary failed for {doc_id}/{page_id}: {e}")
+                    summary_active = False
+                    summary_failed = True
+                    break
+                if not summary_text:
+                    continue
+                summary_id = f"{doc_id}:{page_id}:s{s_idx:03d}"
+                sec_heading_path = sec.get("heading_path") or heading_path
+                tokens = tokenize(summary_text)
+                dl = len(tokens)
+                if dl == 0:
+                    continue
+                summary_units += 1
+                summary_total_tokens += dl
+                tf = Counter(tokens)
+                for term, term_tf in tf.items():
+                    summary_postings_rows.append((term, summary_id, int(term_tf)))
+                for term in tf.keys():
+                    summary_df_counter[term] += 1
+                summary_rows.append(
+                    (
+                        summary_id,
+                        doc_id,
+                        page_id,
+                        json.dumps(sec_heading_path, ensure_ascii=False),
+                        summary_text,
+                        source_path,
+                        anchor,
+                        dl,
+                    )
+                )
+            if not summary_active:
+                log("WARNING: summary disabled after failure; continuing without summary index.")
+
+        chunks = semantic_chunk_markdown(
+            md_text,
+            doc_title=doc_title,
+            page_title=page_title,
+            max_chars_part=chunk_max_chars_part,
+            max_chars_section=chunk_max_chars_section,
+            max_chars_topic=chunk_max_chars_topic,
+        )
+        granularity_counts: dict[str, int] = {"topic": 0, "section": 0, "part": 0}
+        granularity_prefix = {"topic": "t", "section": "s", "part": "p"}
+        for ch in chunks:
+            granularity = str(ch.get("granularity") or "part")
+            prefix = granularity_prefix.get(granularity, "p")
+            idx = granularity_counts.get(granularity, 0)
+            granularity_counts[granularity] = idx + 1
+            chunk_id = f"{doc_id}:{page_id}:{prefix}{idx:03d}"
+            text = str(ch.get("text") or "")
+            images_urls = [u for u in ch.get("images") or [] if str(u).startswith("/assets/")]
+            tokens = tokenize(text)
+            dl = len(tokens)
+            if dl == 0:
+                continue
+            chunk_id_text.append((chunk_id, text))
+            n_chunks += 1
+            total_tokens += dl
+
+            tf = Counter(tokens)
+            for term, term_tf in tf.items():
+                postings_rows.append((term, chunk_id, int(term_tf)))
+            for term in tf.keys():
+                df_counter[term] += 1
+
+            chunk_rows.append(
+                (
+                    chunk_id,
+                    doc_id,
+                    page_id,
+                    json.dumps(ch.get("heading_path") or heading_path, ensure_ascii=False),
+                    text,
+                    source_path,
+                    anchor,
+                    json.dumps(images_urls, ensure_ascii=False),
+                    dl,
+                )
+            )
+        seen_pages.add((doc_id, page_id))
+
+    if summary_failed:
+        summary_rows = []
+        summary_postings_rows = []
+        summary_df_counter = Counter()
+        summary_units = 0
+        summary_total_tokens = 0
 
     pages_jsonl.close()
 
@@ -682,6 +1340,9 @@ def main() -> int:
             conn.execute("DELETE FROM terms;")
             conn.execute("DELETE FROM postings;")
             conn.execute("DELETE FROM embeddings;")
+            conn.execute("DELETE FROM summary_chunks;")
+            conn.execute("DELETE FROM summary_terms;")
+            conn.execute("DELETE FROM summary_postings;")
 
             conn.executemany(
                 """
@@ -704,6 +1365,26 @@ def main() -> int:
                     "INSERT INTO postings(term, chunk_id, tf) VALUES (?,?,?)",
                     postings_rows[i : i + batch_size],
                 )
+
+            if summary_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO summary_chunks(
+                      summary_id, doc_id, page_id, heading_path_json, text, source_path, anchor, length
+                    )
+                    VALUES (?,?,?,?,?,?,?,?)
+                    """,
+                    summary_rows,
+                )
+                conn.executemany(
+                    "INSERT INTO summary_terms(term, df) VALUES (?,?)",
+                    [(t, int(df)) for t, df in summary_df_counter.items()],
+                )
+                for i in range(0, len(summary_postings_rows), batch_size):
+                    conn.executemany(
+                        "INSERT INTO summary_postings(term, summary_id, tf) VALUES (?,?,?)",
+                        summary_postings_rows[i : i + batch_size],
+                    )
 
             if compute_embeddings:
                 embedding_model_id = embedding_model or _detect_embedding_model_id(lmstudio_base_url)
@@ -760,6 +1441,17 @@ def main() -> int:
                     ("embedding_dim", str(int(embedding_dim or 0))),
                     ("embedding_max_chars", str(int(embedding_max_chars))),
                     ("embedding_batch_size", str(int(embedding_batch_size))),
+                    ("summary_enabled", "1" if summary_rows else "0"),
+                    ("summary_model_id", str(summary_model or "")),
+                    ("summary_units", str(int(summary_units or 0))),
+                    ("summary_avgdl", f"{(summary_total_tokens / summary_units):.6f}" if summary_units else "0"),
+                    ("summary_max_input_chars", str(int(summary_max_input_chars))),
+                    ("summary_max_output_tokens", str(int(summary_max_output_tokens))),
+                    ("summary_unit_max_tokens", str(int(summary_unit_max_tokens))),
+                    ("chunk_max_chars_part", str(int(chunk_max_chars_part))),
+                    ("chunk_max_chars_section", str(int(chunk_max_chars_section))),
+                    ("chunk_max_chars_topic", str(int(chunk_max_chars_topic))),
+                    ("chunk_granularity_scheme", "topic/section/part"),
                 ],
             )
     except Exception as e:

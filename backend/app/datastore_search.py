@@ -53,9 +53,12 @@ _STOPWORDS = {
     "evo",
 }
 
+_GRANULARITY_WEIGHTS = {"p": 1.05, "s": 1.0, "t": 0.9}
+
 
 def tokenize(text: str) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
+
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,18 @@ class ChunkRow:
     length: int
 
 
+@dataclass(frozen=True)
+class SummaryRow:
+    summary_id: str
+    doc_id: str
+    page_id: str
+    heading_path: list[str]
+    text: str
+    source_path: str
+    anchor: str | None
+    length: int
+
+
 class SearchEngine:
     def __init__(self, version: str = DEFAULT_VERSION, datastore_dir: Path = DATASTORE_DIR) -> None:
         self.version = version
@@ -81,6 +96,7 @@ class SearchEngine:
         self._embedding_vectors: dict[str, array] | None = None
         self._embedding_dim: int | None = None
         self._embedding_model_id: str | None = None
+        self._summary_ready: bool | None = None
 
     def is_ready(self) -> bool:
         return self.index_path.exists()
@@ -103,6 +119,7 @@ class SearchEngine:
         self._embedding_vectors = None
         self._embedding_dim = None
         self._embedding_model_id = None
+        self._summary_ready = None
 
     def _load_meta(self) -> dict[str, Any]:
         if self._meta is not None:
@@ -122,6 +139,15 @@ class SearchEngine:
             raise RuntimeError(f"Invalid meta in index: {e}") from e
         return n_chunks, avgdl
 
+    def _get_summary_stat_floats(self) -> tuple[int, float]:
+        meta = self._load_meta()
+        try:
+            n_units = int(meta.get("summary_units", 0) or 0)
+            avgdl = float(meta.get("summary_avgdl", 0) or 0.0)
+        except Exception as e:
+            raise RuntimeError(f"Invalid summary meta in index: {e}") from e
+        return n_units, avgdl
+
     def embeddings_ready(self) -> bool:
         try:
             meta = self._load_meta()
@@ -139,6 +165,26 @@ class SearchEngine:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='embeddings' LIMIT 1"
         ).fetchone()
         return bool(row)
+
+    def summary_ready(self) -> bool:
+        if self._summary_ready is not None:
+            return self._summary_ready
+        try:
+            meta = self._load_meta()
+            enabled = str(meta.get("summary_enabled", "0"))
+            units = int(meta.get("summary_units", "0") or 0)
+        except Exception:
+            self._summary_ready = False
+            return False
+        if enabled != "1" or units <= 0:
+            self._summary_ready = False
+            return False
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='summary_chunks' LIMIT 1"
+        ).fetchone()
+        self._summary_ready = bool(row)
+        return self._summary_ready
 
     def _load_embeddings(self) -> None:
         if self._embedding_vectors is not None:
@@ -206,7 +252,39 @@ class SearchEngine:
             )
         return out
 
-    def _bm25_rank(self, query: str, k: int) -> tuple[list[tuple[str, float]], dict[str, ChunkRow]]:
+    def _fetch_summary_rows(self, summary_ids: list[str]) -> dict[str, SummaryRow]:
+        if not summary_ids:
+            return {}
+        conn = self._connect()
+        qmarks = ",".join(["?"] * len(summary_ids))
+        rows = conn.execute(
+            f"""
+            SELECT summary_id, doc_id, page_id, heading_path_json, text, source_path, anchor, length
+            FROM summary_chunks
+            WHERE summary_id IN ({qmarks})
+            """,
+            summary_ids,
+        ).fetchall()
+        out: dict[str, SummaryRow] = {}
+        for r in rows:
+            out[r["summary_id"]] = SummaryRow(
+                summary_id=r["summary_id"],
+                doc_id=r["doc_id"],
+                page_id=r["page_id"],
+                heading_path=json.loads(r["heading_path_json"]) if r["heading_path_json"] else [],
+                text=r["text"],
+                source_path=r["source_path"],
+                anchor=r["anchor"],
+                length=int(r["length"] or 0),
+            )
+        return out
+
+    def _bm25_rank(
+        self,
+        query: str,
+        k: int,
+        allowed_pages: set[tuple[str, str]] | None = None,
+    ) -> tuple[list[tuple[str, float]], dict[str, ChunkRow]]:
         query_terms = tokenize(query)
         if not query_terms:
             return ([], {})
@@ -238,6 +316,10 @@ class SearchEngine:
             lst: list[tuple[str, int]] = []
             for post in posts:
                 chunk_id = str(post["chunk_id"])
+                if allowed_pages is not None:
+                    page_key = self._chunk_page_key(chunk_id)
+                    if page_key is None or page_key not in allowed_pages:
+                        continue
                 tf = int(post["tf"])
                 candidate_chunk_ids.add(chunk_id)
                 lst.append((chunk_id, tf))
@@ -247,6 +329,14 @@ class SearchEngine:
             return ([], {})
 
         chunk_rows = self._fetch_chunk_rows(list(candidate_chunk_ids))
+        if allowed_pages is not None:
+            chunk_rows = {
+                cid: row
+                for cid, row in chunk_rows.items()
+                if (row.doc_id, row.page_id) in allowed_pages
+            }
+            if not chunk_rows:
+                return ([], {})
         scores: dict[str, float] = {}
         for term, posts in postings_by_term.items():
             idf = idf_by_term.get(term)
@@ -264,7 +354,71 @@ class SearchEngine:
         top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
         return top, chunk_rows
 
-    async def _embedding_rank(self, query: str, k: int) -> list[tuple[str, float]]:
+    def _summary_bm25_rank(self, query: str, k: int) -> tuple[list[tuple[str, float]], dict[str, SummaryRow]]:
+        query_terms = tokenize(query)
+        if not query_terms:
+            return ([], {})
+
+        conn = self._connect()
+        n_units, avgdl = self._get_summary_stat_floats()
+        if n_units <= 0:
+            return ([], {})
+
+        k1 = 1.5
+        b = 0.75
+        unique_terms = list(dict.fromkeys(query_terms))
+
+        postings_by_term: dict[str, list[tuple[str, int]]] = {}
+        candidate_ids: set[str] = set()
+        idf_by_term: dict[str, float] = {}
+
+        for term in unique_terms:
+            df_row = conn.execute("SELECT df FROM summary_terms WHERE term = ?", (term,)).fetchone()
+            if not df_row:
+                continue
+            df = int(df_row["df"])
+            idf_by_term[term] = math.log((n_units - df + 0.5) / (df + 0.5) + 1.0)
+
+            posts = conn.execute(
+                "SELECT summary_id, tf FROM summary_postings WHERE term = ?", (term,)
+            ).fetchall()
+            if not posts:
+                continue
+            lst: list[tuple[str, int]] = []
+            for post in posts:
+                sid = str(post["summary_id"])
+                tf = int(post["tf"])
+                candidate_ids.add(sid)
+                lst.append((sid, tf))
+            postings_by_term[term] = lst
+
+        if not candidate_ids:
+            return ([], {})
+
+        rows = self._fetch_summary_rows(list(candidate_ids))
+        scores: dict[str, float] = {}
+        for term, posts in postings_by_term.items():
+            idf = idf_by_term.get(term)
+            if idf is None:
+                continue
+            for sid, tf in posts:
+                row = rows.get(sid)
+                if not row:
+                    continue
+                dl = max(row.length, 1)
+                denom = tf + k1 * (1.0 - b + b * (dl / max(avgdl, 1e-9)))
+                score = idf * (tf * (k1 + 1.0) / denom)
+                scores[sid] = scores.get(sid, 0.0) + score
+
+        top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+        return top, rows
+
+    async def _embedding_rank(
+        self,
+        query: str,
+        k: int,
+        allowed_pages: set[tuple[str, str]] | None = None,
+    ) -> list[tuple[str, float]]:
         self._load_embeddings()
         assert self._embedding_vectors is not None
         assert self._embedding_dim is not None
@@ -283,6 +437,10 @@ class SearchEngine:
         scores: list[tuple[str, float]] = []
         dim = self._embedding_dim
         for cid, v in self._embedding_vectors.items():
+            if allowed_pages is not None:
+                page_key = self._chunk_page_key(cid)
+                if page_key is None or page_key not in allowed_pages:
+                    continue
             s = 0.0
             for i in range(dim):
                 s += q[i] * v[i]
@@ -303,6 +461,19 @@ class SearchEngine:
             return 1.0
         frac = float(len(overlap)) / float(len(query_terms) or 1)
         return 1.0 + float(boost) * frac
+
+    def _granularity_code(self, chunk_id: str) -> str:
+        try:
+            idx_part = chunk_id.rsplit(":", 1)[1]
+        except Exception:
+            return ""
+        if idx_part and idx_part[0].isalpha():
+            return idx_part[0].lower()
+        return ""
+
+    def _granularity_multiplier(self, chunk_id: str) -> float:
+        code = self._granularity_code(chunk_id)
+        return float(_GRANULARITY_WEIGHTS.get(code, 1.0))
 
     def _doc_priority_multiplier(self, doc_id: str, priority: list[str], boost: float, prio_map: dict[str, int]) -> float:
         if boost <= 0.0:
@@ -511,12 +682,24 @@ class SearchEngine:
             return [chunk_id]
         try:
             doc_part, page_part, idx_part = chunk_id.rsplit(":", 2)
-            idx = int(idx_part)
+            prefix = ""
+            num_part = idx_part
+            if idx_part and idx_part[0].isalpha():
+                prefix = idx_part[0]
+                num_part = idx_part[1:]
+            idx = int(num_part)
         except Exception:
             return [chunk_id]
         start = max(0, idx - neighbors)
         end = idx + neighbors
-        return [f"{doc_part}:{page_part}:{i:03d}" for i in range(start, end + 1)]
+        return [f"{doc_part}:{page_part}:{prefix}{i:03d}" for i in range(start, end + 1)]
+
+    def _chunk_page_key(self, chunk_id: str) -> tuple[str, str] | None:
+        try:
+            doc_part, page_part, _ = chunk_id.rsplit(":", 2)
+            return (doc_part, page_part)
+        except Exception:
+            return None
 
     def _expand_chunk_text(
         self,
@@ -607,6 +790,7 @@ class SearchEngine:
         *,
         expand_neighbors: int,
         expand_max_chars: int,
+        expand_include_images: bool,
     ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for cid, score in selected:
@@ -614,12 +798,13 @@ class SearchEngine:
             if not row:
                 continue
             if expand_neighbors > 0:
-                text, images = self._expand_chunk_text(
+                text, expanded_images = self._expand_chunk_text(
                     cid,
                     chunk_rows,
                     neighbors=expand_neighbors,
                     max_chars=expand_max_chars,
                 )
+                images = expanded_images if expand_include_images else row.images
             else:
                 text, images = row.text, row.images
             out.append(
@@ -649,6 +834,7 @@ class SearchEngine:
         mmr_use_embeddings: bool = True,
         expand_neighbors: int = 0,
         expand_max_chars: int = 0,
+        expand_include_images: bool = False,
         heading_boost: float = 0.0,
         bm25_candidates: int | None = None,
         embedding_candidates: int | None = None,
@@ -657,6 +843,9 @@ class SearchEngine:
         embedding_weight: float = 1.0,
         doc_priority: list[str] | None = None,
         doc_priority_boost: float = 0.0,
+        summary_enabled: bool | None = None,
+        summary_k: int | None = None,
+        summary_max_pages: int | None = None,
         max_per_page: int = 0,
         max_per_doc: int = 0,
         debug_out: dict[str, Any] | None = None,
@@ -692,12 +881,91 @@ class SearchEngine:
                         "candidates": int(cand_limit or 0),
                         "use_embeddings": bool(mmr_use_embeddings),
                     },
-                    "expand": {"neighbors": int(expand_neighbors or 0), "max_chars": int(expand_max_chars or 0)},
+                    "expand": {
+                        "neighbors": int(expand_neighbors or 0),
+                        "max_chars": int(expand_max_chars or 0),
+                        "include_images": bool(expand_include_images),
+                    },
                 }
             )
 
+        summary_enabled_flag = bool(summary_enabled) if summary_enabled is not None else False
+        summary_k_val = int(summary_k or 0)
+        summary_max_pages_val = int(summary_max_pages or 0)
+        summary_ready = False
+        summary_k_eff = 0
+        allowed_pages: set[tuple[str, str]] | None = None
+        summary_top: list[tuple[str, float]] = []
+        summary_rows: dict[str, SummaryRow] = {}
+        summary_pages: list[tuple[str, str]] = []
+
+        summary_queries: list[str] = []
+        if summary_enabled_flag:
+            summary_ready = self.summary_ready()
+            if summary_ready:
+                summary_k_eff = summary_k_val if summary_k_val > 0 else max(k, 10)
+                summary_queries = [query] if query else []
+                rrf_scores: dict[str, float] = {}
+                for q in summary_queries:
+                    top, rows = self._summary_bm25_rank(q, summary_k_eff)
+                    for sid, row in rows.items():
+                        summary_rows.setdefault(sid, row)
+                    for rank, (sid, _) in enumerate(top, start=1):
+                        rrf_scores[sid] = rrf_scores.get(sid, 0.0) + (1.0 / float(rrf_k + rank))
+                summary_top = sorted(rrf_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:summary_k_eff]
+                seen_pages: set[tuple[str, str]] = set()
+                for sid, score in summary_top:
+                    row = summary_rows.get(sid)
+                    if not row:
+                        continue
+                    key = (row.doc_id, row.page_id)
+                    if key in seen_pages:
+                        continue
+                    seen_pages.add(key)
+                    summary_pages.append(key)
+                    if summary_max_pages_val > 0 and len(summary_pages) >= summary_max_pages_val:
+                        break
+                if summary_pages:
+                    allowed_pages = set(summary_pages)
+
+        if want_debug:
+            summary_debug: dict[str, Any] = {
+                "enabled": bool(summary_enabled_flag),
+                "ready": bool(summary_ready),
+                "applied": bool(allowed_pages),
+                "k": int(summary_k_eff or summary_k_val or 0),
+                "max_pages": int(summary_max_pages_val or 0),
+                "candidates": int(len(summary_top)),
+                "queries": list(summary_queries),
+                "selected_pages": [{"doc_id": d, "page_id": p} for d, p in summary_pages],
+            }
+            if summary_top:
+                top_rows: list[dict[str, Any]] = []
+                for rank, (sid, score) in enumerate(summary_top, start=1):
+                    row = summary_rows.get(sid)
+                    if not row:
+                        continue
+                    top_rows.append(
+                        {
+                            "rank": int(rank),
+                            "summary_id": sid,
+                            "doc_id": row.doc_id,
+                            "page_id": row.page_id,
+                            "heading_path": row.heading_path,
+                            "score": float(score),
+                        }
+                    )
+                    if len(top_rows) >= 50:
+                        break
+                summary_debug["top"] = top_rows
+            debug_out["summary"] = summary_debug
+
         if mode == "bm25":
-            top, chunk_rows = self._bm25_rank(query, cand_limit if use_mmr and cand_limit else k)
+            top, chunk_rows = self._bm25_rank(
+                query,
+                cand_limit if use_mmr and cand_limit else k,
+                allowed_pages=allowed_pages,
+            )
             adjusted: list[tuple[str, float]] = []
             cand_debug: dict[str, dict[str, Any]] = {}
             for rank, (cid, bm25_score) in enumerate(top, start=1):
@@ -706,7 +974,8 @@ class SearchEngine:
                     continue
                 doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
                 heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
-                score = float(bm25_score) * float(doc_mult) * float(heading_mult)
+                gran_mult = self._granularity_multiplier(cid)
+                score = float(bm25_score) * float(doc_mult) * float(heading_mult) * float(gran_mult)
                 adjusted.append((cid, float(score)))
                 if want_debug:
                     cand_debug[cid] = {
@@ -718,6 +987,8 @@ class SearchEngine:
                         "bm25": {"rank": int(rank), "score": float(bm25_score)},
                         "doc_priority_mult": float(doc_mult),
                         "heading_mult": float(heading_mult),
+                        "granularity": self._granularity_code(cid) or "legacy",
+                        "granularity_mult": float(gran_mult),
                     }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
             mmr_trace: list[dict[str, Any]] = []
@@ -739,6 +1010,7 @@ class SearchEngine:
                 chunk_rows,
                 expand_neighbors=int(expand_neighbors or 0),
                 expand_max_chars=int(expand_max_chars or 0),
+                expand_include_images=bool(expand_include_images),
             )
             if want_debug:
                 debug_out["candidates_count"] = int(len(adjusted))
@@ -763,7 +1035,11 @@ class SearchEngine:
                 raise RuntimeError(
                     "Embeddings mode requested but embeddings are not available. Re-run ingestion to build embeddings."
                 )
-            top = await self._embedding_rank(query, k=max((cand_limit if use_mmr and cand_limit else k), 1))
+            top = await self._embedding_rank(
+                query,
+                k=max((cand_limit if use_mmr and cand_limit else k), 1),
+                allowed_pages=allowed_pages,
+            )
             chunk_ids = [cid for cid, _ in top]
             chunk_rows = self._fetch_chunk_rows(chunk_ids)
             adjusted: list[tuple[str, float]] = []
@@ -774,7 +1050,8 @@ class SearchEngine:
                     continue
                 doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
                 heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
-                score = float(emb_score) * float(doc_mult) * float(heading_mult)
+                gran_mult = self._granularity_multiplier(cid)
+                score = float(emb_score) * float(doc_mult) * float(heading_mult) * float(gran_mult)
                 adjusted.append((cid, float(score)))
                 if want_debug:
                     cand_debug[cid] = {
@@ -786,6 +1063,8 @@ class SearchEngine:
                         "embedding": {"rank": int(rank), "score": float(emb_score)},
                         "doc_priority_mult": float(doc_mult),
                         "heading_mult": float(heading_mult),
+                        "granularity": self._granularity_code(cid) or "legacy",
+                        "granularity_mult": float(gran_mult),
                     }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
             mmr_trace: list[dict[str, Any]] = []
@@ -807,6 +1086,7 @@ class SearchEngine:
                 chunk_rows,
                 expand_neighbors=int(expand_neighbors or 0),
                 expand_max_chars=int(expand_max_chars or 0),
+                expand_include_images=bool(expand_include_images),
             )
             if want_debug:
                 debug_out["candidates_count"] = int(len(adjusted))
@@ -843,8 +1123,8 @@ class SearchEngine:
                 "embedding_candidates": int(embedding_candidates),
             }
 
-        bm25_top, _bm25_rows = self._bm25_rank(query, bm25_candidates)
-        emb_top = await self._embedding_rank(query, embedding_candidates)
+        bm25_top, _bm25_rows = self._bm25_rank(query, bm25_candidates, allowed_pages=allowed_pages)
+        emb_top = await self._embedding_rank(query, embedding_candidates, allowed_pages=allowed_pages)
 
         bm25_rank = {cid: i + 1 for i, (cid, _) in enumerate(bm25_top)}
         emb_rank = {cid: i + 1 for i, (cid, _) in enumerate(emb_top)}
@@ -870,7 +1150,8 @@ class SearchEngine:
             if row:
                 doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
                 heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
-            score = float(base) * float(doc_mult) * float(heading_mult)
+            gran_mult = self._granularity_multiplier(cid)
+            score = float(base) * float(doc_mult) * float(heading_mult) * float(gran_mult)
             combined.append((cid, float(score)))
             if want_debug and row:
                 cand_debug[cid] = {
@@ -884,6 +1165,8 @@ class SearchEngine:
                     "embedding": {"rank": int(r_e) if r_e is not None else None, "score": emb_score.get(cid)},
                     "doc_priority_mult": float(doc_mult),
                     "heading_mult": float(heading_mult),
+                    "granularity": self._granularity_code(cid) or "legacy",
+                    "granularity_mult": float(gran_mult),
                 }
 
         combined.sort(key=lambda kv: (-kv[1], kv[0]))
@@ -907,6 +1190,7 @@ class SearchEngine:
             chunk_rows,
             expand_neighbors=int(expand_neighbors or 0),
             expand_max_chars=int(expand_max_chars or 0),
+            expand_include_images=bool(expand_include_images),
         )
         if want_debug:
             debug_out["candidates_count"] = int(len(combined))
