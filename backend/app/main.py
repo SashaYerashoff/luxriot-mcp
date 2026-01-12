@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import secrets
 import shutil
 import sqlite3
@@ -34,6 +35,7 @@ from .datastore_search import SearchEngine
 from .docs_store import DocsStore
 from .lmstudio import LMStudioError, chat_completion, chat_completion_stream
 from .logging_utils import get_logger
+from .pdf_export import render_markdown_to_pdf
 from .prompting import PromptTemplateError, render_template
 from .settings import SettingsError, ensure_defaults, get_settings_bundle, update_settings
 from .web_tools import WebToolError, duckduckgo_search, extract_urls, fetch_url, parse_search_query
@@ -54,6 +56,9 @@ from .schemas import (
     DocGuideCreateRequest,
     DocAssetUploadResponse,
     DocPageResponse,
+    DocPdfRequest,
+    DocsStyleResponse,
+    DocsStyleUpdateRequest,
     DocsCatalogResponse,
     DocsVersionsResponse,
     DocSectionCreateRequest,
@@ -812,12 +817,57 @@ def _select_system_prompt_template(settings: dict[str, Any], *, role: str) -> st
     raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
 
 
+def _get_docs_style() -> dict[str, str | None]:
+    try:
+        effective = get_settings_bundle()["effective"]
+    except SettingsError:
+        return {"heading_font": None, "body_font": None}
+    style = effective.get("docs_style") if isinstance(effective.get("docs_style"), dict) else {}
+    heading = str(style.get("heading_font") or "").strip()
+    body = str(style.get("body_font") or "").strip()
+    return {
+        "heading_font": heading or None,
+        "body_font": body or None,
+    }
+
+
+def _normalize_font_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) > 64:
+        raise HTTPException(status_code=400, detail="Font value too long")
+    return text
+
+
 @app.get("/docs/versions", response_model=DocsVersionsResponse)
 def docs_versions(ctx: AuthContext = Depends(resolve_auth)) -> DocsVersionsResponse:
     versions = _available_versions()
     if not versions:
         raise HTTPException(status_code=503, detail="Docs catalog is not available. Run ingestion first.")
     return DocsVersionsResponse(default_version=DEFAULT_VERSION, versions=versions)
+
+
+@app.get("/docs/style", response_model=DocsStyleResponse)
+def docs_style(ctx: AuthContext = Depends(resolve_auth)) -> DocsStyleResponse:
+    style = _get_docs_style()
+    return DocsStyleResponse(heading_font=style.get("heading_font"), body_font=style.get("body_font"))
+
+
+@app.post("/docs/style", response_model=DocsStyleResponse)
+def docs_style_update(req: DocsStyleUpdateRequest, ctx: AuthContext = Depends(resolve_auth)) -> DocsStyleResponse:
+    require_role(ctx, {"admin", "redactor"})
+    style = _get_docs_style()
+    heading = _normalize_font_value(req.heading_font)
+    body = _normalize_font_value(req.body_font)
+    if heading is not None:
+        style["heading_font"] = heading
+    if body is not None:
+        style["body_font"] = body
+    update_settings({"docs_style": style})
+    return DocsStyleResponse(heading_font=style.get("heading_font"), body_font=style.get("body_font"))
 
 
 @app.get("/docs/catalog", response_model=DocsCatalogResponse)
@@ -953,6 +1003,17 @@ def docs_page(
     )
 
 
+def _get_effective_markdown(version: str, doc_id: str, page_id: str) -> tuple[dict[str, Any], str]:
+    meta, md_text, _ = _resolve_doc_page(version, doc_id, page_id)
+    try:
+        published = app_db.get_doc_edit(version=version, doc_id=meta["doc_id"], page_id=meta["page_id"], status="published")
+        if published and str(published.get("content_md") or "").strip():
+            md_text = str(published["content_md"])
+    except Exception:
+        log.exception("Failed to load published doc edit for PDF export")
+    return meta, md_text
+
+
 def _assert_edit_role(ctx: AuthContext) -> None:
     if ctx.principal.role not in ("admin", "redactor", "support"):
         raise HTTPException(status_code=403, detail="Editing requires admin/redactor/support role")
@@ -1078,6 +1139,119 @@ def docs_page_edit_delete(
     ver = _select_edit_version(req.version)
     app_db.delete_doc_edit(version=ver, doc_id=doc_id, page_id=page_id, status=status)
     return docs_page_edit(doc_id, page_id, version=ver, ctx=ctx)
+
+
+@app.post("/docs/pdf")
+def docs_pdf(req: DocPdfRequest, ctx: AuthContext = Depends(resolve_auth)) -> Response:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(req.version)
+    content = str(req.markdown or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Content is empty")
+    title = str(req.title or "document").strip() or "document"
+    style = _get_docs_style()
+    pdf_bytes = render_markdown_to_pdf(
+        content,
+        title=title,
+        version=ver,
+        heading_font=style.get("heading_font"),
+        body_font=style.get("body_font"),
+    )
+    filename = f"{_safe_slug(title)}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/docs/guide/{doc_id}/pdf")
+def docs_guide_pdf(
+    doc_id: str, version: str | None = None, ctx: AuthContext = Depends(resolve_auth)
+) -> Response:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
+        )
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    if not _doc_allowed(doc_id, allow, deny):
+        raise HTTPException(status_code=403, detail="Doc is not available for this user")
+
+    pages: list[dict[str, Any]] = []
+    doc_title = _get_doc_title(ver, doc_id) or doc_id
+    if store.is_ready():
+        try:
+            data = store.list_pages(doc_id)
+            doc_title = str(data.get("doc_title") or doc_title)
+            pages = list(data.get("pages") or [])
+        except KeyError:
+            pages = []
+
+    custom_pages = app_db.list_doc_pages(version=ver, doc_id=doc_id)
+    existing = {str(p.get("page_id") or "") for p in pages}
+    for rec in custom_pages:
+        pid = str(rec.get("page_id") or "")
+        if not pid or pid in existing:
+            continue
+        pages.append(
+            {
+                "page_id": pid,
+                "page_title": str(rec.get("page_title") or pid),
+            }
+        )
+        existing.add(pid)
+
+    if not pages:
+        raise HTTPException(status_code=404, detail="Doc not found")
+
+    combined: list[str] = []
+    for p in pages:
+        pid = str(p.get("page_id") or "")
+        if not pid:
+            continue
+        meta, md_text = _get_effective_markdown(ver, doc_id, pid)
+        page_title = str(p.get("page_title") or meta.get("page_title") or pid)
+        content = str(md_text or "").strip()
+        if page_title and not _content_starts_with_heading(content, page_title):
+            combined.append(f"## {page_title}")
+        if content:
+            combined.append(content)
+        combined.append("")
+
+    style = _get_docs_style()
+    pdf_bytes = render_markdown_to_pdf(
+        "\n".join(combined),
+        title=doc_title,
+        version=ver,
+        heading_font=style.get("heading_font"),
+        body_font=style.get("body_font"),
+    )
+    filename = f"{_safe_slug(doc_title)}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _content_starts_with_heading(markdown: str, heading: str) -> bool:
+    normalized_heading = re.sub(r"\s+", " ", str(heading or "")).strip().lower()
+    if not normalized_heading:
+        return False
+    for raw in str(markdown or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        match = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if not match:
+            return False
+        text = re.sub(r"\s+", " ", match.group(2)).strip().lower()
+        return text == normalized_heading
+    return False
 
 
 def _safe_slug(value: str) -> str:

@@ -72,5 +72,9 @@
     "max_chars": 20000,
     "max_urls_per_message": 2,
     "search_k": 5
+  },
+  "docs_style": {
+    "heading_font": "sans",
+    "body_font": "sans"
   }
 }

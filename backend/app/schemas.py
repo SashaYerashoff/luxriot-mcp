@@ -181,6 +181,22 @@ class DocsVersionsResponse(BaseModel):
     versions: list[str]
 
 
+class DocsStyleResponse(BaseModel):
+    heading_font: str | None = None
+    body_font: str | None = None
+
+
+class DocsStyleUpdateRequest(BaseModel):
+    heading_font: str | None = None
+    body_font: str | None = None
+
+
+class DocPdfRequest(BaseModel):
+    markdown: str = Field(min_length=1)
+    title: str | None = None
+    version: str | None = None
+
+
 class DocPageInfo(BaseModel):
     page_id: str
     page_title: str

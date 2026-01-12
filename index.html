@@ -16,6 +16,8 @@
       --danger:#d85c5c;
       --ok:#69d17a;
       --warn:#d8b15c;
+      --docs-heading-font:"IBM Plex Sans","Source Sans 3","Segoe UI",system-ui,sans-serif;
+      --docs-body-font:"Source Sans 3","Segoe UI",system-ui,sans-serif;
     }
     *{box-sizing:border-box}
 	    html, body{height:100%;}
@@ -302,6 +304,16 @@
       padding-right:6px;
       margin-top:8px;
     }
+    .docs-fonts{
+      margin-top:12px;
+      padding:10px 12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:rgba(255,255,255,.03);
+      display:none;
+    }
+    .docs-fonts label{margin-top:8px;}
+    .docs-fonts label:first-child{margin-top:0;}
     .docs-item{
       border:1px solid var(--border);
       border-radius:12px;
@@ -371,16 +383,26 @@
 	      min-height:0;
 	      overflow:auto;
 	      padding-right:10px;
-	      line-height:1.45;
+	      font-family:var(--docs-body-font);
+	      font-size:14px;
+	      line-height:1.6;
 	      color:var(--text);
 	      overflow-wrap:anywhere;
 	    }
-    .docsPage p{margin:0 0 10px;}
+    .docsPage p{margin:0 0 14px;}
     .docsPage p:last-child{margin-bottom:0;}
-    .docsPage h1,.docsPage h2,.docsPage h3{margin:10px 0 8px;line-height:1.25;}
-    .docsPage h1{font-size:18px;}
-    .docsPage h2{font-size:16px;}
-    .docsPage h3{font-size:14px;}
+    .docsPage h1,.docsPage h2,.docsPage h3,.docsPage h4,.docsPage h5,.docsPage h6{
+      font-family:var(--docs-heading-font);
+      margin:20px 0 12px;
+      line-height:1.25;
+    }
+    .docsPage h1{font-size:22px;}
+    .docsPage h2{font-size:18px;}
+    .docsPage h3{font-size:17px;}
+    .docsPage h4{font-size:15px;}
+    .docsPage h5{font-size:14px;}
+    .docsPage h6{font-size:13px;}
+    .docsPage h1:first-child,.docsPage h2:first-child,.docsPage h3:first-child,.docsPage h4:first-child,.docsPage h5:first-child,.docsPage h6:first-child{margin-top:0;}
     .docsPage ul,.docsPage ol{margin:6px 0 10px 20px;padding:0;}
     .docsPage li{margin:4px 0;}
     .docsPage code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;background:rgba(255,255,255,.06);padding:2px 5px;border-radius:8px;border:1px solid var(--border);}
@@ -456,7 +478,8 @@
       border:1px solid var(--border);
       background:rgba(16,17,19,.35);
     }
-    .docs-edit-preview p{margin:0 0 10px;}
+    .docs-edit-preview{font-family:var(--docs-body-font);font-size:14px;line-height:1.6;}
+    .docs-edit-preview p{margin:0 0 14px;}
     .docs-edit-preview p:last-child{margin-bottom:0;}
     .docs-edit-preview ul,.docs-edit-preview ol{margin:6px 0 10px 20px;padding:0;}
     .docs-edit-preview li{margin:4px 0;}
@@ -471,7 +494,18 @@
     .docs-edit-preview th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
     .docs-edit-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
     .docs-edit-status{font-size:11px;color:var(--muted);}
-    .docs-edit-preview h1,.docs-edit-preview h2,.docs-edit-preview h3,.docs-edit-preview h4,.docs-edit-preview h5,.docs-edit-preview h6{margin:10px 0 8px;line-height:1.25;}
+    .docs-edit-preview h1,.docs-edit-preview h2,.docs-edit-preview h3,.docs-edit-preview h4,.docs-edit-preview h5,.docs-edit-preview h6{
+      font-family:var(--docs-heading-font);
+      margin:20px 0 12px;
+      line-height:1.25;
+    }
+    .docs-edit-preview h1{font-size:22px;}
+    .docs-edit-preview h2{font-size:18px;}
+    .docs-edit-preview h3{font-size:17px;}
+    .docs-edit-preview h4{font-size:15px;}
+    .docs-edit-preview h5{font-size:14px;}
+    .docs-edit-preview h6{font-size:13px;}
+    .docs-edit-preview h1:first-child,.docs-edit-preview h2:first-child,.docs-edit-preview h3:first-child,.docs-edit-preview h4:first-child,.docs-edit-preview h5:first-child,.docs-edit-preview h6:first-child{margin-top:0;}
     .docs-edit-preview img{max-width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
     .docs-edit-preview blockquote{margin:10px 0;padding:8px 12px;border-left:3px solid rgba(214,217,223,.35);background:rgba(255,255,255,.04);border-radius:10px;color:var(--muted);}
     .docs-edit-preview .admonition{margin:12px 0;padding:10px 12px;border-left:3px solid rgba(63,163,124,.45);border-radius:12px;background:rgba(63,163,124,.08);}
@@ -532,7 +566,7 @@
       background:rgba(22,24,28,.55);
       padding:14px;
     }
-    .card h3{
+    .card > h3{
       margin:0 0 10px 0;
       font-size:13px;
       color:var(--text);
@@ -668,6 +702,8 @@
 	    .msg .content th,.msg .content td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;}
 	    .msg .content th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
 	    .msg .content .cite{color:var(--muted);font-size:12px;padding:0 2px;}
+      .msg .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+      .msg .actions .btn{font-size:12px;padding:6px 10px;}
 	    .msg.pending{opacity:.95;}
 	    .msg.pending .activity{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;}
 	    .msg.pending .activity .stop-btn{
@@ -1316,6 +1352,14 @@
         </div>
         <div class="docs-list" id="docsSearchResults" style="display:none; max-height:240px;"></div>
 
+        <div class="docs-fonts" id="docsFontsPanel">
+          <label>Heading font</label>
+          <select id="docsHeadingFont"></select>
+          <label>Body font</label>
+          <select id="docsBodyFont"></select>
+          <div class="tiny muted" style="margin-top:6px;">Applies to reader + PDF export.</div>
+        </div>
+
         <label>Pages</label>
         <div class="docs-list" id="docsPageList"></div>
 
@@ -1345,6 +1389,11 @@
             <button class="icon-btn" id="docsEditBtn" title="Edit page" aria-label="Edit page">
               <svg class="icon icon-edit" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M3 17.25V21h3.75l11-11-3.75-3.75-11 11zm17.71-10.04a1.003 1.003 0 000-1.42l-2.5-2.5a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.99-1.66z"/>
+              </svg>
+            </button>
+            <button class="icon-btn" id="docsPdfBtn" title="Download PDF" aria-label="Download PDF">
+              <svg class="icon icon-download" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 20h14v-2H5v2zm7-18l-5.5 5.5h3.5V15h4V7.5H17.5L12 2z"/>
               </svg>
             </button>
           </div>
@@ -1501,6 +1550,39 @@
 
   const annotations = []; // in-memory only
 
+  const DOCS_FONT_PRESETS = [
+    {
+      key: 'sans',
+      label: 'Neutral Sans',
+      css: '"IBM Plex Sans","Source Sans 3","Segoe UI",system-ui,sans-serif'
+    },
+    {
+      key: 'grotesk',
+      label: 'Grotesk',
+      css: '"Space Grotesk","Work Sans","Segoe UI",system-ui,sans-serif'
+    },
+    {
+      key: 'serif',
+      label: 'Editorial Serif',
+      css: '"IBM Plex Serif","Source Serif 4","Georgia",serif'
+    },
+    {
+      key: 'slab',
+      label: 'Slab Serif',
+      css: '"Bitter","Rockwell","Georgia",serif'
+    },
+    {
+      key: 'mono',
+      label: 'Monospace',
+      css: '"JetBrains Mono","Fira Code",ui-monospace,Menlo,monospace'
+    }
+  ];
+  const DOCS_FONT_PRESET_MAP = DOCS_FONT_PRESETS.reduce((acc, item) => {
+    acc[item.key] = item;
+    return acc;
+  }, {});
+  let docsStyleState = { heading_font: 'sans', body_font: 'sans' };
+
   // ---------- UI handles ----------
   const historyPanel = document.getElementById('historyPanel');
   const historyList = document.getElementById('historyList');
@@ -1623,6 +1705,66 @@
 		  window.addEventListener('resize', () => scheduleDockUpdate());
 		  scheduleDockUpdate();
 
+	  function resolveDocsFontCss(key) {
+	    if (!key) return '';
+	    const preset = DOCS_FONT_PRESET_MAP[key];
+	    if (preset && preset.css) return preset.css;
+	    return String(key);
+	  }
+
+	  function populateDocsFontSelect(selectEl, selectedKey) {
+	    if (!selectEl) return;
+	    selectEl.innerHTML = '';
+	    DOCS_FONT_PRESETS.forEach((preset) => {
+	      const opt = document.createElement('option');
+	      opt.value = preset.key;
+	      opt.textContent = preset.label;
+	      selectEl.appendChild(opt);
+	    });
+	    if (selectedKey && DOCS_FONT_PRESET_MAP[selectedKey]) {
+	      selectEl.value = selectedKey;
+	    } else if (selectEl.options.length) {
+	      selectEl.selectedIndex = 0;
+	    }
+	  }
+
+	  function applyDocsStyle(style) {
+	    const headingKey = String(style?.heading_font || docsStyleState.heading_font || 'sans');
+	    const bodyKey = String(style?.body_font || docsStyleState.body_font || 'sans');
+	    docsStyleState = { heading_font: headingKey, body_font: bodyKey };
+	    const headingCss = resolveDocsFontCss(headingKey);
+	    const bodyCss = resolveDocsFontCss(bodyKey);
+	    if (headingCss) document.documentElement.style.setProperty('--docs-heading-font', headingCss);
+	    if (bodyCss) document.documentElement.style.setProperty('--docs-body-font', bodyCss);
+	    populateDocsFontSelect(docsHeadingFontEl, headingKey);
+	    populateDocsFontSelect(docsBodyFontEl, bodyKey);
+	  }
+
+	  async function loadDocsStyle() {
+	    try {
+	      const res = await apiJson('/docs/style');
+	      applyDocsStyle(res || {});
+	    } catch (e) {
+	      applyDocsStyle({});
+	    }
+	  }
+
+	  async function saveDocsStyle() {
+	    if (!docsHeadingFontEl || !docsBodyFontEl) return;
+	    const payload = {
+	      heading_font: String(docsHeadingFontEl.value || '').trim(),
+	      body_font: String(docsBodyFontEl.value || '').trim()
+	    };
+	    applyDocsStyle(payload);
+	    try {
+	      await apiJson('/docs/style', { method: 'POST', body: payload });
+	      if (docsStatusEl) docsStatusEl.textContent = 'Docs font updated.';
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      if (docsStatusEl) docsStatusEl.textContent = `Font update failed: ${raw}`;
+	    }
+	  }
+
 	  // ---------- Admin settings UI ----------
 	  const adminApiBaseEl = document.getElementById('adminApiBase');
 	  const adminDocsVersionEl = document.getElementById('adminDocsVersion');
@@ -1712,6 +1854,9 @@
     const docsVersionSelectEl = document.getElementById('docsVersionSelect');
     const docsGuideSelectEl = document.getElementById('docsGuideSelect');
     const docsEditActionsEl = document.getElementById('docsEditActions');
+    const docsFontsPanelEl = document.getElementById('docsFontsPanel');
+    const docsHeadingFontEl = document.getElementById('docsHeadingFont');
+    const docsBodyFontEl = document.getElementById('docsBodyFont');
     const docsNewGuideBtn = document.getElementById('docsNewGuideBtn');
     const docsNewSectionBtn = document.getElementById('docsNewSectionBtn');
     const docsSearchInputEl = document.getElementById('docsSearchInput');
@@ -1725,6 +1870,7 @@
     const docsFullscreenBtn = document.getElementById('docsFullscreenBtn');
     const docsThemeBtn = document.getElementById('docsThemeBtn');
     const docsEditBtn = document.getElementById('docsEditBtn');
+    const docsPdfBtn = document.getElementById('docsPdfBtn');
     const docsEditorEl = document.getElementById('docsEditor');
     const docsEditTextEl = document.getElementById('docsEditText');
     const docsEditPreviewEl = document.getElementById('docsEditPreview');
@@ -2872,16 +3018,36 @@
       wrap.appendChild(c);
     }
 
-    if (errorText) {
-      const details = document.createElement('details');
-      details.className = 'err-details';
-      const summary = document.createElement('summary');
-      summary.textContent = 'Show raw error';
-      const pre = document.createElement('pre');
-      pre.textContent = errorText;
-      details.appendChild(summary);
-      details.appendChild(pre);
-      wrap.appendChild(details);
+      if (errorText) {
+        const details = document.createElement('details');
+        details.className = 'err-details';
+        const summary = document.createElement('summary');
+        summary.textContent = 'Show raw error';
+        const pre = document.createElement('pre');
+        pre.textContent = errorText;
+        details.appendChild(summary);
+        details.appendChild(pre);
+        wrap.appendChild(details);
+      }
+
+    if (role === 'assistant') {
+      const roleName = String(authState?.role || 'anonymous');
+      const canEditDocs = ['admin', 'redactor', 'support'].includes(roleName);
+      if (canEditDocs) {
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn ghost small';
+        editBtn.textContent = 'EDIT IN DOCS';
+        editBtn.addEventListener('click', () => {
+          openAnswerInDocs({
+            content: String(content || ''),
+            context_chunks: Array.isArray(context_chunks) ? context_chunks : []
+          });
+        });
+        actions.appendChild(editBtn);
+        wrap.appendChild(actions);
+      }
     }
 
 	    thread.appendChild(wrap);
@@ -2909,6 +3075,45 @@
       throw err;
     }
     return await resp.json();
+  }
+
+  async function apiBlob(path, { method = 'GET', body = undefined } = {}) {
+    const opts = { method, headers: {} };
+    if (body !== undefined) {
+      if (body instanceof FormData) {
+        opts.body = body;
+      } else {
+        opts.headers['content-type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+    }
+    const resp = await fetch(apiBase + path, opts);
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      const err = new Error(`HTTP ${resp.status}`);
+      err.status = resp.status;
+      err.raw = text;
+      throw err;
+    }
+    return await resp.blob();
+  }
+
+  function downloadBlob(blob, filename) {
+    const name = String(filename || 'document.pdf');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function safeFilename(text) {
+    const raw = String(text || '').trim().toLowerCase();
+    const cleaned = raw.replace(/[^a-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return cleaned || 'document';
   }
 
 	  async function apiSse(path, { body, onEvent, signal } = {}) {
@@ -3011,9 +3216,11 @@
 		    setActionVisible(historyBtn, isAdmin || isRedactor || isSupport || isClient);
 		    const canEditDocs = isAdmin || isRedactor || isSupport;
 		    setActionVisible(docsEditBtn, canEditDocs);
+		    setActionVisible(docsPdfBtn, canEditDocs);
 		    setActionVisible(docsNewGuideBtn, canEditDocs);
 		    setActionVisible(docsNewSectionBtn, canEditDocs);
 		    if (docsEditActionsEl) docsEditActionsEl.style.display = canEditDocs ? '' : 'none';
+		    if (docsFontsPanelEl) docsFontsPanelEl.style.display = (isAdmin || isRedactor) ? '' : 'none';
 
 		    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
 		    if (!(isAdmin || isRedactor) && redactorPanel.classList.contains('visible')) closeAllModals();
@@ -3053,6 +3260,7 @@
 	    syncGreeting(authState);
 	    renderAuthPanel(authState);
 	    applyRoleUI(authState);
+	    await loadDocsStyle();
 	  }
 
 	  async function doLogin() {
@@ -3615,24 +3823,24 @@
 	  function handleInsert(type) {
 	    if (!docsEditTextEl) return;
 	    switch (type) {
-	      case 'h1': insertAtCursor(docsEditTextEl, '# Heading 1\\n'); break;
-	      case 'h2': insertAtCursor(docsEditTextEl, '## Heading 2\\n'); break;
-	      case 'h3': insertAtCursor(docsEditTextEl, '### Heading 3\\n'); break;
-	      case 'h4': insertAtCursor(docsEditTextEl, '#### Heading 4\\n'); break;
-	      case 'h5': insertAtCursor(docsEditTextEl, '##### Heading 5\\n'); break;
-	      case 'ul': insertAtCursor(docsEditTextEl, '- Item 1\\n- Item 2\\n'); break;
-	      case 'ol': insertAtCursor(docsEditTextEl, '1. Step one\\n2. Step two\\n'); break;
+	      case 'h1': insertAtCursor(docsEditTextEl, '# Heading 1\n'); break;
+	      case 'h2': insertAtCursor(docsEditTextEl, '## Heading 2\n'); break;
+	      case 'h3': insertAtCursor(docsEditTextEl, '### Heading 3\n'); break;
+	      case 'h4': insertAtCursor(docsEditTextEl, '#### Heading 4\n'); break;
+	      case 'h5': insertAtCursor(docsEditTextEl, '##### Heading 5\n'); break;
+	      case 'ul': insertAtCursor(docsEditTextEl, '- Item 1\n- Item 2\n'); break;
+	      case 'ol': insertAtCursor(docsEditTextEl, '1. Step one\n2. Step two\n'); break;
 	      case 'table':
-	        insertAtCursor(docsEditTextEl, '| Column | Column |\\n| --- | --- |\\n| Value | Value |\\n');
+	        insertAtCursor(docsEditTextEl, '| Column | Column |\n| --- | --- |\n| Value | Value |\n');
 	        break;
 	      case 'tip':
-	        insertAtCursor(docsEditTextEl, '> [!TIP] Tip\\n> Add your tip here.\\n');
+	        insertAtCursor(docsEditTextEl, '> [!TIP] Tip\n> Add your tip here.\n');
 	        break;
 	      case 'warn':
-	        insertAtCursor(docsEditTextEl, '> [!WARNING] Warning\\n> Add your warning here.\\n');
+	        insertAtCursor(docsEditTextEl, '> [!WARNING] Warning\n> Add your warning here.\n');
 	        break;
 	      case 'info':
-	        insertAtCursor(docsEditTextEl, '> [!INFO] Info\\n> Add your note here.\\n');
+	        insertAtCursor(docsEditTextEl, '> [!INFO] Info\n> Add your note here.\n');
 	        break;
 	      default:
 	        break;
@@ -3749,7 +3957,7 @@
 	      const res = await apiJson('/docs/assets/upload', { method: 'POST', body: form });
 	      const url = res?.url ? String(res.url) : '';
 	      if (url) {
-	        insertAtCursor(docsEditTextEl, `![screenshot](${url})\\n`);
+	        insertAtCursor(docsEditTextEl, `![screenshot](${url})\n`);
 	      }
 	      if (docsEditStatusEl) docsEditStatusEl.textContent = 'Image uploaded.';
 	    } catch (e) {
@@ -3789,9 +3997,10 @@
     highlightDocsActivePage();
   }
 
-		  async function openDocsReader({ doc_id = null, page_id = null, anchor = null, fullscreen = null, version = null } = {}) {
+  async function openDocsReader({ doc_id = null, page_id = null, anchor = null, fullscreen = null, version = null } = {}) {
 		    openModal(docsPanel);
 		    setDocsEditMode(false);
+		    loadDocsStyle().catch(() => {});
 		    if (fullscreen === true) setDocsFullscreen(true);
 		    if (fullscreen === false) setDocsFullscreen(false);
 		    setDocsStatus('');
@@ -3839,6 +4048,67 @@
     } catch (e) {
       const raw = e?.raw ? String(e.raw) : String(e);
       setDocsStatus(`Failed to load docs: ${raw}`, { error: true });
+    }
+  }
+
+  function suggestTitleFromAnswer(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return 'New guide';
+    const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const heading = line.match(/^#{1,6}\s+(.*)$/);
+      if (heading) return heading[1].trim() || 'New guide';
+    }
+    for (const line of lines) {
+      if (/^based on/i.test(line)) continue;
+      const cleaned = line.replace(/\[[^\]]+\]/g, '').trim();
+      if (cleaned) return cleaned.slice(0, 80);
+    }
+    return 'New guide';
+  }
+
+  async function startDocsEditForPage(docId, pageId, seedMarkdown) {
+    if (!docId || !pageId) return;
+    setDocsEditMode(true);
+    await loadDocsEdit(docId, pageId);
+    const seed = String(seedMarkdown || '').trim();
+    if (seed && docsEditTextEl) {
+      docsEditTextEl.value = seed;
+      docsState.editDirty = true;
+      updateDocsEditPreview();
+      if (docsEditStatusEl) docsEditStatusEl.textContent = 'Draft: unsaved · Published: none';
+    }
+  }
+
+  async function openAnswerInDocs({ content, context_chunks } = {}) {
+    const role = String(authState?.role || 'anonymous');
+    if (!['admin', 'redactor', 'support'].includes(role)) return;
+    const raw = String(content || '').trim();
+    if (!raw) return;
+    if (docsState.editing && docsState.editDirty) {
+      const ok = confirm('You have unsaved edits. Discard and open this answer in docs?');
+      if (!ok) return;
+      setDocsEditMode(false);
+    }
+    const selectedDoc = docsState.selectedDocId || null;
+    await openDocsReader({ version: docsState.version || null, doc_id: selectedDoc });
+
+    const augmented = injectTopologicalImages(raw, context_chunks);
+    const seedMarkdown = augmented.md || raw;
+    const suggestion = suggestTitleFromAnswer(raw);
+    const currentTitle = docsState.selectedDocTitle || docsState.selectedDocId || '';
+    let useSection = false;
+    if (currentTitle) {
+      useSection = confirm(`Add as new section to "${currentTitle}"?`);
+    }
+    if (useSection) {
+      const title = prompt('New section title', suggestion) || '';
+      if (!title.trim()) return;
+      await createNewSection({ title: title.trim(), seedMarkdown });
+    } else {
+      const title = prompt('New guide name', suggestion) || '';
+      if (!title.trim()) return;
+      await createNewGuide({ title: title.trim(), seedMarkdown });
     }
   }
 
@@ -3890,6 +4160,9 @@
   });
 
   async function createNewGuide() {
+    const opts = arguments.length > 0 ? arguments[0] : {};
+    const providedTitle = opts && typeof opts === 'object' ? String(opts.title || '').trim() : '';
+    const seedMarkdown = opts && typeof opts === 'object' ? String(opts.seedMarkdown || '').trim() : '';
     if (!docsState.version) {
       setDocsStatus('Select a docs version first.', { error: true });
       return;
@@ -3898,7 +4171,7 @@
       if (!confirm('You have unsaved edits. Discard and create a new guide?')) return;
       setDocsEditMode(false);
     }
-    const title = prompt('New guide name', '');
+    const title = providedTitle || prompt('New guide name', '');
     if (!title) return;
     setDocsStatus('Creating guide…');
     try {
@@ -3908,6 +4181,7 @@
       });
       docsState.catalog = null;
       await openDocsReader({ version: docsState.version, doc_id: res.doc_id, page_id: res.page_id, anchor: null });
+      await startDocsEditForPage(res.doc_id, res.page_id, seedMarkdown);
       setDocsStatus('Guide created.');
     } catch (e) {
       const raw = e?.raw ? String(e.raw) : String(e);
@@ -3916,6 +4190,9 @@
   }
 
   async function createNewSection() {
+    const opts = arguments.length > 0 ? arguments[0] : {};
+    const providedTitle = opts && typeof opts === 'object' ? String(opts.title || '').trim() : '';
+    const seedMarkdown = opts && typeof opts === 'object' ? String(opts.seedMarkdown || '').trim() : '';
     if (!docsState.version) {
       setDocsStatus('Select a docs version first.', { error: true });
       return;
@@ -3929,7 +4206,7 @@
       if (!confirm('You have unsaved edits. Discard and create a new section?')) return;
       setDocsEditMode(false);
     }
-    const title = prompt('New section title', '');
+    const title = providedTitle || prompt('New section title', '');
     if (!title) return;
     setDocsStatus('Creating section…');
     try {
@@ -3941,6 +4218,7 @@
       await loadDocPages(docId);
       renderDocsPageList();
       await loadAndRenderDocsPage(docId, res.page_id, null);
+      await startDocsEditForPage(docId, res.page_id, seedMarkdown);
       setDocsStatus('Section created.');
     } catch (e) {
       const raw = e?.raw ? String(e.raw) : String(e);
@@ -3962,6 +4240,8 @@
 	    clearDocsSearch();
 	    setDocsStatus('');
 	  });
+	  docsHeadingFontEl?.addEventListener('change', () => saveDocsStyle());
+	  docsBodyFontEl?.addEventListener('change', () => saveDocsStyle());
   docsSearchInputEl?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -3973,6 +4253,50 @@
       setDocsStatus('');
     }
   });
+
+  async function downloadDocsPdf() {
+    const role = String(authState?.role || 'anonymous');
+    if (!['admin', 'redactor', 'support'].includes(role)) return;
+    if (docsState.editing && docsEditTextEl) {
+      const markdown = String(docsEditTextEl.value || '').trim();
+      if (!markdown) {
+        setDocsStatus('Nothing to export.', { error: true });
+        return;
+      }
+      const title = docsState.page?.page_title || docsState.selectedDocTitle || 'draft';
+      setDocsStatus('Building PDF…');
+      try {
+        const blob = await apiBlob('/docs/pdf', {
+          method: 'POST',
+          body: { markdown, title, version: docsState.version || null },
+        });
+        downloadBlob(blob, `${safeFilename(title)}.pdf`);
+        setDocsStatus('PDF downloaded.');
+      } catch (e) {
+        const raw = e?.raw ? String(e.raw) : String(e);
+        setDocsStatus(`PDF export failed: ${raw}`, { error: true });
+      }
+      return;
+    }
+
+    const docId = docsState.selectedDocId;
+    if (!docId) {
+      setDocsStatus('Select a guide first.', { error: true });
+      return;
+    }
+    const ver = docsState.version || null;
+    const qs = ver ? `?version=${encodeURIComponent(ver)}` : '';
+    setDocsStatus('Building PDF…');
+    try {
+      const blob = await apiBlob(`/docs/guide/${encodeURIComponent(docId)}/pdf${qs}`);
+      const title = docsState.selectedDocTitle || docId;
+      downloadBlob(blob, `${safeFilename(title)}.pdf`);
+      setDocsStatus('PDF downloaded.');
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`PDF export failed: ${raw}`, { error: true });
+    }
+  }
 
 	  function setDocsFullscreen(enabled) {
 	    const on = Boolean(enabled);
@@ -4500,6 +4824,11 @@
       if (docsEditStatusEl) docsEditStatusEl.textContent = `Edit load failed: ${raw}`;
       setDocsEditMode(false);
     }
+  });
+
+  docsPdfBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    downloadDocsPdf();
   });
 
   debugBtn.addEventListener('click', (e) => {
