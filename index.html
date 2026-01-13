@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>MCP Interface Mock — Admin + Redactor</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Titillium+Web:ital,wght@0,200;0,300;0,400;0,600;0,700;0,900;1,200;1,300;1,400;1,600;1,700&display=swap');
+
     :root{
       --bg:#0e0f11;
       --panel:#16181c;
@@ -135,6 +137,16 @@
       width:var(--action-size,46px);height:var(--action-size,46px);
       border-radius:50%;background:var(--panel);border:1px solid var(--border);
       display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
+    }
+    .icon-btn .pdf-label{
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.4px;
+      color:var(--text);
+    }
+    .icon-btn .icon-label{
+      font-size:16px;
+      line-height:1;
     }
 
     /* Small pop panels (history) */
@@ -304,16 +316,6 @@
       padding-right:6px;
       margin-top:8px;
     }
-    .docs-fonts{
-      margin-top:12px;
-      padding:10px 12px;
-      border:1px solid var(--border);
-      border-radius:12px;
-      background:rgba(255,255,255,.03);
-      display:none;
-    }
-    .docs-fonts label{margin-top:8px;}
-    .docs-fonts label:first-child{margin-top:0;}
     .docs-item{
       border:1px solid var(--border);
       border-radius:12px;
@@ -506,6 +508,29 @@
     .docs-edit-preview h5{font-size:14px;}
     .docs-edit-preview h6{font-size:13px;}
     .docs-edit-preview h1:first-child,.docs-edit-preview h2:first-child,.docs-edit-preview h3:first-child,.docs-edit-preview h4:first-child,.docs-edit-preview h5:first-child,.docs-edit-preview h6:first-child{margin-top:0;}
+    .docs-style-preview{
+      margin-top:10px;
+      padding:10px 12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:rgba(255,255,255,.03);
+    }
+    .docs-style-preview .preview-heading{
+      font-family:var(--docs-heading-font);
+      font-size:16px;
+      font-weight:700;
+      margin-bottom:6px;
+    }
+    .docs-style-preview .preview-body{
+      font-family:var(--docs-body-font);
+      font-size:13px;
+      color:var(--muted);
+    }
+    .docs-style-preview .preview-body span{
+      display:inline-block;
+      margin-right:8px;
+      color:var(--text);
+    }
     .docs-edit-preview img{max-width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
     .docs-edit-preview blockquote{margin:10px 0;padding:8px 12px;border-left:3px solid rgba(214,217,223,.35);background:rgba(255,255,255,.04);border-radius:10px;color:var(--muted);}
     .docs-edit-preview .admonition{margin:12px 0;padding:10px 12px;border-left:3px solid rgba(63,163,124,.45);border-radius:12px;background:rgba(63,163,124,.08);}
@@ -959,10 +984,10 @@
 			        </details>
 			      </div>
 
-		      <div class="card">
-		        <h3>Docs</h3>
-		        <label>Docs folder (Help+Manual export root)</label>
-		        <input id="adminDocsDir" type="text" placeholder="/path/to/docs"/>
+      <div class="card">
+        <h3>Docs</h3>
+        <label>Docs folder (Help+Manual export root)</label>
+        <input id="adminDocsDir" type="text" placeholder="/path/to/docs"/>
 	        <div class="inline" style="margin-top:8px;">
 	          <span class="pill"><input id="adminIngestEmbeddings" type="checkbox" checked> embeddings</span>
 	          <span class="pill"><input id="adminIncludeEdits" type="checkbox" checked> include published edits</span>
@@ -980,11 +1005,28 @@
 	          <button class="btn ghost" id="adminReindexRefreshBtn">REFRESH</button>
 	        </div>
 	        <div class="tiny muted" id="adminReindexStatus" style="margin-top:10px;"></div>
-	        <details class="log-details">
-	          <summary>Show reindex logs</summary>
-	          <pre id="adminReindexLogs"></pre>
-	        </details>
-	      </div>
+        <details class="log-details">
+          <summary>Show reindex logs</summary>
+          <pre id="adminReindexLogs"></pre>
+        </details>
+      </div>
+
+      <div class="card" id="docsStyleCard">
+        <h3>Docs style</h3>
+        <label>Heading font</label>
+        <select id="docsHeadingFont"></select>
+        <label>Body font</label>
+        <select id="docsBodyFont"></select>
+        <div class="docs-style-preview">
+          <div class="preview-heading">Heading preview</div>
+          <div class="preview-body">
+            <span style="font-weight:300;">Light</span>
+            <span style="font-weight:400;">Regular</span>
+            <span style="font-weight:600;">Bold</span>
+          </div>
+        </div>
+        <div class="tiny muted" style="margin-top:6px;">Applies to docs reader + PDF export.</div>
+      </div>
 	
 		      <div class="card">
 		        <h3>Retrieval</h3>
@@ -1352,14 +1394,6 @@
         </div>
         <div class="docs-list" id="docsSearchResults" style="display:none; max-height:240px;"></div>
 
-        <div class="docs-fonts" id="docsFontsPanel">
-          <label>Heading font</label>
-          <select id="docsHeadingFont"></select>
-          <label>Body font</label>
-          <select id="docsBodyFont"></select>
-          <div class="tiny muted" style="margin-top:6px;">Applies to reader + PDF export.</div>
-        </div>
-
         <label>Pages</label>
         <div class="docs-list" id="docsPageList"></div>
 
@@ -1387,14 +1421,10 @@
 	              </svg>
             </button>
             <button class="icon-btn" id="docsEditBtn" title="Edit page" aria-label="Edit page">
-              <svg class="icon icon-edit" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M3 17.25V21h3.75l11-11-3.75-3.75-11 11zm17.71-10.04a1.003 1.003 0 000-1.42l-2.5-2.5a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.99-1.66z"/>
-              </svg>
+              <span class="icon-label" aria-hidden="true">✎</span>
             </button>
             <button class="icon-btn" id="docsPdfBtn" title="Download PDF" aria-label="Download PDF">
-              <svg class="icon icon-download" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 20h14v-2H5v2zm7-18l-5.5 5.5h3.5V15h4V7.5H17.5L12 2z"/>
-              </svg>
+              <span class="pdf-label" aria-hidden="true">PDF</span>
             </button>
           </div>
         </div>
@@ -1555,6 +1585,11 @@
       key: 'sans',
       label: 'Neutral Sans',
       css: '"IBM Plex Sans","Source Sans 3","Segoe UI",system-ui,sans-serif'
+    },
+    {
+      key: 'titillium',
+      label: 'Titillium Web',
+      css: '"Titillium Web","Source Sans 3","Segoe UI",system-ui,sans-serif'
     },
     {
       key: 'grotesk',
@@ -1854,7 +1889,7 @@
     const docsVersionSelectEl = document.getElementById('docsVersionSelect');
     const docsGuideSelectEl = document.getElementById('docsGuideSelect');
     const docsEditActionsEl = document.getElementById('docsEditActions');
-    const docsFontsPanelEl = document.getElementById('docsFontsPanel');
+    const docsStyleCardEl = document.getElementById('docsStyleCard');
     const docsHeadingFontEl = document.getElementById('docsHeadingFont');
     const docsBodyFontEl = document.getElementById('docsBodyFont');
     const docsNewGuideBtn = document.getElementById('docsNewGuideBtn');
@@ -3220,7 +3255,7 @@
 		    setActionVisible(docsNewGuideBtn, canEditDocs);
 		    setActionVisible(docsNewSectionBtn, canEditDocs);
 		    if (docsEditActionsEl) docsEditActionsEl.style.display = canEditDocs ? '' : 'none';
-		    if (docsFontsPanelEl) docsFontsPanelEl.style.display = (isAdmin || isRedactor) ? '' : 'none';
+		    if (docsStyleCardEl) docsStyleCardEl.style.display = isAdmin ? '' : 'none';
 
 		    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
 		    if (!(isAdmin || isRedactor) && redactorPanel.classList.contains('visible')) closeAllModals();

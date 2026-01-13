@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from fpdf import FPDF
 
-from .config import DATASTORE_DIR
+from .config import DATASTORE_DIR, REPO_ROOT
 
 _IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
@@ -24,6 +24,18 @@ _PDF_FONT_MAP = {
     "slab": "Times",
     "mono": "Courier",
 }
+_CUSTOM_FONTS = {
+    "titillium": {
+        "family": "TitilliumWeb",
+        "files": {
+            "": "TitilliumWeb-Regular.ttf",
+            "B": "TitilliumWeb-Bold.ttf",
+            "I": "TitilliumWeb-Italic.ttf",
+            "BI": "TitilliumWeb-BoldItalic.ttf",
+        },
+    }
+}
+_FONT_DIR = REPO_ROOT / "backend" / "assets" / "fonts"
 
 
 def _sanitize_pdf_text(text: str) -> str:
@@ -59,10 +71,12 @@ def _wrap_code_line(line: str, max_len: int = 90) -> list[str]:
     return [line[i : i + max_len] for i in range(0, len(line), max_len)]
 
 
-def _resolve_pdf_font(name: str | None, *, default: str = "Helvetica") -> str:
+def _resolve_pdf_font(name: str | None, *, default: str = "Helvetica", custom: dict[str, str] | None = None) -> str:
     if not name:
         return default
     key = str(name).strip().lower()
+    if custom and key in custom:
+        return custom[key]
     if key in _PDF_FONT_MAP:
         return _PDF_FONT_MAP[key]
     if "serif" in key:
@@ -70,6 +84,27 @@ def _resolve_pdf_font(name: str | None, *, default: str = "Helvetica") -> str:
     if "mono" in key or "courier" in key:
         return "Courier"
     return "Helvetica"
+
+
+def _register_custom_fonts(pdf: FPDF) -> dict[str, str]:
+    registered: dict[str, str] = {}
+    if not _FONT_DIR.exists():
+        return registered
+    for key, meta in _CUSTOM_FONTS.items():
+        family = meta.get("family")
+        files = meta.get("files") or {}
+        if not family or "" not in files:
+            continue
+        regular_path = _FONT_DIR / files[""]
+        if not regular_path.exists():
+            continue
+        for style, filename in files.items():
+            path = _FONT_DIR / filename
+            if not path.exists():
+                continue
+            pdf.add_font(family, style=style, fname=str(path))
+        registered[key] = family
+    return registered
 
 
 def _normalize_heading_text(text: str) -> str:
@@ -171,9 +206,10 @@ def render_markdown_to_pdf(
     markdown = str(markdown or "")
     markdown = markdown.replace("\\r\\n", "\n").replace("\\n", "\n")
 
+    custom_fonts = _register_custom_fonts(pdf)
     content_width = pdf.w - pdf.l_margin - pdf.r_margin
-    heading_face = _resolve_pdf_font(heading_font, default="Helvetica")
-    body_face = _resolve_pdf_font(body_font, default="Helvetica")
+    heading_face = _resolve_pdf_font(heading_font, default="Helvetica", custom=custom_fonts)
+    body_face = _resolve_pdf_font(body_font, default="Helvetica", custom=custom_fonts)
 
     def write_heading(text: str, level: int) -> None:
         size = {1: 18, 2: 16, 3: 14, 4: 12, 5: 11, 6: 11}.get(level, 12)

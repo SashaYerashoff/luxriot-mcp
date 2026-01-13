@@ -858,7 +858,7 @@ def docs_style(ctx: AuthContext = Depends(resolve_auth)) -> DocsStyleResponse:
 
 @app.post("/docs/style", response_model=DocsStyleResponse)
 def docs_style_update(req: DocsStyleUpdateRequest, ctx: AuthContext = Depends(resolve_auth)) -> DocsStyleResponse:
-    require_role(ctx, {"admin", "redactor"})
+    require_role(ctx, {"admin"})
     style = _get_docs_style()
     heading = _normalize_font_value(req.heading_font)
     body = _normalize_font_value(req.body_font)
