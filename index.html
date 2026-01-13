@@ -191,6 +191,7 @@
     .btn.primary{background:rgba(63,163,124,.40);border-color:rgba(63,163,124,.55);}
     .btn.danger{background:rgba(216,92,92,.18);border-color:rgba(216,92,92,.35);}
     .btn.small{padding:8px 12px;border-radius:18px;font-size:11px;}
+    .btn.toggled{background:rgba(63,163,124,.32);border-color:rgba(63,163,124,.65);}
 
     /* Admin panel */
     .admin-grid{
@@ -273,6 +274,8 @@
       border-color:rgba(0,0,0,.12);
     }
     #docsPanel.light .docs-edit-preview th{background:rgba(0,0,0,.04);}
+    #docsPanel.nav-collapsed .docs-grid{grid-template-columns:1fr;}
+    #docsPanel.nav-collapsed .docs-nav{display:none;}
     #docsPanel.fullscreen{
       left:24px;
       right:24px;
@@ -364,33 +367,37 @@
 	    }
 	    #docsBreadcrumb{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 	    .docs-controls{display:flex;align-items:center;gap:10px;flex:0 0 auto;}
-	    .icon-btn{
-	      width:36px;height:36px;border-radius:999px;
-	      border:1px solid rgba(63,163,124,.30);
-	      background:rgba(63,163,124,.14);
-	      color:var(--text);
+    .icon-btn{
+      width:36px;height:36px;border-radius:999px;
+      border:1px solid rgba(63,163,124,.30);
+      background:rgba(63,163,124,.14);
+      color:var(--text);
 	      display:inline-flex;align-items:center;justify-content:center;
 	      cursor:pointer;
 	      padding:0;
 	    }
 	    .icon-btn:hover{background:rgba(63,163,124,.20);border-color:rgba(63,163,124,.45);}
-	    .icon-btn svg{width:18px;height:18px;fill:currentColor;opacity:.92;}
-	    .icon-btn .icon{display:none;}
-	    #docsPanel:not(.fullscreen) #docsFullscreenBtn .icon-enter{display:block;}
-	    #docsPanel.fullscreen #docsFullscreenBtn .icon-exit{display:block;}
-	    #docsPanel.light #docsThemeBtn .icon-moon{display:block;}
-	    #docsPanel:not(.light) #docsThemeBtn .icon-sun{display:block;}
-	    .docsPage{
-	      flex:1;
-	      min-height:0;
-	      overflow:auto;
-	      padding-right:10px;
-	      font-family:var(--docs-body-font);
-	      font-size:14px;
-	      line-height:1.6;
-	      color:var(--text);
-	      overflow-wrap:anywhere;
-	    }
+    .icon-btn svg{width:18px;height:18px;fill:currentColor;opacity:.92;}
+    .icon-btn .icon{display:none;}
+    #docsPanel:not(.fullscreen) #docsFullscreenBtn .icon-enter{display:block;}
+    #docsPanel.fullscreen #docsFullscreenBtn .icon-exit{display:block;}
+    #docsPanel.light #docsThemeBtn .icon-moon{display:block;}
+    #docsPanel:not(.light) #docsThemeBtn .icon-sun{display:block;}
+    #docsPanel.nav-collapsed #docsNavToggleBtn .icon-expand{display:block;}
+    #docsPanel:not(.nav-collapsed) #docsNavToggleBtn .icon-collapse{display:block;}
+    .docsPage{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding-right:10px;
+      font-family:var(--docs-body-font);
+      font-size:14px;
+      line-height:1.6;
+      color:var(--text);
+      overflow-wrap:anywhere;
+      font-variant-ligatures:none !important;
+      font-feature-settings:"liga" 0, "calt" 0, "clig" 0, "rlig" 0, "dlig" 0 !important;
+    }
     .docsPage p{margin:0 0 14px;}
     .docsPage p:last-child{margin-bottom:0;}
     .docsPage h1,.docsPage h2,.docsPage h3,.docsPage h4,.docsPage h5,.docsPage h6{
@@ -471,6 +478,8 @@
       font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
       font-size:12px;
       line-height:1.4;
+      font-variant-ligatures:none !important;
+      font-feature-settings:"liga" 0, "calt" 0, "clig" 0, "rlig" 0, "dlig" 0 !important;
     }
     .docs-edit-preview{
       min-height:0;
@@ -480,7 +489,13 @@
       border:1px solid var(--border);
       background:rgba(16,17,19,.35);
     }
-    .docs-edit-preview{font-family:var(--docs-body-font);font-size:14px;line-height:1.6;}
+    .docs-edit-preview{
+      font-family:var(--docs-body-font);
+      font-size:14px;
+      line-height:1.6;
+      font-variant-ligatures:none !important;
+      font-feature-settings:"liga" 0, "calt" 0, "clig" 0, "rlig" 0, "dlig" 0 !important;
+    }
     .docs-edit-preview p{margin:0 0 14px;}
     .docs-edit-preview p:last-child{margin-bottom:0;}
     .docs-edit-preview ul,.docs-edit-preview ol{margin:6px 0 10px 20px;padding:0;}
@@ -1402,12 +1417,16 @@
 
 	      <div class="card docs-content">
 	        <div class="docs-toolbar">
-	          <div class="tiny muted" id="docsBreadcrumb">Select a page…</div>
+          <div class="tiny muted" id="docsBreadcrumb">Select a page…</div>
           <div class="docs-controls">
+            <button class="icon-btn" id="docsNavToggleBtn" title="Toggle sidebar" aria-label="Toggle sidebar">
+              <span class="icon icon-collapse" aria-hidden="true">⟨</span>
+              <span class="icon icon-expand" aria-hidden="true">⟩</span>
+            </button>
             <button class="icon-btn" id="docsFullscreenBtn" title="Toggle fullscreen" aria-label="Toggle fullscreen">
-	              <svg class="icon icon-enter" viewBox="0 0 24 24" aria-hidden="true">
-	                <path d="M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 9h-3v2h5v-5h-2v3zm0-14V5h-5v2h3v3h2V5z"/>
-	              </svg>
+              <svg class="icon icon-enter" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 9h-3v2h5v-5h-2v3zm0-14V5h-5v2h3v3h2V5z"/>
+              </svg>
 	              <svg class="icon icon-exit" viewBox="0 0 24 24" aria-hidden="true">
 	                <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
 	              </svg>
@@ -1445,6 +1464,7 @@
             <button class="btn ghost small" data-insert="info">Info</button>
             <button class="btn ghost small" id="docsInsertLinkBtn">Link</button>
             <button class="btn ghost small" id="docsInsertImageBtn">Image</button>
+            <button class="btn ghost small" id="docsScrollLockBtn">LOCK SCROLL</button>
             <input id="docsImageInput" type="file" accept="image/*" style="display:none;">
           </div>
           <div class="docs-edit-body">
@@ -1552,6 +1572,8 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.1/dist/markdown-it.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it-container@3.0.0/dist/markdown-it-container.min.js"></script>
 <script>
   // Mobile viewport height fix (fallback for browsers without dvh).
   function setVhUnit(){
@@ -1902,6 +1924,7 @@
     const docsPageEl = document.getElementById('docsPage');
     const docsBreadcrumbEl = document.getElementById('docsBreadcrumb');
     const docsStatusEl = document.getElementById('docsStatus');
+    const docsNavToggleBtn = document.getElementById('docsNavToggleBtn');
     const docsFullscreenBtn = document.getElementById('docsFullscreenBtn');
     const docsThemeBtn = document.getElementById('docsThemeBtn');
     const docsEditBtn = document.getElementById('docsEditBtn');
@@ -1919,6 +1942,7 @@
     const docsInsertLinkBtn = document.getElementById('docsInsertLinkBtn');
     const docsInsertImageBtn = document.getElementById('docsInsertImageBtn');
     const docsImageInputEl = document.getElementById('docsImageInput');
+    const docsScrollLockBtn = document.getElementById('docsScrollLockBtn');
     const docsOkBtn = document.getElementById('docsOkBtn');
     const docsContentEl = document.querySelector('#docsPanel .docs-content');
 
@@ -2540,267 +2564,410 @@
 	    emptyState.style.display = visible ? 'flex' : 'none';
 	  }
 
-	  // ---------- Minimal safe Markdown renderer ----------
-	  function escapeHtml(s) {
-	    return String(s ?? '')
-	      .replace(/&/g, '&amp;')
-	      .replace(/</g, '&lt;')
-	      .replace(/>/g, '&gt;')
-	      .replace(/\"/g, '&quot;')
-	      .replace(/'/g, '&#39;');
-	  }
+	  // ---------- Markdown renderer ----------
+  function escapeHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
-	  function normalizeUrl(url) {
-	    const u = String(url || '').trim();
-	    if (!u) return '';
-	    if (/^(https?:|data:|blob:)/i.test(u)) return u;
-	    if (u.startsWith('/')) return apiBase + u;
-	    return u;
-	  }
+  function normalizeUrl(url) {
+    const u = String(url || '').trim();
+    if (!u) return '';
+    if (u.startsWith('#')) return u;
+    if (/^(https?:|data:|blob:)/i.test(u)) return u;
+    if (u.startsWith('/')) return apiBase + u;
+    return u;
+  }
 
-	  function mdInline(text) {
-	    const raw = String(text ?? '');
-	    const stash = [];
-	    const put = (html) => {
-	      const idx = stash.length;
-	      stash.push(String(html));
-	      return `\u0000${idx}\u0000`;
-	    };
+  function mdInline(text) {
+    const raw = String(text ?? '');
+    const stash = [];
+    const put = (html) => {
+      const idx = stash.length;
+      stash.push(String(html));
+      return `\u0000${idx}\u0000`;
+    };
 
-	    let s = raw;
+    let s = raw;
 
-	    // Images: ![alt](url)
-	    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, url) => {
-	      const src = normalizeUrl(url);
-	      if (!src) return '';
-	      return put(`<img src="${src}" alt="${escapeHtml(alt || '')}">`);
-	    });
+    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, url) => {
+      const src = normalizeUrl(url);
+      if (!src) return '';
+      return put(`<img src="${src}" alt="${escapeHtml(alt || '')}">`);
+    });
 
-	    // Links: [text](url)
-	    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
-	      const href = normalizeUrl(url);
-	      if (!href) return escapeHtml(label || '');
-	      return put(`<a href="${href}" target="_blank" rel="noreferrer">${escapeHtml(label || '')}</a>`);
-	    });
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
+      const href = normalizeUrl(url);
+      if (!href) return escapeHtml(label || '');
+      return put(`<a href="${href}" target="_blank" rel="noreferrer">${escapeHtml(label || '')}</a>`);
+    });
 
-	    // Inline code
-	    s = s.replace(/`([^`]+)`/g, (m, code) => put(`<code>${escapeHtml(code)}</code>`));
+    s = s.replace(/`([^`]+)`/g, (m, code) => put(`<code>${escapeHtml(code)}</code>`));
+    s = escapeHtml(s);
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/\[(\d{1,3})\]/g, '<span class="cite">[$1]</span>');
+    s = s.replace(/\n/g, '<br>');
+    s = s.replace(/\u0000(\d+)\u0000/g, (m, n) => stash[Number(n)] ?? '');
+    return s;
+  }
 
-	    // Escape remaining text
-	    s = escapeHtml(s);
+  function slugifyId(text) {
+    let s = String(text || '').toLowerCase().trim();
+    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1');
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+    s = s.replace(/`+/g, '');
+    s = s.replace(/[*_]+/g, '');
+    try { s = s.normalize('NFKD'); } catch (e) {}
+    s = s.replace(/[\u0300-\u036f]/g, '');
+    s = s.replace(/[^a-z0-9]+/g, '-');
+    s = s.replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return s || 'section';
+  }
 
-	    // Bold + italic (on escaped text)
-	    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-	    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  function renderMarkdownFallback(mdText, { addHeadingIds = false } = {}) {
+    const src = String(mdText || '').replace(/\r\n?/g, '\n');
+    const lines = src.split('\n');
+    let html = '';
+    let inCode = false;
+    let codeBuf = [];
+    let paraBuf = [];
+    let listTag = null;
+    let quoteBuf = [];
+    const usedHeadingIds = new Map();
 
-	    // Citation markers like [1] or [12]
-	    s = s.replace(/\[(\d{1,3})\]/g, '<span class="cite">[$1]</span>');
+    function splitTableRow(row) {
+      let s = String(row || '').trim();
+      if (s.startsWith('|')) s = s.slice(1);
+      if (s.endsWith('|')) s = s.slice(0, -1);
+      return s.split('|').map((c) => c.trim());
+    }
 
-	    // Line breaks inside a paragraph
-	    s = s.replace(/\n/g, '<br>');
+    function isTableSeparator(row) {
+      const cells = splitTableRow(row);
+      if (!cells.length) return false;
+      return cells.every((c) => {
+        const t = String(c || '').trim();
+        if (!t) return true;
+        return /^:?-+:?$/.test(t);
+      });
+    }
 
-	    // Restore stashed HTML
-	    s = s.replace(/\u0000(\d+)\u0000/g, (m, n) => stash[Number(n)] ?? '');
-	    return s;
-	  }
+    function flushParagraph() {
+      if (!paraBuf.length) return;
+      html += `<p>${mdInline(paraBuf.join('\n'))}</p>`;
+      paraBuf = [];
+    }
 
-		  function slugifyId(text) {
-		    let s = String(text || '').toLowerCase().trim();
-		    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1');
-		    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
-		    s = s.replace(/`+/g, '');
-		    s = s.replace(/[*_]+/g, '');
-		    try { s = s.normalize('NFKD'); } catch (e) {}
-		    s = s.replace(/[\u0300-\u036f]/g, '');
-		    s = s.replace(/[^a-z0-9]+/g, '-');
-		    s = s.replace(/-+/g, '-').replace(/^-|-$/g, '');
-		    return s || 'section';
-		  }
+    function closeList() {
+      if (!listTag) return;
+      html += `</${listTag}>`;
+      listTag = null;
+    }
 
-		  function renderMarkdown(mdText, { addHeadingIds = false } = {}) {
-		    const src = String(mdText || '').replace(/\r\n?/g, '\n');
-		    const lines = src.split('\n');
-		    let html = '';
-		    let inCode = false;
-		    let codeBuf = [];
-		    let paraBuf = [];
-		    let listTag = null; // 'ul' | 'ol' | null
-		    let quoteBuf = [];
-		    const usedHeadingIds = new Map();
+    function flushQuote() {
+      if (!quoteBuf.length) return;
+      const rawLines = quoteBuf.map((l) => l.replace(/^\s*>\s?/, ''));
+      const first = (rawLines[0] || '').trim();
+      const admon = first.match(/^\[!([A-Z]+)\]\s*(.*)$/i);
+      if (admon) {
+        const kind = String(admon[1] || 'note').toLowerCase();
+        const title = (admon[2] || admon[1] || 'Note').trim();
+        const bodyLines = rawLines.slice(1);
+        const bodyHtml = bodyLines.length
+          ? bodyLines.map((l) => `<p>${mdInline(l)}</p>`).join('')
+          : '';
+        html += `<div class="admonition ${escapeHtml(kind)}">`;
+        html += `<div class="admonition-title">${escapeHtml(title)}</div>`;
+        if (bodyHtml) html += `<div class="admonition-body">${bodyHtml}</div>`;
+        html += `</div>`;
+      } else {
+        const bodyHtml = rawLines.map((l) => `<p>${mdInline(l)}</p>`).join('');
+        html += `<blockquote>${bodyHtml}</blockquote>`;
+      }
+      quoteBuf = [];
+    }
 
-	    function splitTableRow(row) {
-	      let s = String(row || '').trim();
-	      if (s.startsWith('|')) s = s.slice(1);
-	      if (s.endsWith('|')) s = s.slice(0, -1);
-	      return s.split('|').map((c) => c.trim());
-	    }
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const fence = line.match(/^\s*```/);
+      if (fence) {
+        flushParagraph();
+        closeList();
+        if (inCode) {
+          html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`;
+          codeBuf = [];
+          inCode = false;
+        } else {
+          inCode = true;
+        }
+        continue;
+      }
 
-	    function isTableSeparator(row) {
-	      const cells = splitTableRow(row);
-	      if (!cells.length) return false;
-	      return cells.every((c) => {
-	        const t = String(c || '').trim();
-	        if (!t) return true;
-	        return /^:?-+:?$/.test(t);
-	      });
-	    }
+      if (inCode) {
+        codeBuf.push(line);
+        continue;
+      }
 
-		    function flushParagraph() {
-		      if (!paraBuf.length) return;
-		      html += `<p>${mdInline(paraBuf.join('\n'))}</p>`;
-		      paraBuf = [];
-		    }
+      const isQuote = /^\s*>\s?/.test(line);
+      if (isQuote) {
+        flushParagraph();
+        closeList();
+        quoteBuf.push(line);
+        continue;
+      }
+      if (quoteBuf.length) {
+        flushQuote();
+      }
 
-		    function closeList() {
-		      if (!listTag) return;
-		      html += `</${listTag}>`;
-		      listTag = null;
-		    }
+      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
+        flushParagraph();
+        closeList();
+        html += '<hr>';
+        continue;
+      }
 
-		    function flushQuote() {
-		      if (!quoteBuf.length) return;
-		      const rawLines = quoteBuf.map((l) => l.replace(/^\s*>\s?/, ''));
-		      const first = (rawLines[0] || '').trim();
-		      const admon = first.match(/^\[!([A-Z]+)\]\s*(.*)$/i);
-		      if (admon) {
-		        const kind = String(admon[1] || 'note').toLowerCase();
-		        const title = (admon[2] || admon[1] || 'Note').trim();
-		        const bodyLines = rawLines.slice(1);
-		        const bodyHtml = bodyLines.length
-		          ? bodyLines.map((l) => `<p>${mdInline(l)}</p>`).join('')
-		          : '';
-		        html += `<div class="admonition ${escapeHtml(kind)}">`;
-		        html += `<div class="admonition-title">${escapeHtml(title)}</div>`;
-		        if (bodyHtml) html += `<div class="admonition-body">${bodyHtml}</div>`;
-		        html += `</div>`;
-		      } else {
-		        const bodyHtml = rawLines.map((l) => `<p>${mdInline(l)}</p>`).join('');
-		        html += `<blockquote>${bodyHtml}</blockquote>`;
-		      }
-		      quoteBuf = [];
-		    }
+      if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+        flushParagraph();
+        closeList();
 
-	    for (let i = 0; i < lines.length; i++) {
-	      const line = lines[i];
-	      const fence = line.match(/^\s*```/);
-	      if (fence) {
-	        flushParagraph();
-	        closeList();
-	        if (inCode) {
-	          html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`;
-	          codeBuf = [];
-	          inCode = false;
-	        } else {
-	          inCode = true;
-	        }
-	        continue;
-	      }
+        const headCells = splitTableRow(line);
+        const bodyRows = [];
+        let j = i + 2;
+        while (j < lines.length) {
+          const rowLine = lines[j];
+          if (/^\s*$/.test(rowLine)) break;
+          if (!rowLine.includes('|')) break;
+          bodyRows.push(splitTableRow(rowLine));
+          j++;
+        }
 
-		      if (inCode) {
-		        codeBuf.push(line);
-		        continue;
-		      }
-		
-		      const isQuote = /^\s*>\s?/.test(line);
-		      if (isQuote) {
-		        flushParagraph();
-		        closeList();
-		        quoteBuf.push(line);
-		        continue;
-		      }
-		      if (quoteBuf.length) {
-		        flushQuote();
-		      }
+        html += '<table><thead><tr>';
+        html += headCells.map((c) => `<th>${mdInline(c)}</th>`).join('');
+        html += '</tr></thead>';
+        if (bodyRows.length) {
+          html += '<tbody>';
+          html += bodyRows
+            .map((r) => `<tr>${r.map((c) => `<td>${mdInline(c)}</td>`).join('')}</tr>`)
+            .join('');
+          html += '</tbody>';
+        }
+        html += '</table>';
+        i = j - 1;
+        continue;
+      }
 
-		      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
-		        flushParagraph();
-		        closeList();
-		        html += '<hr>';
-	        continue;
-	      }
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        flushParagraph();
+        closeList();
+        const lvl = Math.min(6, h[1].length);
+        const headingText = h[2].trim();
+        let idAttr = '';
+        if (addHeadingIds) {
+          const base = slugifyId(headingText);
+          const next = (usedHeadingIds.get(base) || 0) + 1;
+          usedHeadingIds.set(base, next);
+          const id = next > 1 ? `${base}-${next}` : base;
+          idAttr = ` id="${escapeHtml(id)}"`;
+        }
+        html += `<h${lvl}${idAttr}>${mdInline(headingText)}</h${lvl}>`;
+        continue;
+      }
 
-	      if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-	        flushParagraph();
-	        closeList();
+      const ol = line.match(/^\s*(\d+)\.\s+(.*)$/);
+      const ul = !ol ? line.match(/^\s*[-*]\s+(.*)$/) : null;
+      if (ol || ul) {
+        flushParagraph();
+        const tag = ol ? 'ol' : 'ul';
+        if (listTag !== tag) {
+          closeList();
+          html += `<${tag}>`;
+          listTag = tag;
+        }
+        const itemText = (ol ? ol[2] : ul[1]).trim();
+        html += `<li>${mdInline(itemText)}</li>`;
+        continue;
+      }
 
-	        const headCells = splitTableRow(line);
-	        const bodyRows = [];
-	        let j = i + 2;
-	        while (j < lines.length) {
-	          const rowLine = lines[j];
-	          if (/^\s*$/.test(rowLine)) break;
-	          if (!rowLine.includes('|')) break;
-	          bodyRows.push(splitTableRow(rowLine));
-	          j++;
-	        }
+      if (/^\s*$/.test(line)) {
+        flushParagraph();
+        closeList();
+        continue;
+      }
 
-	        html += '<table><thead><tr>';
-	        html += headCells.map((c) => `<th>${mdInline(c)}</th>`).join('');
-	        html += '</tr></thead>';
-	        if (bodyRows.length) {
-	          html += '<tbody>';
-	          html += bodyRows
-	            .map((r) => `<tr>${r.map((c) => `<td>${mdInline(c)}</td>`).join('')}</tr>`)
-	            .join('');
-	          html += '</tbody>';
-	        }
-	        html += '</table>';
-	        i = j - 1;
-	        continue;
-	      }
+      paraBuf.push(line);
+    }
 
-		      const h = line.match(/^(#{1,6})\s+(.*)$/);
-		      if (h) {
-		        flushParagraph();
-		        closeList();
-		        const lvl = Math.min(6, h[1].length);
-		        const headingText = h[2].trim();
-		        let idAttr = '';
-		        if (addHeadingIds) {
-		          const base = slugifyId(headingText);
-		          const next = (usedHeadingIds.get(base) || 0) + 1;
-		          usedHeadingIds.set(base, next);
-		          const id = next > 1 ? `${base}-${next}` : base;
-		          idAttr = ` id="${escapeHtml(id)}"`;
-		        }
-		        html += `<h${lvl}${idAttr}>${mdInline(headingText)}</h${lvl}>`;
-		        continue;
-		      }
+    if (inCode) {
+      html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`;
+    }
+    flushQuote();
+    flushParagraph();
+    closeList();
+    return html;
+  }
 
-	      const ol = line.match(/^\s*(\d+)\.\s+(.*)$/);
-	      const ul = !ol ? line.match(/^\s*[-*]\s+(.*)$/) : null;
-	      if (ol || ul) {
-	        flushParagraph();
-	        const tag = ol ? 'ol' : 'ul';
-	        if (listTag !== tag) {
-	          closeList();
-	          html += `<${tag}>`;
-	          listTag = tag;
-	        }
-	        const itemText = (ol ? ol[2] : ul[1]).trim();
-	        html += `<li>${mdInline(itemText)}</li>`;
-	        continue;
-	      }
+  function normalizeAdmonitions(mdText) {
+    const src = String(mdText || '').replace(/\r\n?/g, '\n');
+    const lines = src.split('\n');
+    const out = [];
+    let inCode = false;
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (trimmed.startsWith('```')) {
+        inCode = !inCode;
+        out.push(line);
+        i += 1;
+        continue;
+      }
+      if (inCode) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
+      const match = line.match(/^\s*>\s*\[!(TIP|INFO|WARNING|NOTE)\]\s*(.*)$/i);
+      if (!match) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
+      const kind = String(match[1]).toLowerCase();
+      const title = String(match[2] || '').trim();
+      out.push(`::: ${kind}${title ? ` ${title}` : ''}`);
+      i += 1;
+      while (i < lines.length) {
+        const next = lines[i];
+        if (/^\s*>\s?/.test(next)) {
+          out.push(next.replace(/^\s*>\s?/, ''));
+          i += 1;
+          continue;
+        }
+        break;
+      }
+      out.push(':::');
+    }
+    return out.join('\n');
+  }
 
-		      if (/^\s*$/.test(line)) {
-		        flushParagraph();
-		        closeList();
-		        continue;
-		      }
+  function wrapCitations(html) {
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const citeRe = /\[(\d{1,3})\]/g;
+    nodes.forEach((node) => {
+      const parent = node.parentElement;
+      if (!parent || parent.tagName === 'CODE' || parent.tagName === 'PRE') return;
+      const text = node.nodeValue || '';
+      if (!citeRe.test(text)) return;
+      citeRe.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      let m;
+      while ((m = citeRe.exec(text)) !== null) {
+        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const span = document.createElement('span');
+        span.className = 'cite';
+        span.textContent = `[${m[1]}]`;
+        frag.appendChild(span);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+    });
+    return root.innerHTML;
+  }
 
-		      paraBuf.push(line);
-		    }
+  function createMarkdownRenderer() {
+    if (typeof window.markdownit !== 'function') return null;
+    const md = window.markdownit({ html: false, linkify: false, breaks: true });
+    const container = window.markdownitContainer;
+    if (typeof container === 'function') {
+      const addContainer = (name, defaultTitle) => {
+        md.use(container, name, {
+          render(tokens, idx) {
+            const token = tokens[idx];
+            if (token.nesting === 1) {
+              const info = String(token.info || '').trim();
+              const parts = info.split(/\s+/);
+              const title = parts.slice(1).join(' ').trim() || defaultTitle;
+              return `<div class="admonition ${name}"><div class="admonition-title">${escapeHtml(title)}</div><div class="admonition-body">`;
+            }
+            return '</div></div>';
+          },
+        });
+      };
+      addContainer('tip', 'Tip');
+      addContainer('info', 'Info');
+      addContainer('warning', 'Warning');
+      addContainer('note', 'Note');
+    }
+    const defaultHeading = md.renderer.rules.heading_open || function (tokens, idx, options, env, self) {
+      return self.renderToken(tokens, idx, options);
+    };
+    md.renderer.rules.heading_open = (tokens, idx, options, env, self) => {
+      if (env && env.addHeadingIds) {
+        const textToken = tokens[idx + 1];
+        if (textToken && textToken.type === 'inline') {
+          let id = slugifyId(textToken.content || '');
+          const used = env.usedHeadingIds || new Map();
+          const count = (used.get(id) || 0) + 1;
+          used.set(id, count);
+          if (count > 1) id = `${id}-${count}`;
+          tokens[idx].attrSet('id', id);
+          env.usedHeadingIds = used;
+        }
+      }
+      return defaultHeading(tokens, idx, options, env, self);
+    };
+    const defaultImage = md.renderer.rules.image || function (tokens, idx, options, env, self) {
+      return self.renderToken(tokens, idx, options);
+    };
+    md.renderer.rules.image = (tokens, idx, options, env, self) => {
+      const token = tokens[idx];
+      const src = token.attrGet('src');
+      const norm = normalizeUrl(src || '');
+      if (norm) token.attrSet('src', norm);
+      token.attrSet('loading', 'lazy');
+      return defaultImage(tokens, idx, options, env, self);
+    };
+    const defaultLink = md.renderer.rules.link_open || function (tokens, idx, options, env, self) {
+      return self.renderToken(tokens, idx, options);
+    };
+    md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+      const token = tokens[idx];
+      const href = token.attrGet('href') || '';
+      const norm = normalizeUrl(href);
+      if (norm) token.attrSet('href', norm);
+      token.attrSet('target', '_blank');
+      token.attrSet('rel', 'noreferrer');
+      return defaultLink(tokens, idx, options, env, self);
+    };
+    return md;
+  }
 
-		    if (inCode) {
-		      html += `<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`;
-		    }
-		    flushQuote();
-		    flushParagraph();
-		    closeList();
-		    return html;
-		  }
+  const markdownRenderer = createMarkdownRenderer();
 
-	  function buildChunkImageMap(contextChunks) {
+  function renderMarkdown(mdText, { addHeadingIds = false } = {}) {
+    if (!markdownRenderer) {
+      return renderMarkdownFallback(mdText, { addHeadingIds });
+    }
+    const env = { addHeadingIds: Boolean(addHeadingIds), usedHeadingIds: new Map() };
+    const normalized = normalizeAdmonitions(mdText || '');
+    let html = markdownRenderer.render(normalized, env);
+    html = wrapCitations(html);
+    return html;
+  }
+
+  function buildChunkImageMap(contextChunks) {
 	    const map = new Map();
 	    if (!Array.isArray(contextChunks)) return map;
 	    contextChunks.forEach((chunk) => {
@@ -3393,7 +3560,12 @@
     editing: false,
     edit: null,
     editDirty: false,
+    navCollapsed: false,
+    scrollLock: false,
   };
+
+  const DOCS_NAV_STORAGE_KEY = 'luxriot_docs_nav';
+  let docsScrollSyncing = false;
 
   function setDocsStatus(text, { error = false } = {}) {
     if (!docsStatusEl) return;
@@ -3414,6 +3586,45 @@
     if (pageId) p.set('page', String(pageId));
     if (anchor) p.set('anchor', String(anchor));
     return `#${p.toString()}`;
+  }
+
+  function setDocsNavCollapsed(collapsed, { persist = true } = {}) {
+    docsState.navCollapsed = Boolean(collapsed);
+    if (docsPanel) docsPanel.classList.toggle('nav-collapsed', docsState.navCollapsed);
+    if (docsNavToggleBtn) {
+      docsNavToggleBtn.setAttribute('aria-pressed', docsState.navCollapsed ? 'true' : 'false');
+    }
+    if (persist) {
+      try {
+        localStorage.setItem(DOCS_NAV_STORAGE_KEY, docsState.navCollapsed ? 'collapsed' : 'expanded');
+      } catch (e) {}
+    }
+  }
+
+  function initDocsNavState() {
+    let collapsed = false;
+    try {
+      collapsed = localStorage.getItem(DOCS_NAV_STORAGE_KEY) === 'collapsed';
+    } catch (e) {}
+    setDocsNavCollapsed(collapsed, { persist: false });
+  }
+
+  function setDocsScrollLock(enabled) {
+    docsState.scrollLock = Boolean(enabled);
+    if (docsScrollLockBtn) {
+      docsScrollLockBtn.classList.toggle('toggled', docsState.scrollLock);
+      docsScrollLockBtn.textContent = docsState.scrollLock ? 'UNLOCK SCROLL' : 'LOCK SCROLL';
+    }
+  }
+
+  function syncDocsScroll(fromEl, toEl) {
+    if (!fromEl || !toEl || docsScrollSyncing) return;
+    const fromMax = fromEl.scrollHeight - fromEl.clientHeight;
+    const toMax = toEl.scrollHeight - toEl.clientHeight;
+    const ratio = fromMax > 0 ? fromEl.scrollTop / fromMax : 0;
+    docsScrollSyncing = true;
+    toEl.scrollTop = ratio * (toMax > 0 ? toMax : 0);
+    docsScrollSyncing = false;
   }
 
 	  function parseDocsHash() {
@@ -3895,6 +4106,14 @@
 	    docsState.editDirty = true;
 	    updateDocsEditPreview();
 	  });
+	  docsEditTextEl?.addEventListener('scroll', () => {
+	    if (!docsState.scrollLock) return;
+	    syncDocsScroll(docsEditTextEl, docsEditPreviewEl);
+	  });
+	  docsEditPreviewEl?.addEventListener('scroll', () => {
+	    if (!docsState.scrollLock) return;
+	    syncDocsScroll(docsEditPreviewEl, docsEditTextEl);
+	  });
 
 	  async function saveDocsEdit(status) {
 	    const page = docsState.page;
@@ -4277,6 +4496,8 @@
 	  });
 	  docsHeadingFontEl?.addEventListener('change', () => saveDocsStyle());
 	  docsBodyFontEl?.addEventListener('change', () => saveDocsStyle());
+	  docsNavToggleBtn?.addEventListener('click', () => setDocsNavCollapsed(!docsState.navCollapsed));
+	  docsScrollLockBtn?.addEventListener('click', () => setDocsScrollLock(!docsState.scrollLock));
   docsSearchInputEl?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -5102,6 +5323,10 @@
       const t = localStorage.getItem('luxriot_docs_theme') || 'dark';
       setDocsTheme(t);
     } catch (e) {}
+  })();
+  (function initDocsNav() {
+    initDocsNavState();
+    setDocsScrollLock(false);
   })();
 </script>
 </body>

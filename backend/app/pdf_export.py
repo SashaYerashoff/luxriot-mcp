@@ -5,6 +5,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fpdf import FPDF
+from markdown_it import MarkdownIt
+from mdit_py_plugins.container import container_plugin
 
 from .config import DATASTORE_DIR, REPO_ROOT
 
@@ -36,10 +38,200 @@ _CUSTOM_FONTS = {
     }
 }
 _FONT_DIR = REPO_ROOT / "backend" / "assets" / "fonts"
+_ASCII_REPLACEMENTS = {
+    "\u00a0": " ",
+    "\u2007": " ",
+    "\u2009": " ",
+    "\u200b": "",
+    "\u2010": "-",
+    "\u2011": "-",
+    "\u2012": "-",
+    "\u2013": "-",
+    "\u2014": "--",
+    "\u2015": "--",
+    "\u2212": "-",
+    "\u2026": "...",
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201c": "\"",
+    "\u201d": "\"",
+    "\u00b7": "*",
+    "\u2022": "*",
+    "\u2190": "<-",
+    "\u2192": "->",
+    "\u2194": "<->",
+    "\u21d0": "<=",
+    "\u21d2": "=>",
+    "\u21d4": "<=>",
+}
 
 
-def _sanitize_pdf_text(text: str) -> str:
-    return text.encode("latin-1", "replace").decode("latin-1")
+def _normalize_ascii(text: str) -> str:
+    out = text
+    for key, val in _ASCII_REPLACEMENTS.items():
+        out = out.replace(key, val)
+    return out
+
+
+def _sanitize_pdf_text(text: str, *, allow_unicode: bool) -> str:
+    if allow_unicode:
+        return text
+    cleaned = _normalize_ascii(text)
+    return cleaned.encode("latin-1", "replace").decode("latin-1")
+
+
+def _normalize_admonitions(markdown: str) -> str:
+    lines = str(markdown or "").splitlines()
+    out: list[str] = []
+    in_code = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            out.append(line)
+            i += 1
+            continue
+        if in_code:
+            out.append(line)
+            i += 1
+            continue
+        match = re.match(r"^\s*>\s*\[!(TIP|INFO|WARNING|NOTE)\]\s*(.*)$", line, re.IGNORECASE)
+        if not match:
+            out.append(line)
+            i += 1
+            continue
+        kind = match.group(1).lower()
+        title = (match.group(2) or "").strip()
+        out.append(f"::: {kind}{(' ' + title) if title else ''}")
+        i += 1
+        while i < len(lines):
+            nxt = lines[i]
+            if re.match(r"^\s*>\s?", nxt):
+                out.append(re.sub(r"^\s*>\s?", "", nxt))
+                i += 1
+                continue
+            break
+        out.append(":::")
+    return "\n".join(out)
+
+
+def _build_markdown_parser() -> MarkdownIt:
+    md = MarkdownIt("commonmark", {"html": False, "breaks": True})
+    md.enable("table")
+    for kind in ("tip", "info", "warning", "note"):
+        md.use(container_plugin, kind)
+    return md
+
+
+_MD_PARSER: MarkdownIt | None = None
+
+
+def _get_markdown_parser() -> MarkdownIt:
+    global _MD_PARSER
+    if _MD_PARSER is None:
+        _MD_PARSER = _build_markdown_parser()
+    return _MD_PARSER
+
+
+def _inline_text(token, *, keep_linebreaks: bool = False, skip_images: bool = False) -> str:
+    if not token:
+        return ""
+    if token.type != "inline":
+        return token.content or ""
+    if not token.children:
+        return token.content or ""
+    parts: list[str] = []
+    for child in token.children:
+        if child.type == "text":
+            parts.append(child.content)
+        elif child.type == "code_inline":
+            parts.append(child.content)
+        elif child.type == "softbreak":
+            parts.append("\n" if keep_linebreaks else " ")
+        elif child.type == "hardbreak":
+            parts.append("\n")
+        elif child.type == "image":
+            if skip_images:
+                continue
+            parts.append(child.content or "")
+    return "".join(parts)
+
+
+def _list_start(token) -> int:
+    if not token or not token.attrs:
+        return 1
+    for key, val in token.attrs:
+        if key == "start":
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return 1
+    return 1
+
+
+def _tokens_to_lines(tokens: list) -> list[str]:
+    lines: list[str] = []
+    list_stack: list[dict[str, int | str]] = []
+    item_stack: list[dict[str, bool]] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        t = tok.type
+        if t in {"bullet_list_open", "ordered_list_open"}:
+            list_stack.append(
+                {
+                    "type": "ol" if t.startswith("ordered") else "ul",
+                    "index": _list_start(tok),
+                }
+            )
+            i += 1
+            continue
+        if t in {"bullet_list_close", "ordered_list_close"}:
+            if list_stack:
+                list_stack.pop()
+            i += 1
+            continue
+        if t == "list_item_open":
+            item_stack.append({"first": True})
+            i += 1
+            continue
+        if t == "list_item_close":
+            if item_stack:
+                item_stack.pop()
+            i += 1
+            continue
+        if t == "paragraph_open":
+            inline = tokens[i + 1] if i + 1 < len(tokens) else None
+            text = _inline_text(inline, skip_images=True).strip()
+            if text:
+                if list_stack and item_stack:
+                    top = list_stack[-1]
+                    item = item_stack[-1]
+                    if top["type"] == "ol":
+                        prefix = f"{top['index']}."
+                    else:
+                        prefix = "-"
+                    if item["first"]:
+                        item["first"] = False
+                        if top["type"] == "ol":
+                            top["index"] = int(top["index"]) + 1
+                        line = f"{prefix} {text}".strip()
+                    else:
+                        line = text
+                    lines.append(line)
+                else:
+                    lines.append(text)
+            i += 3
+            continue
+        if t in {"fence", "code_block"}:
+            if tok.content:
+                lines.extend([ln for ln in tok.content.splitlines() if ln.strip()])
+            i += 1
+            continue
+        i += 1
+    return lines
 
 
 def _normalize_inline(text: str) -> str:
@@ -201,8 +393,6 @@ def render_markdown_to_pdf(
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-    pdf.set_title(_sanitize_pdf_text(title))
-
     markdown = str(markdown or "")
     markdown = markdown.replace("\\r\\n", "\n").replace("\\n", "\n")
 
@@ -210,12 +400,16 @@ def render_markdown_to_pdf(
     content_width = pdf.w - pdf.l_margin - pdf.r_margin
     heading_face = _resolve_pdf_font(heading_font, default="Helvetica", custom=custom_fonts)
     body_face = _resolve_pdf_font(body_font, default="Helvetica", custom=custom_fonts)
+    custom_values = set(custom_fonts.values())
+    allow_unicode_heading = heading_face in custom_values
+    allow_unicode_body = body_face in custom_values
+    pdf.set_title(_sanitize_pdf_text(title, allow_unicode=allow_unicode_heading))
 
     def write_heading(text: str, level: int) -> None:
         size = {1: 18, 2: 16, 3: 14, 4: 12, 5: 11, 6: 11}.get(level, 12)
         pdf.set_font(heading_face, "B", size)
         pdf.set_x(pdf.l_margin)
-        safe = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(text)))
+        safe = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(text)), allow_unicode=allow_unicode_heading)
         pdf.multi_cell(0, 8, safe)
         pdf.ln(1)
         pdf.set_font(body_face, "", 11)
@@ -225,14 +419,18 @@ def render_markdown_to_pdf(
             return
         pdf.set_font(body_face, "", 11)
         pdf.set_x(pdf.l_margin)
-        safe = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(text)))
+        safe = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(text)), allow_unicode=allow_unicode_body)
         pdf.multi_cell(0, 6, safe)
         pdf.ln(1)
 
-    def write_list_item(text: str, prefix: str) -> None:
+    def write_list_item(text: str, prefix: str, *, indent: float = 0.0, continuation: bool = False) -> None:
         pdf.set_font(body_face, "", 11)
-        pdf.set_x(pdf.l_margin)
-        safe = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(f"{prefix} {text}".strip())))
+        pdf.set_x(pdf.l_margin + indent)
+        bullet = f"{prefix} " if prefix and not continuation else ""
+        safe = _sanitize_pdf_text(
+            _split_long_tokens(_normalize_inline(f"{bullet}{text}".strip())),
+            allow_unicode=allow_unicode_body,
+        )
         pdf.multi_cell(0, 6, safe)
 
     def write_code_block(lines: list[str]) -> None:
@@ -240,20 +438,20 @@ def render_markdown_to_pdf(
         for ln in lines:
             for chunk in _wrap_code_line(ln):
                 pdf.set_x(pdf.l_margin)
-                pdf.multi_cell(0, 4, _sanitize_pdf_text(chunk))
+                pdf.multi_cell(0, 4, _sanitize_pdf_text(chunk, allow_unicode=False))
         pdf.ln(1)
         pdf.set_font(body_face, "", 11)
 
     def write_blockquote(lines: list[str]) -> None:
         if not lines:
             return
-        text = " ".join(s.strip() for s in lines if s.strip())
+        text = "\n".join(s.strip() for s in lines if s.strip())
         if not text:
             return
         pdf.set_font(body_face, "I", 10)
         pdf.set_text_color(120, 120, 120)
         pdf.set_x(pdf.l_margin)
-        safe = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(text)))
+        safe = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(text)), allow_unicode=allow_unicode_body)
         pdf.multi_cell(0, 5, safe)
         pdf.ln(1)
         pdf.set_text_color(0, 0, 0)
@@ -276,11 +474,11 @@ def render_markdown_to_pdf(
         start_y = pdf.get_y()
         text_width = content_width - padding_x * 2
         line_height = 6
-        safe_title = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(title_text)))
+        safe_title = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(title_text)), allow_unicode=allow_unicode_body)
         title_lines = pdf.multi_cell(text_width, line_height, safe_title, split_only=True)
         body_lines = []
         if body:
-            safe_body = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(body)))
+            safe_body = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(body)), allow_unicode=allow_unicode_body)
             body_lines = pdf.multi_cell(text_width, line_height, safe_body, split_only=True)
         total_lines = max(1, len(title_lines)) + (len(body_lines) if body_lines else 0)
         total_height = total_lines * line_height + padding_y * 2
@@ -318,7 +516,7 @@ def render_markdown_to_pdf(
             split_cells = []
             max_lines = 1
             for cell in cells:
-                text = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(cell)))
+                text = _sanitize_pdf_text(_split_long_tokens(_normalize_inline(cell)), allow_unicode=allow_unicode_body)
                 lines = pdf.multi_cell(col_width, line_height, text, split_only=True)
                 if not lines:
                     lines = [""]
@@ -349,136 +547,184 @@ def render_markdown_to_pdf(
             pdf.ln(1)
         except Exception:
             pdf.set_font(body_face, "", 10)
-            pdf.multi_cell(0, 5, _sanitize_pdf_text(f"[image omitted: {path.name}]"))
+            pdf.multi_cell(0, 5, _sanitize_pdf_text(f"[image omitted: {path.name}]", allow_unicode=allow_unicode_body))
             pdf.ln(1)
 
     first_heading = _first_heading_text(markdown)
     if title and not _headings_match(title, first_heading):
         write_heading(title, 1)
 
-    lines = markdown.splitlines()
-    in_code = False
-    para: list[str] = []
-    code: list[str] = []
+    parser = _get_markdown_parser()
+    normalized = _normalize_admonitions(markdown)
+    tokens = parser.parse(normalized)
+    list_stack: list[dict[str, int | str]] = []
+    item_stack: list[dict[str, bool]] = []
+    indent_step = 6.0
 
-    def flush_paragraph() -> None:
-        nonlocal para
-        if not para:
-            return
-        text = " ".join(s.strip() for s in para if s.strip())
-        para = []
-        if text:
-            write_paragraph(text)
+    def list_prefix() -> str:
+        if not list_stack:
+            return "-"
+        top = list_stack[-1]
+        if top["type"] == "ol":
+            return f"{top['index']}."
+        return "•"
 
-    def flush_code() -> None:
-        nonlocal code
-        if not code:
-            return
-        write_code_block(code)
-        code = []
+    def list_indent() -> float:
+        return indent_step * max(0, len(list_stack) - 1)
+
+    def inline_images(token) -> list[str]:
+        out: list[str] = []
+        if not token or not token.children:
+            return out
+        for child in token.children:
+            if child.type != "image":
+                continue
+            attrs = dict(child.attrs or [])
+            src = attrs.get("src")
+            if src:
+                out.append(src)
+        return out
+
+    def parse_block(start_idx: int, open_type: str, close_type: str) -> tuple[list, int]:
+        depth = 0
+        i = start_idx
+        if tokens[i].type == open_type:
+            depth = 1
+            i += 1
+        inner_start = i
+        while i < len(tokens):
+            t = tokens[i].type
+            if t == open_type:
+                depth += 1
+            elif t == close_type:
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        inner = tokens[inner_start:i]
+        return inner, i + 1
+
+    def parse_table(start_idx: int) -> tuple[list[list[str]], int]:
+        rows: list[list[str]] = []
+        i = start_idx + 1
+        current_row: list[str] | None = None
+        cell_text = ""
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok.type == "table_close":
+                break
+            if tok.type == "tr_open":
+                current_row = []
+            elif tok.type in {"th_open", "td_open"}:
+                cell_text = ""
+            elif tok.type == "inline" and current_row is not None:
+                cell_text = _inline_text(tok, skip_images=True).strip()
+            elif tok.type in {"th_close", "td_close"} and current_row is not None:
+                current_row.append(cell_text)
+            elif tok.type == "tr_close" and current_row is not None:
+                rows.append(current_row)
+                current_row = None
+            i += 1
+        return rows, i + 1
 
     i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.strip().startswith("```"):
-            if in_code:
-                flush_code()
-                in_code = False
-            else:
-                flush_paragraph()
-                in_code = True
-            i += 1
-            continue
-        if in_code:
-            code.append(line)
-            i += 1
-            continue
-        if not line.strip():
-            flush_paragraph()
-            i += 1
+    while i < len(tokens):
+        tok = tokens[i]
+        t = tok.type
+
+        if t == "heading_open":
+            level = int(tok.tag[1]) if tok.tag and tok.tag.startswith("h") else 2
+            inline = tokens[i + 1] if i + 1 < len(tokens) else None
+            text = _inline_text(inline, skip_images=True).strip()
+            if text:
+                write_heading(text, level)
+            i += 3
             continue
 
-        if line.lstrip().startswith(">"):
-            flush_paragraph()
-            quote_lines: list[str] = []
-            while i < len(lines) and lines[i].lstrip().startswith(">"):
-                chunk = lines[i].lstrip()[1:]
-                if chunk.startswith(" "):
-                    chunk = chunk[1:]
-                quote_lines.append(chunk)
-                i += 1
-            if quote_lines:
-                first = quote_lines[0].strip()
-                admon = _ADMONITION_RE.match(first)
-                if admon:
-                    kind = admon.group(1).lower()
-                    title_text = admon.group(2).strip() or kind.title()
-                    write_admonition(kind, title_text, quote_lines[1:])
-                else:
-                    write_blockquote(quote_lines)
+        if t in {"bullet_list_open", "ordered_list_open"}:
+            list_stack.append(
+                {
+                    "type": "ol" if t.startswith("ordered") else "ul",
+                    "index": _list_start(tok),
+                }
+            )
+            i += 1
             continue
-
-        if _looks_like_table_row(line):
-            j = i
-            rows: list[list[str]] = []
-            while j < len(lines):
-                raw = lines[j]
-                if not raw.strip():
-                    j += 1
-                    continue
-                if not _looks_like_table_row(raw):
-                    break
-                if _is_table_separator(raw):
-                    j += 1
-                    continue
-                cells = _split_table_row(raw)
-                if cells and any(c.strip() for c in cells):
-                    rows.append(cells)
-                j += 1
-            if len(rows) >= 2:
-                flush_paragraph()
-                write_table(rows)
-                i = j
-                continue
-
-        heading = _HEADING_RE.match(line)
-        if heading:
-            flush_paragraph()
-            level = len(heading.group(1))
-            text = heading.group(2).strip()
-            write_heading(text, level)
+        if t in {"bullet_list_close", "ordered_list_close"}:
+            if list_stack:
+                list_stack.pop()
+            pdf.ln(1)
+            i += 1
+            continue
+        if t == "list_item_open":
+            item_stack.append({"first": True})
+            i += 1
+            continue
+        if t == "list_item_close":
+            if item_stack:
+                item_stack.pop()
             i += 1
             continue
 
-        img_matches = list(_IMG_RE.finditer(line))
-        if img_matches:
-            flush_paragraph()
-            for match in img_matches:
-                path = _resolve_image_path(match.group(1), version=version)
+        if t == "paragraph_open":
+            inline = tokens[i + 1] if i + 1 < len(tokens) else None
+            for src in inline_images(inline):
+                path = _resolve_image_path(src, version=version)
                 if path:
                     write_image(path)
-            remainder = _IMG_RE.sub("", line).strip()
-            if remainder:
-                para.append(remainder)
+            text = _inline_text(inline, skip_images=True).strip()
+            if text:
+                if list_stack and item_stack:
+                    item = item_stack[-1]
+                    prefix = ""
+                    if item["first"]:
+                        prefix = list_prefix()
+                        item["first"] = False
+                        if list_stack[-1]["type"] == "ol":
+                            list_stack[-1]["index"] = int(list_stack[-1]["index"]) + 1
+                    write_list_item(
+                        text,
+                        prefix,
+                        indent=list_indent(),
+                        continuation=not prefix,
+                    )
+                else:
+                    write_paragraph(text)
+            i += 3
+            continue
+
+        if t in {"fence", "code_block"}:
+            lines = tok.content.splitlines() if tok.content else []
+            write_code_block(lines)
             i += 1
             continue
 
-        list_match = _LIST_RE.match(line)
-        if list_match:
-            flush_paragraph()
-            bullet = list_match.group(1)
-            text = list_match.group(2).strip()
-            prefix = bullet if bullet.endswith(".") else "-"
-            write_list_item(text, prefix)
-            i += 1
+        if t == "table_open":
+            rows, next_i = parse_table(i)
+            if rows:
+                write_table(rows)
+            i = next_i
             continue
 
-        para.append(line)
+        if t == "blockquote_open":
+            inner, next_i = parse_block(i, "blockquote_open", "blockquote_close")
+            lines = _tokens_to_lines(inner)
+            write_blockquote(lines)
+            i = next_i
+            continue
+
+        if t.startswith("container_") and t.endswith("_open"):
+            kind = t[len("container_") : -len("_open")]
+            info = str(tok.info or "").strip()
+            parts = info.split(None, 1)
+            title_text = parts[1].strip() if len(parts) > 1 else kind.title()
+            inner, next_i = parse_block(i, t, f"container_{kind}_close")
+            lines = _tokens_to_lines(inner)
+            write_admonition(kind, title_text, lines)
+            i = next_i
+            continue
+
         i += 1
-
-    if in_code:
-        flush_code()
-    flush_paragraph()
 
     output = pdf.output(dest="S")
     if isinstance(output, (bytes, bytearray)):

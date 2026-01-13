@@ -5,3 +5,5 @@ pydantic
 beautifulsoup4
 markdownify
 fpdf2
+markdown-it-py
+mdit-py-plugins
