@@ -31,7 +31,7 @@ from .auth import (
     resolve_auth,
     require_role,
 )
-from .config import APP_DB_PATH, DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
+from .config import APP_DB_PATH, APP_VERSION, DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
 from .datastore_search import SearchEngine
 from .docs_store import DocsStore
 from .lmstudio import LMStudioError, chat_completion, chat_completion_stream
@@ -632,6 +632,7 @@ def health() -> dict[str, Any]:
     engine = _get_search_engine(DEFAULT_VERSION)
     return {
         "status": "ok",
+        "app_version": APP_VERSION,
         "docs_version": DEFAULT_VERSION,
         "datastore_ready": engine.is_ready(),
         "embeddings_ready": engine.embeddings_ready() if engine.is_ready() else False,

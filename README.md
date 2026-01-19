@@ -27,9 +27,16 @@ To serve on your LAN, run:
 uvicorn backend.app.main:app --host 0.0.0.0 --reload --port 8000
 ```
 
+## Versioning
+
+- App version is stored in `VERSION` (default format: `Luxriot SA 0.x.y`).
+- `/health` now returns `app_version` so the UI can display it.
+- You can override the version with `LUXRIOT_APP_VERSION`.
+
 ## Re-index from UI
 
 Open `Administrator tools → Docs` and click `RE-INDEX` to rebuild `datastore/evo_1_32/` from the docs folder.
+Use `REFRESH` to reindex from the current datastore (ingested docs + published edits only).
 
 Notes:
 - If embeddings ingestion is unstable (LM Studio returns `400 {"error":"Model has unloaded or crashed.."}`), lower `Emb max chars` (try `448` or `384`) and/or lower `Emb batch` (try `4`).
@@ -60,18 +67,21 @@ In `Administrator tools → Web`, enable web tools, then:
 ## Docs editor (alpha)
 
 - Open `Documentation` → select a page → click the pencil icon to enter edit mode.
-- Roles: `admin` + `redactor` can publish; `support` can save drafts; `client` + `anonymous` are read-only.
+- Access is permission-based: `docs_edit` enables editing, `docs_publish` enables publishing. Admin can toggle these per user.
+- If a user has `docs_edit` but not `docs_publish`, they can submit a publish request for admin approval.
 - Upload screenshots in edit mode (Image button) to store under `datastore/<version>/assets/user/...`.
 
 Auth endpoints:
 - `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`
 - Admin: `GET/POST/PATCH /auth/users` (supports `disabled: true/false`), `POST /auth/users/{id}/password/reset`
 - Self: `POST /auth/password/change`
+- Publish requests: `GET /admin/publish-requests`, `POST /docs/page/{doc_id}/{page_id}/publish/request`, `POST /admin/publish-requests/{doc_id}/{page_id}/approve|reject`
 
 ## Environment variables
 
 - `LMSTUDIO_BASE_URL` (default `http://localhost:1234`)
 - `LMSTUDIO_MODEL` (optional; auto-detected if unset)
+- `LUXRIOT_APP_VERSION` (overrides `VERSION`)
 - `LUXRIOT_DOCS_VERSION` (default `evo_1_32`)
 - `LUXRIOT_APP_DB_PATH` (default `backend/data/app.sqlite`)
 

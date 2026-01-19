@@ -2007,6 +2007,7 @@
 	  }
 
 	  // ---------- Admin settings UI ----------
+	  const appVersionEl = document.getElementById('appVersion');
 	  const adminApiBaseEl = document.getElementById('adminApiBase');
 	  const adminDocsVersionEl = document.getElementById('adminDocsVersion');
 		  const adminDatastoreReadyEl = document.getElementById('adminDatastoreReady');
@@ -2661,21 +2662,24 @@
 			  adminEditUserSaveBtnEl?.addEventListener('click', () => saveAdminUserEdits());
 			  adminEditUserClearBtnEl?.addEventListener('click', () => clearAdminUserSelection());
 
+		  async function loadHealthInfo() {
+		    try {
+		      const health = await apiJson('/health');
+		      if (appVersionEl && health?.app_version) appVersionEl.textContent = health.app_version;
+		      if (adminDocsVersionEl) adminDocsVersionEl.textContent = health.docs_version ?? '—';
+		      if (adminDatastoreReadyEl) adminDatastoreReadyEl.textContent = String(health.datastore_ready ?? '—');
+		      if (adminLmstudioUrlEl) adminLmstudioUrlEl.textContent = health.lmstudio_base_url ?? '—';
+		      return health;
+		    } catch (e) {
+		      return null;
+		    }
+		  }
+
 		  async function loadAdminPanel() {
 		    adminSaveHintEl.textContent = '';
 		    adminApiBaseEl.textContent = apiBase;
 
-	    let health = null;
-	    try {
-	      health = await apiJson('/health');
-	      adminDocsVersionEl.textContent = health.docs_version ?? '—';
-	      adminDatastoreReadyEl.textContent = String(health.datastore_ready ?? '—');
-	      adminLmstudioUrlEl.textContent = health.lmstudio_base_url ?? '—';
-	    } catch (e) {
-	      adminDocsVersionEl.textContent = '—';
-	      adminDatastoreReadyEl.textContent = '—';
-	      adminLmstudioUrlEl.textContent = '—';
-	    }
+	    await loadHealthInfo();
 
 		    adminBundle = await apiJson('/admin/settings');
 			    const effective = adminBundle.effective || {};
@@ -2921,6 +2925,7 @@
 	      // Backend may be down; keep defaults.
 	    }
 	  })();
+	  loadHealthInfo().catch(() => {});
 
 	  function setEmptyStateVisible(visible) {
 	    emptyState.style.display = visible ? 'flex' : 'none';
