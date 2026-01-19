@@ -24,6 +24,7 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _EMBED_H3_RE = re.compile(r"(?m)^([ \t]*)###(\s+)")
 _CONTROL_RE = re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
 def log(msg: str) -> None:
@@ -183,6 +184,16 @@ def html_to_markdown(
     md_page = f"# {page_title}\n\n{md_body}".strip() + "\n"
     md_page = re.sub(r"\n{3,}", "\n\n", md_page)
     return md_page, images
+
+
+def markdown_images(md_text: str) -> list[dict[str, str]]:
+    images: list[dict[str, str]] = []
+    for alt, url in _MD_IMAGE_RE.findall(md_text or ""):
+        clean = str(url or "").strip()
+        if not clean:
+            continue
+        images.append({"original": clean, "url": clean, "alt": str(alt or "").strip()})
+    return images
 
 
 def _split_long_block(text: str, max_chars: int) -> list[str]:
@@ -931,6 +942,12 @@ def _embed_texts_resilient(
 def main() -> int:
     ap = argparse.ArgumentParser(description="Ingest Help+Manual HTML export into BM25 datastore (Evo 1.32).")
     ap.add_argument("--docs-dir", type=Path, default=Path("docs"), help="Input docs directory (HTML export root)")
+    ap.add_argument(
+        "--from-datastore",
+        type=Path,
+        default=None,
+        help="Use existing datastore as input (skip HTML conversion)",
+    )
     ap.add_argument("--out-dir", type=Path, default=Path("datastore/evo_1_32"), help="Output datastore directory")
     ap.add_argument("--version", type=str, default="evo_1_32", help="Version id used in /assets/{version}/ URLs")
     ap.add_argument(
@@ -961,6 +978,7 @@ def main() -> int:
     args = ap.parse_args()
 
     docs_dir: Path = args.docs_dir
+    source_store: Path | None = args.from_datastore
     out_dir: Path = args.out_dir
     version: str = args.version
     lmstudio_base_url: str = str(args.lmstudio_base_url).rstrip("/")
@@ -979,9 +997,15 @@ def main() -> int:
     chunk_max_chars_section: int = int(args.chunk_max_chars_section)
     chunk_max_chars_topic: int = int(args.chunk_max_chars_topic)
 
-    if not docs_dir.exists():
-        log(f"ERROR: docs dir not found: {docs_dir}")
-        return 2
+    if source_store is not None:
+        source_store = source_store.expanduser()
+        if not source_store.exists():
+            log(f"ERROR: source datastore not found: {source_store}")
+            return 2
+    else:
+        if not docs_dir.exists():
+            log(f"ERROR: docs dir not found: {docs_dir}")
+            return 2
 
     if out_dir.exists():
         if args.clean:
@@ -1005,10 +1029,18 @@ def main() -> int:
     pages_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     pages_jsonl = pages_jsonl_path.open("w", encoding="utf-8")
 
-    doc_dirs = sorted([p for p in docs_dir.iterdir() if p.is_dir()])
-    if not doc_dirs:
-        log(f"ERROR: no doc directories found under {docs_dir}")
-        return 2
+    if source_store is not None:
+        source_assets = source_store / "assets"
+        if source_assets.exists():
+            shutil.copytree(source_assets, assets_out, dirs_exist_ok=True)
+        else:
+            log(f"WARNING: source assets not found at {source_assets}")
+        doc_dirs: list[Path] = []
+    else:
+        doc_dirs = sorted([p for p in docs_dir.iterdir() if p.is_dir()])
+        if not doc_dirs:
+            log(f"ERROR: no doc directories found under {docs_dir}")
+            return 2
 
     df_counter: Counter[str] = Counter()
     postings_rows: list[tuple[str, str, int]] = []
@@ -1036,6 +1068,163 @@ def main() -> int:
         custom_pages = _load_custom_pages(app_db_path, version)
 
     seen_pages: set[tuple[str, str]] = set()
+
+    if source_store is not None:
+        source_pages = source_store / "pages"
+        source_pages_jsonl = source_store / "pages.jsonl"
+        if not source_pages_jsonl.exists():
+            log(f"ERROR: source pages.jsonl not found at {source_pages_jsonl}")
+            return 2
+        log(f"Indexing from datastore: {source_store}")
+        with source_pages_jsonl.open("r", encoding="utf-8") as src:
+            for line in src:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                doc_id = str(entry.get("doc_id") or "").strip()
+                page_id = str(entry.get("page_id") or "").strip()
+                if not doc_id or not page_id:
+                    continue
+                doc_title = str(entry.get("doc_title") or doc_id)
+                page_title = str(entry.get("page_title") or page_id)
+                heading_path = entry.get("heading_path") or [doc_title, page_title]
+                source_path = str(entry.get("source_path") or f"{doc_id}/{page_id}.md")
+                anchor = str(entry.get("anchor") or "pagetitle")
+                md_in_path = source_pages / doc_id / f"{page_id}.md"
+                if not md_in_path.exists():
+                    log(f"WARNING: missing markdown {md_in_path}")
+                    continue
+                md_text = read_text(md_in_path)
+                edit_text = published_edits.get((doc_id, page_id))
+                if edit_text:
+                    md_text = edit_text
+                images = markdown_images(md_text)
+
+                if summary_active:
+                    sections = split_markdown_for_summary(
+                        md_text,
+                        doc_title=doc_title,
+                        page_title=page_title,
+                        unit_max_tokens=summary_unit_max_tokens,
+                    )
+                    if sections:
+                        log(f"  Summarizing {doc_id}/{page_id} ({len(sections)} sections)...")
+                    for s_idx, sec in enumerate(sections):
+                        raw_text = str(sec.get("text") or "").strip()
+                        if not raw_text:
+                            continue
+                        summary_input = raw_text[:summary_max_input_chars] if summary_max_input_chars > 0 else raw_text
+                        try:
+                            summary_text = _chat_completion(
+                                lmstudio_base_url,
+                                summary_model,
+                                summary_input,
+                                max_tokens=summary_max_output_tokens,
+                            ).strip()
+                        except Exception as e:
+                            log(f"WARNING: summary failed for {doc_id}/{page_id}: {e}")
+                            summary_active = False
+                            summary_failed = True
+                            break
+                        if not summary_text:
+                            continue
+                        summary_id = f"{doc_id}:{page_id}:s{s_idx:03d}"
+                        sec_heading_path = sec.get("heading_path") or [doc_title, page_title]
+                        tokens = tokenize(summary_text)
+                        dl = len(tokens)
+                        if dl == 0:
+                            continue
+                        summary_units += 1
+                        summary_total_tokens += dl
+                        tf = Counter(tokens)
+                        for term, term_tf in tf.items():
+                            summary_postings_rows.append((term, summary_id, int(term_tf)))
+                        for term in tf.keys():
+                            summary_df_counter[term] += 1
+                        summary_rows.append(
+                            (
+                                summary_id,
+                                doc_id,
+                                page_id,
+                                json.dumps(sec_heading_path, ensure_ascii=False),
+                                summary_text,
+                                source_path,
+                                anchor,
+                                dl,
+                            )
+                        )
+                    if not summary_active:
+                        log("WARNING: summary disabled after failure; continuing without summary index.")
+
+                md_path = pages_out / doc_id / f"{page_id}.md"
+                md_path.parent.mkdir(parents=True, exist_ok=True)
+                md_path.write_text(md_text, encoding="utf-8")
+
+                page_record = {
+                    "version": version,
+                    "doc_id": doc_id,
+                    "doc_title": doc_title,
+                    "page_id": page_id,
+                    "page_title": page_title,
+                    "heading_path": heading_path,
+                    "source_path": source_path,
+                    "anchor": anchor,
+                    "images": images,
+                    "markdown_path": str(md_path.relative_to(out_dir)),
+                }
+                pages_jsonl.write(json.dumps(page_record, ensure_ascii=False) + "\n")
+
+                chunks = semantic_chunk_markdown(
+                    md_text,
+                    doc_title=doc_title,
+                    page_title=page_title,
+                    max_chars_part=chunk_max_chars_part,
+                    max_chars_section=chunk_max_chars_section,
+                    max_chars_topic=chunk_max_chars_topic,
+                )
+                granularity_counts: dict[str, int] = {"topic": 0, "section": 0, "part": 0}
+                granularity_prefix = {"topic": "t", "section": "s", "part": "p"}
+
+                for ch in chunks:
+                    granularity = str(ch.get("granularity") or "part")
+                    granularity_counts[granularity] += 1
+                    chunk_idx = granularity_counts[granularity]
+                    chunk_id = f"{doc_id}:{page_id}:{granularity_prefix.get(granularity, 'p')}{chunk_idx:03d}"
+                    text = str(ch.get("text") or "").strip()
+                    if not text:
+                        continue
+                    tokens = tokenize(text)
+                    dl = len(tokens)
+                    if dl == 0:
+                        continue
+                    n_chunks += 1
+                    total_tokens += dl
+                    tf = Counter(tokens)
+                    for term, term_tf in tf.items():
+                        postings_rows.append((term, chunk_id, int(term_tf)))
+                    for term in tf.keys():
+                        df_counter[term] += 1
+
+                    images_urls = [u for u in ch.get("images") or [] if str(u).startswith("/assets/")]
+
+                    chunk_rows.append(
+                        (
+                            chunk_id,
+                            doc_id,
+                            page_id,
+                            json.dumps(ch.get("heading_path") or heading_path, ensure_ascii=False),
+                            text,
+                            source_path,
+                            anchor,
+                            json.dumps(images_urls, ensure_ascii=False),
+                            dl,
+                        )
+                    )
+                seen_pages.add((doc_id, page_id))
 
     for doc_dir in doc_dirs:
         doc_title = doc_dir.name
@@ -1201,6 +1390,9 @@ def main() -> int:
         doc_id = custom["doc_id"]
         page_id = custom["page_id"]
         if (doc_id, page_id) in seen_pages:
+            continue
+        if (doc_id, page_id) not in published_edits:
+            log(f"  Skipping unpublished custom page {doc_id}/{page_id}")
             continue
         doc_title = custom["doc_title"]
         page_title = custom["page_title"]

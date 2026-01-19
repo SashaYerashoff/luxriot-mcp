@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from datetime import datetime
 import re
 import secrets
 import shutil
@@ -53,6 +54,14 @@ from .schemas import (
     DocEditDeleteRequest,
     DocEditRequest,
     DocEditResponse,
+    DocPublishRequest,
+    PublishRequestDecision,
+    PublishRequestInfo,
+    PublishRequestItem,
+    PublishRequestListResponse,
+    DocDeleteRequest,
+    DocExcludeRequest,
+    DocExcludeResponse,
     DocGuideCreateRequest,
     DocAssetUploadResponse,
     DocPageResponse,
@@ -102,6 +111,7 @@ _search_lock = asyncio.Lock()
 _reindex_lock = asyncio.Lock()
 _reindex_job: dict[str, Any] | None = None
 _reindex_task: asyncio.Task[None] | None = None
+_REINDEX_BACKUP_KEEP = 8
 
 
 def _available_versions() -> list[str]:
@@ -170,9 +180,12 @@ def auth_me(response: Response, ctx: AuthContext = Depends(resolve_auth)) -> Aut
     return AuthMeResponse(
         authenticated=bool(p.authenticated),
         role=p.role,
+        user_id=p.user_id,
         username=p.username,
         email=p.email,
         greeting=p.greeting,
+        docs_edit=bool(getattr(p, "docs_edit", False)),
+        docs_publish=bool(getattr(p, "docs_publish", False)),
     )
 
 
@@ -191,9 +204,12 @@ def auth_login(req: LoginRequest, response: Response) -> LoginResponse:
         user=AuthMeResponse(
             authenticated=True,
             role=principal.role,
+            user_id=principal.user_id,
             username=principal.username,
             email=principal.email,
             greeting=principal.greeting,
+            docs_edit=bool(getattr(principal, "docs_edit", False)),
+            docs_publish=bool(getattr(principal, "docs_publish", False)),
         )
     )
 
@@ -206,7 +222,16 @@ def auth_logout(request: Request, response: Response, ctx: AuthContext = Depends
     anon_ctx = resolve_auth(request)
     apply_auth_cookies(response, anon_ctx)
     p = anon_ctx.principal
-    return AuthMeResponse(authenticated=False, role=p.role, username=None, email=None, greeting=p.greeting)
+    return AuthMeResponse(
+        authenticated=False,
+        role=p.role,
+        user_id=None,
+        username=None,
+        email=None,
+        greeting=p.greeting,
+        docs_edit=False,
+        docs_publish=False,
+    )
 
 
 @app.post("/auth/password/change", response_model=OkResponse)
@@ -262,6 +287,8 @@ def auth_create_user(req: UserCreateRequest, ctx: AuthContext = Depends(resolve_
             email=email or None,
             password_hash=hash_password(req.password),
             role=role,
+            docs_edit=req.docs_edit,
+            docs_publish=req.docs_publish,
             greeting=greeting,
         )
     except Exception as e:
@@ -299,6 +326,10 @@ def auth_update_user(user_id: str, req: UserUpdateRequest, ctx: AuthContext = De
             ):
                 raise HTTPException(status_code=400, detail="Cannot disable the last active admin")
             update_kwargs["disabled_at"] = _utc_now() if desired_disabled else None
+    if "docs_edit" in req.model_fields_set:
+        update_kwargs["docs_edit"] = bool(req.docs_edit)
+    if "docs_publish" in req.model_fields_set:
+        update_kwargs["docs_publish"] = bool(req.docs_publish)
 
     greeting = str(req.greeting).strip() if req.greeting is not None else None
     if req.role is not None and req.role != "admin":
@@ -316,7 +347,18 @@ def auth_update_user(user_id: str, req: UserUpdateRequest, ctx: AuthContext = De
     return UserInfo(
         **{
             k: rec[k]
-            for k in ("user_id", "username", "email", "role", "greeting", "disabled_at", "created_at", "updated_at")
+            for k in (
+                "user_id",
+                "username",
+                "email",
+                "role",
+                "docs_edit",
+                "docs_publish",
+                "greeting",
+                "disabled_at",
+                "created_at",
+                "updated_at",
+            )
         }
     )
 
@@ -345,6 +387,29 @@ def _job_defaults() -> dict[str, Any]:
     }
 
 
+def _count_datastore_docs(store_dir: Path) -> int | None:
+    pages_jsonl = store_dir / "pages.jsonl"
+    if not pages_jsonl.exists():
+        return None
+    doc_ids: set[str] = set()
+    try:
+        with pages_jsonl.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                doc_id = str(rec.get("doc_id") or "").strip()
+                if doc_id:
+                    doc_ids.add(doc_id)
+    except Exception:
+        return None
+    return len(doc_ids)
+
+
 def _append_log(job: dict[str, Any], line: str) -> None:
     logs: list[str] = job.get("logs_tail") if isinstance(job.get("logs_tail"), list) else []
     logs.append(line)
@@ -354,10 +419,28 @@ def _append_log(job: dict[str, Any], line: str) -> None:
     job["updated_at"] = _utc_now()
 
 
+def _prune_reindex_backups(version: str, keep: int = _REINDEX_BACKUP_KEEP) -> None:
+    if keep <= 0:
+        return
+    prefix = f"{version}.bak_"
+    try:
+        candidates = [p for p in DATASTORE_DIR.iterdir() if p.is_dir() and p.name.startswith(prefix)]
+    except FileNotFoundError:
+        return
+    candidates.sort(key=lambda p: p.name, reverse=True)
+    for stale in candidates[keep:]:
+        try:
+            shutil.rmtree(stale)
+        except Exception:
+            log.exception("Failed to prune backup %s", stale)
+
+
 def _update_phase_from_log(job: dict[str, Any], line: str) -> None:
     s = str(line or "")
     if "Ingesting doc:" in s:
         job["phase"] = "converting_html_to_md"
+    elif "Indexing from datastore" in s:
+        job["phase"] = "indexing_existing_md"
     elif s.strip().startswith("Done:") or s.strip().startswith("Done."):
         # Keep 'finalizing'/'done' for the outer controller.
         pass
@@ -394,6 +477,7 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
     job["updated_at"] = _utc_now()
 
     docs_dir = Path(str(job.get("docs_dir") or "")).expanduser()
+    source_datastore = str(job.get("source_datastore") or "").strip()
     version = str(job.get("version") or DEFAULT_VERSION)
     build_dir = Path(str(job.get("build_dir") or "")).expanduser()
     target_dir = DATASTORE_DIR / version
@@ -419,8 +503,6 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
     cmd = [
         sys.executable,
         str(script),
-        "--docs-dir",
-        str(docs_dir),
         "--out-dir",
         str(build_dir),
         "--version",
@@ -433,6 +515,10 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
         str(int(job.get("embedding_batch_size") or 8)),
         "--clean",
     ]
+    if source_datastore:
+        cmd.extend(["--from-datastore", source_datastore])
+    else:
+        cmd.extend(["--docs-dir", str(docs_dir)])
     if not bool(job.get("compute_embeddings", True)):
         cmd.append("--no-embeddings")
     if bool(job.get("include_edits", True)):
@@ -516,6 +602,7 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
 
             build_dir.rename(target_dir)
             _get_docs_store(version).invalidate()
+            _prune_reindex_backups(version)
             if backup_dir and backup_dir.exists():
                 pass
         except Exception as e:
@@ -609,6 +696,68 @@ async def admin_reindex_start(req: ReindexRequest, ctx: AuthContext = Depends(re
             "started_at": _utc_now(),
             "updated_at": _utc_now(),
             "doc_total": int(doc_total),
+            "doc_done": 0,
+            "exit_code": None,
+            "error": None,
+            "logs_tail": [],
+            "build_dir": str(build_dir),
+        }
+
+        _reindex_job = job
+        _reindex_task = asyncio.create_task(_run_reindex_job(job))
+
+    return ReindexStatusResponse(defaults=_job_defaults(), job=ReindexJob(**job))
+
+
+@app.post("/admin/refresh", response_model=ReindexStatusResponse, response_model_exclude_none=True)
+async def admin_refresh_start(req: ReindexRequest, ctx: AuthContext = Depends(resolve_auth)) -> ReindexStatusResponse:
+    require_role(ctx, {"admin"})
+    global _reindex_job, _reindex_task
+
+    source_store = (DATASTORE_DIR / DEFAULT_VERSION).resolve()
+    if not source_store.exists() or not (source_store / "pages.jsonl").exists():
+        raise HTTPException(status_code=400, detail="Datastore not found; run full reindex first.")
+
+    async with _reindex_lock:
+        if _reindex_job and _reindex_job.get("status") == "running":
+            raise HTTPException(status_code=409, detail="Reindex is already running")
+
+        job_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(4)
+        build_dir = (DATASTORE_DIR / f".build_{DEFAULT_VERSION}_{job_id}").resolve()
+
+        defaults = _job_defaults()
+        summary_enabled = bool(req.summary_enabled) if req.summary_enabled is not None else bool(defaults.get("summary_enabled"))
+        summary_model = req.summary_model if req.summary_model is not None else defaults.get("summary_model")
+        summary_max_input_chars = (
+            int(req.summary_max_input_chars) if req.summary_max_input_chars is not None else int(defaults.get("summary_max_input_chars") or 6000)
+        )
+        summary_max_output_tokens = (
+            int(req.summary_max_output_tokens) if req.summary_max_output_tokens is not None else int(defaults.get("summary_max_output_tokens") or 280)
+        )
+        summary_unit_max_tokens = (
+            int(req.summary_unit_max_tokens) if req.summary_unit_max_tokens is not None else int(defaults.get("summary_unit_max_tokens") or 900)
+        )
+
+        job: dict[str, Any] = {
+            "job_id": job_id,
+            "status": "running",
+            "phase": "queued",
+            "mode": "refresh",
+            "docs_dir": str(DOCS_DIR),
+            "source_datastore": str(source_store),
+            "version": DEFAULT_VERSION,
+            "compute_embeddings": bool(req.compute_embeddings),
+            "embedding_max_chars": int(req.embedding_max_chars),
+            "embedding_batch_size": int(req.embedding_batch_size),
+            "include_edits": bool(req.include_edits),
+            "summary_enabled": summary_enabled,
+            "summary_model": summary_model,
+            "summary_max_input_chars": summary_max_input_chars,
+            "summary_max_output_tokens": summary_max_output_tokens,
+            "summary_unit_max_tokens": summary_unit_max_tokens,
+            "started_at": _utc_now(),
+            "updated_at": _utc_now(),
+            "doc_total": _count_datastore_docs(source_store),
             "doc_done": 0,
             "exit_code": None,
             "error": None,
@@ -729,6 +878,20 @@ def _get_doc_title(version: str, doc_id: str) -> str | None:
     return None
 
 
+def _get_page_title(version: str, doc_id: str, page_id: str) -> str | None:
+    store = _get_docs_store(version)
+    if store.is_ready():
+        try:
+            page = store.get_page(doc_id, page_id)
+            return str(page.page_title or page_id)
+        except KeyError:
+            pass
+    custom = app_db.get_doc_page(version=version, doc_id=doc_id, page_id=page_id)
+    if custom:
+        return str(custom.get("page_title") or page_id)
+    return None
+
+
 def _resolve_doc_page(version: str, doc_id: str, page_id: str) -> tuple[dict[str, Any], str, list[PageImage]]:
     store = _get_docs_store(version)
     if store.is_ready():
@@ -754,6 +917,8 @@ def _resolve_doc_page(version: str, doc_id: str, page_id: str) -> tuple[dict[str
                     "heading_path": page.heading_path,
                     "anchor": page.anchor,
                     "source_path": page.source_path,
+                    "custom": False,
+                    "author_id": None,
                 },
                 md_text,
                 images,
@@ -776,6 +941,8 @@ def _resolve_doc_page(version: str, doc_id: str, page_id: str) -> tuple[dict[str
             "heading_path": heading_path,
             "anchor": custom.get("anchor"),
             "source_path": str(custom.get("source_path") or ""),
+            "custom": True,
+            "author_id": custom.get("author_id"),
         },
         str(custom.get("base_markdown") or ""),
         [],
@@ -791,6 +958,25 @@ def _doc_exists(version: str, doc_id: str) -> bool:
         except KeyError:
             pass
     return bool(app_db.list_doc_pages(version=version, doc_id=doc_id))
+
+
+def _doc_is_ingested(version: str, doc_id: str) -> bool:
+    store = _get_docs_store(version)
+    if store.is_ready():
+        try:
+            store.list_pages(doc_id)
+            return True
+        except KeyError:
+            return False
+    return False
+
+
+def _doc_exclusions(version: str) -> set[str]:
+    try:
+        rows = app_db.list_doc_exclusions(version=version)
+    except Exception:
+        return set()
+    return {str(r.get("doc_id") or "") for r in rows if str(r.get("doc_id") or "").strip()}
 
 
 def _page_exists(version: str, doc_id: str, page_id: str) -> bool:
@@ -821,13 +1007,28 @@ def _get_docs_style() -> dict[str, str | None]:
     try:
         effective = get_settings_bundle()["effective"]
     except SettingsError:
-        return {"heading_font": None, "body_font": None}
+        return {
+            "heading_font": None,
+            "body_font": None,
+            "cover_type": "Guide",
+            "cover_image": None,
+            "cover_text": None,
+            "cover_copyright": None,
+        }
     style = effective.get("docs_style") if isinstance(effective.get("docs_style"), dict) else {}
     heading = str(style.get("heading_font") or "").strip()
     body = str(style.get("body_font") or "").strip()
+    cover_type = str(style.get("cover_type") or "").strip()
+    cover_image = str(style.get("cover_image") or "").strip()
+    cover_text = str(style.get("cover_text") or "").strip()
+    cover_copyright = str(style.get("cover_copyright") or "").strip()
     return {
         "heading_font": heading or None,
         "body_font": body or None,
+        "cover_type": cover_type or "Guide",
+        "cover_image": cover_image or None,
+        "cover_text": cover_text or None,
+        "cover_copyright": cover_copyright or None,
     }
 
 
@@ -842,6 +1043,17 @@ def _normalize_font_value(value: str | None) -> str | None:
     return text
 
 
+def _normalize_cover_value(value: str | None, *, max_len: int, field: str) -> str | None:
+    if value is None:
+        return None
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) > max_len:
+        raise HTTPException(status_code=400, detail=f"{field} is too long")
+    return text
+
+
 @app.get("/docs/versions", response_model=DocsVersionsResponse)
 def docs_versions(ctx: AuthContext = Depends(resolve_auth)) -> DocsVersionsResponse:
     versions = _available_versions()
@@ -853,7 +1065,14 @@ def docs_versions(ctx: AuthContext = Depends(resolve_auth)) -> DocsVersionsRespo
 @app.get("/docs/style", response_model=DocsStyleResponse)
 def docs_style(ctx: AuthContext = Depends(resolve_auth)) -> DocsStyleResponse:
     style = _get_docs_style()
-    return DocsStyleResponse(heading_font=style.get("heading_font"), body_font=style.get("body_font"))
+    return DocsStyleResponse(
+        heading_font=style.get("heading_font"),
+        body_font=style.get("body_font"),
+        cover_type=style.get("cover_type"),
+        cover_image=style.get("cover_image"),
+        cover_text=style.get("cover_text"),
+        cover_copyright=style.get("cover_copyright"),
+    )
 
 
 @app.post("/docs/style", response_model=DocsStyleResponse)
@@ -866,8 +1085,25 @@ def docs_style_update(req: DocsStyleUpdateRequest, ctx: AuthContext = Depends(re
         style["heading_font"] = heading
     if body is not None:
         style["body_font"] = body
+    if req.cover_type is not None:
+        style["cover_type"] = _normalize_cover_value(req.cover_type, max_len=60, field="cover_type")
+    if req.cover_image is not None:
+        style["cover_image"] = _normalize_cover_value(req.cover_image, max_len=300, field="cover_image")
+    if req.cover_text is not None:
+        style["cover_text"] = _normalize_cover_value(req.cover_text, max_len=800, field="cover_text")
+    if req.cover_copyright is not None:
+        style["cover_copyright"] = _normalize_cover_value(
+            req.cover_copyright, max_len=120, field="cover_copyright"
+        )
     update_settings({"docs_style": style})
-    return DocsStyleResponse(heading_font=style.get("heading_font"), body_font=style.get("body_font"))
+    return DocsStyleResponse(
+        heading_font=style.get("heading_font"),
+        body_font=style.get("body_font"),
+        cover_type=style.get("cover_type"),
+        cover_image=style.get("cover_image"),
+        cover_text=style.get("cover_text"),
+        cover_copyright=style.get("cover_copyright"),
+    )
 
 
 @app.get("/docs/catalog", response_model=DocsCatalogResponse)
@@ -882,8 +1118,15 @@ def docs_catalog(version: str | None = None, ctx: AuthContext = Depends(resolve_
     try:
         allow, deny = docs_allowed_for_role(ctx.principal.role)
         docs = [d for d in store.list_docs() if _doc_allowed(d.get("doc_id"), allow, deny)]
+        excluded = _doc_exclusions(ver)
         custom_pages = app_db.list_doc_pages(version=ver)
-        doc_map: dict[str, dict[str, Any]] = {d["doc_id"]: dict(d) for d in docs}
+        doc_map: dict[str, dict[str, Any]] = {}
+        for d in docs:
+            doc_id = str(d.get("doc_id") or "")
+            entry = dict(d)
+            entry["origin"] = "ingested"
+            entry["rag_excluded"] = doc_id in excluded
+            doc_map[doc_id] = entry
         ordered = [d["doc_id"] for d in docs]
         for page in custom_pages:
             doc_id = str(page.get("doc_id") or "")
@@ -896,6 +1139,8 @@ def docs_catalog(version: str | None = None, ctx: AuthContext = Depends(resolve_
                     "doc_id": doc_id,
                     "doc_title": str(page.get("doc_title") or doc_id),
                     "page_count": 1,
+                    "origin": "custom",
+                    "rag_excluded": doc_id in excluded,
                 }
         custom_only = [d for d in doc_map.keys() if d not in ordered]
         custom_only.sort(key=lambda d: str(doc_map[d].get("doc_title") or d).lower())
@@ -916,6 +1161,7 @@ def docs_catalog_doc(doc_id: str, version: str | None = None, ctx: AuthContext =
             detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
         )
     allow, deny = docs_allowed_for_role(ctx.principal.role)
+    excluded_docs = _doc_exclusions(DEFAULT_VERSION)
     if not _doc_allowed(doc_id, allow, deny):
         raise HTTPException(status_code=403, detail="Doc is not available for this user")
     try:
@@ -924,7 +1170,11 @@ def docs_catalog_doc(doc_id: str, version: str | None = None, ctx: AuthContext =
         try:
             data = store.list_pages(doc_id)
             doc_title = data.get("doc_title")
-            pages.extend(data.get("pages") or [])
+            for p in data.get("pages") or []:
+                entry = dict(p)
+                entry["custom"] = False
+                entry["author_id"] = None
+                pages.append(entry)
         except KeyError:
             pass
 
@@ -945,6 +1195,8 @@ def docs_catalog_doc(doc_id: str, version: str | None = None, ctx: AuthContext =
                     "heading_path": heading_path,
                     "source_path": page.get("source_path") or "",
                     "anchor": page.get("anchor"),
+                    "custom": True,
+                    "author_id": page.get("author_id"),
                 }
             )
 
@@ -988,6 +1240,7 @@ def docs_page(
             md_text = str(published["content_md"])
     except Exception:
         log.exception("Failed to load published doc edit")
+    _, md_text = _split_front_matter_text(md_text)
 
     return DocPageResponse(
         version=ver,
@@ -1000,6 +1253,8 @@ def docs_page(
         source_path=page_meta.get("source_path") or "",
         markdown=md_text,
         images=images,
+        custom=bool(page_meta.get("custom")),
+        author_id=page_meta.get("author_id"),
     )
 
 
@@ -1014,9 +1269,21 @@ def _get_effective_markdown(version: str, doc_id: str, page_id: str) -> tuple[di
     return meta, md_text
 
 
+def _can_edit_docs(ctx: AuthContext) -> bool:
+    if ctx.principal.role == "admin":
+        return True
+    return bool(getattr(ctx.principal, "docs_edit", False))
+
+
+def _can_publish_docs(ctx: AuthContext) -> bool:
+    if ctx.principal.role == "admin":
+        return True
+    return bool(getattr(ctx.principal, "docs_publish", False))
+
+
 def _assert_edit_role(ctx: AuthContext) -> None:
-    if ctx.principal.role not in ("admin", "redactor", "support"):
-        raise HTTPException(status_code=403, detail="Editing requires admin/redactor/support role")
+    if not _can_edit_docs(ctx):
+        raise HTTPException(status_code=403, detail="Editing requires permission")
 
 
 def _select_edit_version(version: str | None) -> str:
@@ -1033,6 +1300,44 @@ def _to_doc_edit_info(rec: dict[str, Any] | None) -> DocEditInfo | None:
         author_id=str(rec.get("author_id") or ""),
         created_at=str(rec.get("created_at") or ""),
         updated_at=str(rec.get("updated_at") or ""),
+    )
+
+
+def _to_publish_request_info(rec: dict[str, Any] | None) -> PublishRequestInfo | None:
+    if not rec:
+        return None
+    return PublishRequestInfo(
+        status=str(rec.get("status") or "pending"),  # type: ignore[arg-type]
+        content_md=str(rec.get("content_md") or ""),
+        author_id=str(rec.get("author_id") or ""),
+        created_at=str(rec.get("created_at") or ""),
+        updated_at=str(rec.get("updated_at") or ""),
+        reviewed_by=str(rec.get("reviewed_by") or "") or None,
+        reviewed_at=str(rec.get("reviewed_at") or "") or None,
+        review_note=str(rec.get("review_note") or "") or None,
+    )
+
+
+def _to_publish_request_item(rec: dict[str, Any], user_map: dict[str, str]) -> PublishRequestItem:
+    version = str(rec.get("version") or DEFAULT_VERSION)
+    doc_id = str(rec.get("doc_id") or "")
+    page_id = str(rec.get("page_id") or "")
+    author_id = str(rec.get("author_id") or "")
+    return PublishRequestItem(
+        version=version,
+        doc_id=doc_id,
+        doc_title=_get_doc_title(version, doc_id) or doc_id,
+        page_id=page_id,
+        page_title=_get_page_title(version, doc_id, page_id) or page_id,
+        status=str(rec.get("status") or "pending"),  # type: ignore[arg-type]
+        content_md=str(rec.get("content_md") or ""),
+        author_id=author_id,
+        author_username=user_map.get(author_id),
+        created_at=str(rec.get("created_at") or ""),
+        updated_at=str(rec.get("updated_at") or ""),
+        reviewed_by=str(rec.get("reviewed_by") or "") or None,
+        reviewed_at=str(rec.get("reviewed_at") or "") or None,
+        review_note=str(rec.get("review_note") or "") or None,
     )
 
 
@@ -1065,9 +1370,13 @@ def docs_page_edit(
     published = app_db.get_doc_edit(
         version=ver, doc_id=page_meta["doc_id"], page_id=page_meta["page_id"], status="published"
     )
+    publish_req = app_db.get_doc_publish_request(
+        version=ver, doc_id=page_meta["doc_id"], page_id=page_meta["page_id"]
+    )
     effective_md = str(published.get("content_md")) if published else base_md
-    can_edit = ctx.principal.role in ("admin", "redactor", "support")
-    can_publish = ctx.principal.role in ("admin", "redactor")
+    can_edit = _can_edit_docs(ctx)
+    can_publish = _can_publish_docs(ctx)
+    can_request_publish = bool(can_edit and not can_publish)
 
     return DocEditResponse(
         version=ver,
@@ -1080,8 +1389,10 @@ def docs_page_edit(
         effective_markdown=effective_md,
         draft=_to_doc_edit_info(draft),
         published=_to_doc_edit_info(published),
+        publish_request=_to_publish_request_info(publish_req),
         can_edit=bool(can_edit),
         can_publish=bool(can_publish),
+        can_request_publish=can_request_publish,
     )
 
 
@@ -1103,8 +1414,8 @@ def docs_page_edit_save(
     status = str(req.status or "draft").strip()
     if status not in ("draft", "published"):
         raise HTTPException(status_code=400, detail="Invalid edit status")
-    if status == "published" and ctx.principal.role not in ("admin", "redactor"):
-        raise HTTPException(status_code=403, detail="Publishing requires admin or redactor role")
+    if status == "published" and not _can_publish_docs(ctx):
+        raise HTTPException(status_code=403, detail="Publishing requires permission")
     content = str(req.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="Content is empty")
@@ -1134,11 +1445,192 @@ def docs_page_edit_delete(
     status = str(req.status or "draft").strip()
     if status not in ("draft", "published"):
         raise HTTPException(status_code=400, detail="Invalid edit status")
-    if status == "published" and ctx.principal.role not in ("admin", "redactor"):
-        raise HTTPException(status_code=403, detail="Publishing requires admin or redactor role")
+    if status == "published" and not _can_publish_docs(ctx):
+        raise HTTPException(status_code=403, detail="Publishing requires permission")
     ver = _select_edit_version(req.version)
     app_db.delete_doc_edit(version=ver, doc_id=doc_id, page_id=page_id, status=status)
     return docs_page_edit(doc_id, page_id, version=ver, ctx=ctx)
+
+
+@app.post("/docs/page/{doc_id}/{page_id}/publish/request", response_model=DocEditResponse)
+def docs_page_publish_request(
+    doc_id: str, page_id: str, req: DocPublishRequest, ctx: AuthContext = Depends(resolve_auth)
+) -> DocEditResponse:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(req.version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
+        )
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    if not _doc_allowed(doc_id, allow, deny):
+        raise HTTPException(status_code=403, detail="Doc is not available for this user")
+    content = str(req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Content is empty")
+    try:
+        page_meta, _, _ = _resolve_doc_page(ver, doc_id, page_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except HTTPException:
+        raise
+    app_db.upsert_doc_publish_request(
+        version=ver,
+        doc_id=page_meta["doc_id"],
+        page_id=page_meta["page_id"],
+        content_md=content,
+        author_id=str(ctx.principal.user_id or "unknown"),
+    )
+    return docs_page_edit(doc_id, page_id, version=ver, ctx=ctx)
+
+
+@app.post("/docs/page/{doc_id}/{page_id}/delete", response_model=OkResponse)
+def docs_page_delete(
+    doc_id: str, page_id: str, req: DocDeleteRequest, ctx: AuthContext = Depends(resolve_auth)
+) -> OkResponse:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(req.version)
+    custom = app_db.get_doc_page(version=ver, doc_id=doc_id, page_id=page_id)
+    if not custom:
+        store = _get_docs_store(ver)
+        if store.is_ready():
+            try:
+                store.get_page(doc_id, page_id)
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot delete an ingested page. Remove edits or exclude the guide from RAG.",
+                )
+            except KeyError:
+                pass
+        raise HTTPException(status_code=404, detail="Page not found")
+    if ctx.principal.role != "admin":
+        if not ctx.principal.user_id or str(custom.get("author_id") or "") != str(ctx.principal.user_id):
+            raise HTTPException(status_code=403, detail="Only the owner or admin can delete this page")
+    app_db.delete_doc_edits_for_page(version=ver, doc_id=doc_id, page_id=page_id)
+    app_db.delete_doc_page(version=ver, doc_id=doc_id, page_id=page_id)
+    return OkResponse()
+
+
+@app.get("/admin/publish-requests", response_model=PublishRequestListResponse)
+def admin_list_publish_requests(
+    status: str | None = None,
+    version: str | None = None,
+    ctx: AuthContext = Depends(resolve_auth),
+) -> PublishRequestListResponse:
+    require_role(ctx, {"admin"})
+    ver = _select_edit_version(version)
+    desired = str(status or "pending").strip().lower()
+    if desired not in ("pending", "approved", "rejected", "all"):
+        raise HTTPException(status_code=400, detail="Invalid status filter")
+    user_map = {str(u.get("user_id") or ""): str(u.get("username") or "") for u in app_db.list_users(limit=1000)}
+    rows = app_db.list_doc_publish_requests(version=ver, status=None if desired == "all" else desired)
+    items = [_to_publish_request_item(r, user_map) for r in rows]
+    return PublishRequestListResponse(requests=items)
+
+
+@app.post("/admin/publish-requests/{doc_id}/{page_id}/approve", response_model=PublishRequestItem)
+def admin_approve_publish_request(
+    doc_id: str, page_id: str, req: PublishRequestDecision, ctx: AuthContext = Depends(resolve_auth)
+) -> PublishRequestItem:
+    require_role(ctx, {"admin"})
+    ver = _select_edit_version(req.version)
+    rec = app_db.get_doc_publish_request(version=ver, doc_id=doc_id, page_id=page_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Publish request not found")
+    if str(rec.get("status") or "") != "pending":
+        raise HTTPException(status_code=409, detail="Publish request is not pending")
+    content = str(rec.get("content_md") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Publish request content is empty")
+    app_db.upsert_doc_edit(
+        version=ver,
+        doc_id=str(rec.get("doc_id") or doc_id),
+        page_id=str(rec.get("page_id") or page_id),
+        status="published",
+        content_md=content,
+        author_id=str(rec.get("author_id") or ctx.principal.user_id or "unknown"),
+    )
+    updated = app_db.update_doc_publish_request_status(
+        version=ver,
+        doc_id=doc_id,
+        page_id=page_id,
+        status="approved",
+        reviewed_by=str(ctx.principal.user_id or "admin"),
+        review_note=req.note,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Publish request not found")
+    user_map = {str(u.get("user_id") or ""): str(u.get("username") or "") for u in app_db.list_users(limit=1000)}
+    return _to_publish_request_item(updated, user_map)
+
+
+@app.post("/admin/publish-requests/{doc_id}/{page_id}/reject", response_model=PublishRequestItem)
+def admin_reject_publish_request(
+    doc_id: str, page_id: str, req: PublishRequestDecision, ctx: AuthContext = Depends(resolve_auth)
+) -> PublishRequestItem:
+    require_role(ctx, {"admin"})
+    ver = _select_edit_version(req.version)
+    rec = app_db.get_doc_publish_request(version=ver, doc_id=doc_id, page_id=page_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Publish request not found")
+    if str(rec.get("status") or "") != "pending":
+        raise HTTPException(status_code=409, detail="Publish request is not pending")
+    updated = app_db.update_doc_publish_request_status(
+        version=ver,
+        doc_id=doc_id,
+        page_id=page_id,
+        status="rejected",
+        reviewed_by=str(ctx.principal.user_id or "admin"),
+        review_note=req.note,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Publish request not found")
+    user_map = {str(u.get("user_id") or ""): str(u.get("username") or "") for u in app_db.list_users(limit=1000)}
+    return _to_publish_request_item(updated, user_map)
+
+
+@app.post("/docs/guide/{doc_id}/delete", response_model=OkResponse)
+def docs_guide_delete(doc_id: str, req: DocDeleteRequest, ctx: AuthContext = Depends(resolve_auth)) -> OkResponse:
+    _assert_edit_role(ctx)
+    ver = _select_edit_version(req.version)
+    if _doc_is_ingested(ver, doc_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete an ingested guide. Use 'exclude from RAG' instead.",
+        )
+    pages = app_db.list_doc_pages(version=ver, doc_id=doc_id)
+    if not pages:
+        raise HTTPException(status_code=404, detail="Guide not found")
+    if ctx.principal.role != "admin":
+        if not ctx.principal.user_id:
+            raise HTTPException(status_code=403, detail="Only the owner or admin can delete this guide")
+        owner_id = str(ctx.principal.user_id)
+        for page in pages:
+            if str(page.get("author_id") or "") != owner_id:
+                raise HTTPException(status_code=403, detail="Only the owner or admin can delete this guide")
+    app_db.delete_doc_edits_for_doc(version=ver, doc_id=doc_id)
+    app_db.delete_doc_pages_for_doc(version=ver, doc_id=doc_id)
+    app_db.delete_doc_exclusion(version=ver, doc_id=doc_id)
+    return OkResponse()
+
+
+@app.post("/docs/guide/{doc_id}/exclude", response_model=DocExcludeResponse)
+def docs_guide_exclude(doc_id: str, req: DocExcludeRequest, ctx: AuthContext = Depends(resolve_auth)) -> DocExcludeResponse:
+    require_role(ctx, {"admin"})
+    ver = _require_version(req.version)
+    exclude = bool(req.excluded)
+    if exclude:
+        app_db.upsert_doc_exclusion(
+            version=ver,
+            doc_id=doc_id,
+            excluded_by=str(ctx.principal.user_id or "admin"),
+            reason=str(req.reason or "").strip() or None,
+        )
+    else:
+        app_db.delete_doc_exclusion(version=ver, doc_id=doc_id)
+    return DocExcludeResponse(doc_id=doc_id, rag_excluded=exclude)
 
 
 @app.post("/docs/pdf")
@@ -1150,12 +1642,22 @@ def docs_pdf(req: DocPdfRequest, ctx: AuthContext = Depends(resolve_auth)) -> Re
         raise HTTPException(status_code=400, detail="Content is empty")
     title = str(req.title or "document").strip() or "document"
     style = _get_docs_style()
+    cover = {
+        "guide_type": style.get("cover_type") or "Guide",
+        "title": title,
+        "image": style.get("cover_image"),
+        "text": style.get("cover_text"),
+        "version": ver,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "copyright": style.get("cover_copyright"),
+    }
     pdf_bytes = render_markdown_to_pdf(
         content,
         title=title,
         version=ver,
         heading_font=style.get("heading_font"),
         body_font=style.get("body_font"),
+        cover=cover,
     )
     filename = f"{_safe_slug(title)}.pdf"
     return Response(
@@ -1209,26 +1711,41 @@ def docs_guide_pdf(
         raise HTTPException(status_code=404, detail="Doc not found")
 
     combined: list[str] = []
-    for p in pages:
+    for idx, p in enumerate(pages):
         pid = str(p.get("page_id") or "")
         if not pid:
             continue
         meta, md_text = _get_effective_markdown(ver, doc_id, pid)
         page_title = str(p.get("page_title") or meta.get("page_title") or pid)
         content = str(md_text or "").strip()
-        if page_title and not _content_starts_with_heading(content, page_title):
-            combined.append(f"## {page_title}")
+        if idx == 0:
+            front, body = _split_front_matter_text(content)
+            if front:
+                combined.append(front.rstrip())
+            content = body.strip()
+        if page_title:
+            combined.append(f"[[DOC_SECTION: {page_title}]]")
         if content:
             combined.append(content)
         combined.append("")
 
     style = _get_docs_style()
+    cover = {
+        "guide_type": style.get("cover_type") or "Guide",
+        "title": doc_title,
+        "image": style.get("cover_image"),
+        "text": style.get("cover_text"),
+        "version": ver,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "copyright": style.get("cover_copyright"),
+    }
     pdf_bytes = render_markdown_to_pdf(
         "\n".join(combined),
         title=doc_title,
         version=ver,
         heading_font=style.get("heading_font"),
         body_font=style.get("body_font"),
+        cover=cover,
     )
     filename = f"{_safe_slug(doc_title)}.pdf"
     return Response(
@@ -1252,6 +1769,27 @@ def _content_starts_with_heading(markdown: str, heading: str) -> bool:
         text = re.sub(r"\s+", " ", match.group(2)).strip().lower()
         return text == normalized_heading
     return False
+
+
+def _split_front_matter_text(markdown: str) -> tuple[str | None, str]:
+    text = str(markdown or "")
+    if text.startswith("\ufeff"):
+        text = text.lstrip("\ufeff")
+    if not text.startswith("---"):
+        return None, markdown
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None, markdown
+    end_idx = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            end_idx = idx
+            break
+    if end_idx is None:
+        return None, markdown
+    front = "\n".join(lines[: end_idx + 1]) + "\n"
+    body = "\n".join(lines[end_idx + 1 :]).lstrip("\n")
+    return front, body
 
 
 def _safe_slug(value: str) -> str:
@@ -1626,6 +2164,7 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
     summary_max_pages = int(summary.get("max_pages", 0) or 0)
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
+    excluded_docs = _doc_exclusions(ver)
     search_k = int(req.k)
     buffer_k = min(max(search_k * 5, search_k + 10), 200)
 
@@ -1662,7 +2201,12 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
-    results = [r for r in results if _doc_allowed(r.get("doc_id"), allow, deny)][:search_k]
+    results = [
+        r
+        for r in results
+        if _doc_allowed(r.get("doc_id"), allow, deny)
+        and str(r.get("doc_id") or "") not in excluded_docs
+    ][:search_k]
     chunks = [
         {
             "doc_id": r["doc_id"],
@@ -1871,7 +2415,12 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
             raise HTTPException(status_code=400, detail=str(e)) from e
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
-        rows = [r for r in rows if _doc_allowed(r.get("doc_id"), allow, deny)]
+        rows = [
+            r
+            for r in rows
+            if _doc_allowed(r.get("doc_id"), allow, deny)
+            and str(r.get("doc_id") or "") not in excluded_docs
+        ]
         if doc_ids:
             allowed_docs = {str(x) for x in doc_ids}
             rows = [r for r in rows if str(r.get("doc_id") or "") in allowed_docs]

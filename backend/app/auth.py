@@ -37,6 +37,8 @@ class Principal:
     username: str | None = None
     email: str | None = None
     greeting: str | None = None
+    docs_edit: bool = False
+    docs_publish: bool = False
 
 
 @dataclass(frozen=True)
@@ -209,14 +211,28 @@ def resolve_auth(request: Request) -> AuthContext:
                 clear_auth_cookie=True,
             )
 
+        role = str(sess.get("role") or "client")  # type: ignore[arg-type]
+        if str(sess.get("docs_edit") or "").strip():
+            docs_edit = bool(int(sess.get("docs_edit") or 0))
+        else:
+            docs_edit = role in ("admin", "redactor", "support")
+        if str(sess.get("docs_publish") or "").strip():
+            docs_publish = bool(int(sess.get("docs_publish") or 0))
+        else:
+            docs_publish = role == "admin"
+        if role == "admin":
+            docs_edit = True
+            docs_publish = True
         principal = Principal(
             authenticated=True,
-            role=str(sess.get("role") or "client"),  # type: ignore[arg-type]
+            role=role,
             owner_id=str(sess.get("user_id") or ""),
             user_id=str(sess.get("user_id") or ""),
             username=str(sess.get("username") or ""),
             email=str(sess.get("email") or "") or None,
             greeting=str(sess.get("greeting") or "") or None,
+            docs_edit=docs_edit,
+            docs_publish=docs_publish,
         )
         return AuthContext(principal=principal)
 
@@ -275,14 +291,28 @@ def create_login_session(*, username: str, password: str) -> tuple[Principal, st
         log.exception("Failed to create auth session")
         raise HTTPException(status_code=500, detail=f"Failed to create auth session: {e}") from e
 
+    role = str(rec.get("role") or "client")  # type: ignore[arg-type]
+    if str(rec.get("docs_edit") or "").strip():
+        docs_edit = bool(int(rec.get("docs_edit") or 0))
+    else:
+        docs_edit = role in ("admin", "redactor", "support")
+    if str(rec.get("docs_publish") or "").strip():
+        docs_publish = bool(int(rec.get("docs_publish") or 0))
+    else:
+        docs_publish = role == "admin"
+    if role == "admin":
+        docs_edit = True
+        docs_publish = True
     principal = Principal(
         authenticated=True,
-        role=str(rec.get("role") or "client"),  # type: ignore[arg-type]
+        role=role,
         owner_id=str(rec["user_id"]),
         user_id=str(rec["user_id"]),
         username=str(rec["username"]),
         email=str(rec.get("email") or "") or None,
         greeting=str(rec.get("greeting") or "") or None,
+        docs_edit=docs_edit,
+        docs_publish=docs_publish,
     )
     return principal, token
 

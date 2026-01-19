@@ -44,6 +44,8 @@
     .logo{display:flex;gap:10px;align-items:center}
     .logo-dot{width:14px;height:14px;background:var(--accent);border-radius:4px}
     .brand{font-weight:700;font-size:22px;color:var(--text);letter-spacing:.5px;font-style:italic}
+    .brand-stack{display:flex;flex-direction:column;gap:2px;line-height:1.1}
+    .brand-version{font-size:11px;color:var(--muted);letter-spacing:.2px;font-style:normal}
     .header-right{display:flex;align-items:center;gap:14px;}
 
     /* Center state */
@@ -463,6 +465,76 @@
       gap:12px;
     }
     .docs-content.editing .docs-editor{display:flex;}
+    .docs-cover-editor{
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:8px 10px;
+      background:rgba(255,255,255,.02);
+    }
+    .docs-cover-editor summary{
+      cursor:pointer;
+      font-weight:600;
+      color:var(--text);
+      margin-bottom:8px;
+    }
+    .docs-cover-editor[open] summary{margin-bottom:12px;}
+    .docs-cover-fields{display:grid;gap:8px;}
+    .docs-cover-disabled{
+      display:none;
+      font-size:11px;
+      color:var(--muted);
+      margin-bottom:8px;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .docs-cover-editor.disabled .docs-cover-fields{display:none;}
+    .docs-cover-editor.disabled .docs-cover-disabled{display:flex;}
+    .docs-cover-preview{
+      margin-top:12px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:16px 18px;
+      background:rgba(0,0,0,.18);
+      text-align:center;
+    }
+    .docs-cover-preview .cover-type{
+      font-size:11px;
+      letter-spacing:.14em;
+      text-transform:uppercase;
+      color:var(--muted);
+      font-weight:700;
+      margin-bottom:10px;
+    }
+    .docs-cover-preview .cover-title{
+      font-family:var(--docs-heading-font);
+      font-size:22px;
+      font-weight:700;
+      margin-bottom:12px;
+      line-height:1.2;
+    }
+    .docs-cover-preview .cover-image{
+      display:flex;
+      justify-content:center;
+      margin:10px 0 14px;
+    }
+    .docs-cover-preview .cover-image img{
+      max-width:70%;
+      max-height:180px;
+      border-radius:10px;
+      border:1px solid var(--border);
+    }
+    .docs-cover-preview .cover-text{
+      font-size:13px;
+      color:var(--muted);
+      margin-bottom:10px;
+      line-height:1.4;
+    }
+    .docs-cover-preview .cover-footer{
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.3;
+    }
     .docs-edit-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
     .docs-edit-body{
       display:grid;
@@ -881,7 +953,10 @@
   <div class="header">
     <div class="logo">
       <div class="logo-dot"></div>
-      <div class="brand">Luxriot</div>
+      <div class="brand-stack">
+        <div class="brand">Luxriot</div>
+        <div class="brand-version" id="appVersion">Luxriot SA 0.1.0</div>
+      </div>
     </div>
 
 	  <div class="header-right">
@@ -981,6 +1056,12 @@
 			          <option value="redactor">redactor</option>
 			          <option value="admin">admin</option>
 			        </select>
+
+			        <label>Docs permissions</label>
+			        <div class="inline">
+			          <span class="pill"><input id="adminEditUserDocsEdit" type="checkbox"> docs edit</span>
+			          <span class="pill"><input id="adminEditUserDocsPublish" type="checkbox"> docs publish</span>
+			        </div>
 		
 			        <label>Status</label>
 			        <span class="pill"><input id="adminEditUserDisabled" type="checkbox"> disabled</span>
@@ -1026,6 +1107,16 @@
         </details>
       </div>
 
+      <div class="card" id="adminPublishCard">
+        <h3>Publish requests</h3>
+        <div class="tiny muted">Pending doc publish requests (admin approval).</div>
+        <div class="inline" style="margin-top:8px;">
+          <button class="btn ghost small" id="adminPublishRefreshBtn">REFRESH</button>
+        </div>
+        <div class="tiny muted" id="adminPublishStatus" style="margin-top:10px;"></div>
+        <div class="list" id="adminPublishList" style="max-height:220px;"></div>
+      </div>
+
       <div class="card" id="docsStyleCard">
         <h3>Docs style</h3>
         <label>Heading font</label>
@@ -1040,6 +1131,14 @@
             <span style="font-weight:600;">Bold</span>
           </div>
         </div>
+        <label style="margin-top:12px;">Cover guide type</label>
+        <input id="docsCoverType" type="text" placeholder="Guide"/>
+        <label>Cover image (path or URL)</label>
+        <input id="docsCoverImage" type="text" placeholder="/assets/evo_1_32/.../logo.png"/>
+        <label>Cover text</label>
+        <textarea id="docsCoverText" rows="3" placeholder="Optional summary or subtitle"></textarea>
+        <label>Copyright</label>
+        <input id="docsCoverCopyright" type="text" placeholder="© Luxriot"/>
         <div class="tiny muted" style="margin-top:6px;">Applies to docs reader + PDF export.</div>
       </div>
 	
@@ -1397,6 +1496,14 @@
           <button class="btn ghost small" id="docsNewGuideBtn">NEW GUIDE</button>
           <button class="btn ghost small" id="docsNewSectionBtn">NEW SECTION</button>
         </div>
+        <div class="docs-actions" id="docsManageActions">
+          <label class="pill" id="docsExcludeWrap">
+            <input id="docsExcludeToggle" type="checkbox">
+            exclude from RAG
+          </label>
+          <button class="btn danger small" id="docsDeleteGuideBtn">DELETE GUIDE</button>
+          <button class="btn danger small" id="docsDeletePageBtn">DELETE PAGE</button>
+        </div>
 
         <label>Guide</label>
         <select id="docsGuideSelect"></select>
@@ -1449,6 +1556,55 @@
         </div>
         <div id="docsPage" class="docsPage"></div>
         <div id="docsEditor" class="docs-editor">
+          <details class="docs-cover-editor" id="docsCoverEditor">
+            <summary>Cover &amp; Headers</summary>
+            <div class="docs-cover-disabled" id="docsCoverDisabled">
+              Cover metadata is stored in the first page of this guide.
+              <button class="btn ghost small" id="docsCoverGoFirstBtn">OPEN FIRST PAGE</button>
+            </div>
+            <div class="docs-cover-fields" id="docsCoverFields">
+              <label>Guide type</label>
+              <input id="docsCoverTypeEdit" type="text" placeholder="Guide"/>
+              <label>Guide title</label>
+              <input id="docsCoverTitleEdit" type="text" placeholder="Auto title"/>
+              <label>Cover image</label>
+              <input id="docsCoverImageEdit" type="text" placeholder="/assets/.../image.png"/>
+              <label>Cover text</label>
+              <textarea id="docsCoverTextEdit" rows="3" placeholder="Optional summary"></textarea>
+              <div class="inline">
+                <div style="flex:1;">
+                  <label>Version override</label>
+                  <input id="docsCoverVersionEdit" type="text" placeholder="Auto version"/>
+                </div>
+                <div style="flex:1;">
+                  <label>Date/time override</label>
+                  <input id="docsCoverDateEdit" type="text" placeholder="Auto date/time"/>
+                </div>
+              </div>
+              <label>Copyright</label>
+              <input id="docsCoverCopyrightEdit" type="text" placeholder="© Luxriot"/>
+              <div class="inline">
+                <div style="flex:1;">
+                  <label>Header left override</label>
+                  <input id="docsHeaderLeftEdit" type="text" placeholder="Auto (guide type)"/>
+                </div>
+                <div style="flex:1;">
+                  <label>Header right override</label>
+                  <input id="docsHeaderRightEdit" type="text" placeholder="Auto (section heading)"/>
+                </div>
+              </div>
+              <div class="inline" style="margin-top:8px;">
+                <button class="btn ghost small" id="docsCoverResetBtn">USE DEFAULTS</button>
+              </div>
+            </div>
+            <div class="docs-cover-preview" id="docsCoverPreview">
+              <div class="cover-type" id="docsCoverPreviewType"></div>
+              <div class="cover-title" id="docsCoverPreviewTitle"></div>
+              <div class="cover-image" id="docsCoverPreviewImage"></div>
+              <div class="cover-text" id="docsCoverPreviewText"></div>
+              <div class="cover-footer" id="docsCoverPreviewFooter"></div>
+            </div>
+          </details>
           <div class="docs-edit-tools">
             <div class="tiny muted" id="docsEditMeta">Edit mode</div>
             <button class="btn ghost small" data-insert="h1">H1</button>
@@ -1478,6 +1634,7 @@
               <button class="btn ghost small" id="docsEditResetPublishedBtn">RESET TO PUBLISHED</button>
               <button class="btn ghost small" id="docsEditDiscardBtn">DISCARD DRAFT</button>
               <button class="btn small" id="docsEditSaveDraftBtn">SAVE DRAFT</button>
+              <button class="btn small" id="docsEditRequestPublishBtn">REQUEST PUBLISH</button>
               <button class="btn primary small" id="docsEditPublishBtn">PUBLISH</button>
             </div>
           </div>
@@ -1638,7 +1795,14 @@
     acc[item.key] = item;
     return acc;
   }, {});
-  let docsStyleState = { heading_font: 'sans', body_font: 'sans' };
+  let docsStyleState = {
+    heading_font: 'sans',
+    body_font: 'sans',
+    cover_type: 'Guide',
+    cover_image: '',
+    cover_text: '',
+    cover_copyright: ''
+  };
 
   // ---------- UI handles ----------
   const historyPanel = document.getElementById('historyPanel');
@@ -1785,17 +1949,33 @@
 	    }
 	  }
 
-	  function applyDocsStyle(style) {
-	    const headingKey = String(style?.heading_font || docsStyleState.heading_font || 'sans');
-	    const bodyKey = String(style?.body_font || docsStyleState.body_font || 'sans');
-	    docsStyleState = { heading_font: headingKey, body_font: bodyKey };
-	    const headingCss = resolveDocsFontCss(headingKey);
-	    const bodyCss = resolveDocsFontCss(bodyKey);
-	    if (headingCss) document.documentElement.style.setProperty('--docs-heading-font', headingCss);
-	    if (bodyCss) document.documentElement.style.setProperty('--docs-body-font', bodyCss);
-	    populateDocsFontSelect(docsHeadingFontEl, headingKey);
-	    populateDocsFontSelect(docsBodyFontEl, bodyKey);
-	  }
+  function applyDocsStyle(style) {
+    const headingKey = String(style?.heading_font || docsStyleState.heading_font || 'sans');
+    const bodyKey = String(style?.body_font || docsStyleState.body_font || 'sans');
+    const coverType = String(style?.cover_type ?? docsStyleState.cover_type ?? 'Guide');
+    const coverImage = String(style?.cover_image ?? docsStyleState.cover_image ?? '');
+    const coverText = String(style?.cover_text ?? docsStyleState.cover_text ?? '');
+    const coverCopyright = String(style?.cover_copyright ?? docsStyleState.cover_copyright ?? '');
+    docsStyleState = {
+      heading_font: headingKey,
+      body_font: bodyKey,
+      cover_type: coverType,
+      cover_image: coverImage,
+      cover_text: coverText,
+      cover_copyright: coverCopyright
+    };
+    const headingCss = resolveDocsFontCss(headingKey);
+    const bodyCss = resolveDocsFontCss(bodyKey);
+    if (headingCss) document.documentElement.style.setProperty('--docs-heading-font', headingCss);
+    if (bodyCss) document.documentElement.style.setProperty('--docs-body-font', bodyCss);
+    populateDocsFontSelect(docsHeadingFontEl, headingKey);
+    populateDocsFontSelect(docsBodyFontEl, bodyKey);
+    if (docsCoverTypeEl) docsCoverTypeEl.value = coverType || '';
+    if (docsCoverImageEl) docsCoverImageEl.value = coverImage || '';
+    if (docsCoverTextEl) docsCoverTextEl.value = coverText || '';
+    if (docsCoverCopyrightEl) docsCoverCopyrightEl.value = coverCopyright || '';
+    if (docsState.editing) applyCoverEditorState();
+  }
 
 	  async function loadDocsStyle() {
 	    try {
@@ -1806,13 +1986,17 @@
 	    }
 	  }
 
-	  async function saveDocsStyle() {
-	    if (!docsHeadingFontEl || !docsBodyFontEl) return;
-	    const payload = {
-	      heading_font: String(docsHeadingFontEl.value || '').trim(),
-	      body_font: String(docsBodyFontEl.value || '').trim()
-	    };
-	    applyDocsStyle(payload);
+  async function saveDocsStyle() {
+    if (!docsHeadingFontEl || !docsBodyFontEl) return;
+    const payload = {
+      heading_font: String(docsHeadingFontEl.value || '').trim(),
+      body_font: String(docsBodyFontEl.value || '').trim(),
+      cover_type: String(docsCoverTypeEl?.value || '').trim(),
+      cover_image: String(docsCoverImageEl?.value || '').trim(),
+      cover_text: String(docsCoverTextEl?.value || '').trim(),
+      cover_copyright: String(docsCoverCopyrightEl?.value || '').trim()
+    };
+    applyDocsStyle(payload);
 	    try {
 	      await apiJson('/docs/style', { method: 'POST', body: payload });
 	      if (docsStatusEl) docsStatusEl.textContent = 'Docs font updated.';
@@ -1878,6 +2062,9 @@
 	  const adminReindexRefreshBtnEl = document.getElementById('adminReindexRefreshBtn');
 	  const adminReindexStatusEl = document.getElementById('adminReindexStatus');
 	  const adminReindexLogsEl = document.getElementById('adminReindexLogs');
+	  const adminPublishRefreshBtnEl = document.getElementById('adminPublishRefreshBtn');
+	  const adminPublishStatusEl = document.getElementById('adminPublishStatus');
+	  const adminPublishListEl = document.getElementById('adminPublishList');
 
 		  const adminWebEnabledEl = document.getElementById('adminWebEnabled');
 		  const adminWebTimeoutSEl = document.getElementById('adminWebTimeoutS');
@@ -1897,11 +2084,13 @@
 			  const adminUsersStatusEl = document.getElementById('adminUsersStatus');
 			  const adminUsersListEl = document.getElementById('adminUsersList');
 			  const adminUserEditDetailsEl = document.getElementById('adminUserEditDetails');
-			  const adminEditUserUsernameEl = document.getElementById('adminEditUserUsername');
-			  const adminEditUserEmailEl = document.getElementById('adminEditUserEmail');
-			  const adminEditUserRoleEl = document.getElementById('adminEditUserRole');
-			  const adminEditUserDisabledEl = document.getElementById('adminEditUserDisabled');
-			  const adminEditUserGreetingEl = document.getElementById('adminEditUserGreeting');
+		  const adminEditUserUsernameEl = document.getElementById('adminEditUserUsername');
+		  const adminEditUserEmailEl = document.getElementById('adminEditUserEmail');
+		  const adminEditUserRoleEl = document.getElementById('adminEditUserRole');
+		  const adminEditUserDocsEditEl = document.getElementById('adminEditUserDocsEdit');
+		  const adminEditUserDocsPublishEl = document.getElementById('adminEditUserDocsPublish');
+		  const adminEditUserDisabledEl = document.getElementById('adminEditUserDisabled');
+		  const adminEditUserGreetingEl = document.getElementById('adminEditUserGreeting');
 			  const adminEditUserPasswordEl = document.getElementById('adminEditUserPassword');
 			  const adminEditUserSaveBtnEl = document.getElementById('adminEditUserSaveBtn');
 			  const adminEditUserClearBtnEl = document.getElementById('adminEditUserClearBtn');
@@ -1914,8 +2103,17 @@
     const docsStyleCardEl = document.getElementById('docsStyleCard');
     const docsHeadingFontEl = document.getElementById('docsHeadingFont');
     const docsBodyFontEl = document.getElementById('docsBodyFont');
+    const docsCoverTypeEl = document.getElementById('docsCoverType');
+    const docsCoverImageEl = document.getElementById('docsCoverImage');
+    const docsCoverTextEl = document.getElementById('docsCoverText');
+    const docsCoverCopyrightEl = document.getElementById('docsCoverCopyright');
     const docsNewGuideBtn = document.getElementById('docsNewGuideBtn');
     const docsNewSectionBtn = document.getElementById('docsNewSectionBtn');
+    const docsManageActionsEl = document.getElementById('docsManageActions');
+    const docsExcludeWrapEl = document.getElementById('docsExcludeWrap');
+    const docsExcludeToggleEl = document.getElementById('docsExcludeToggle');
+    const docsDeleteGuideBtn = document.getElementById('docsDeleteGuideBtn');
+    const docsDeletePageBtn = document.getElementById('docsDeletePageBtn');
     const docsSearchInputEl = document.getElementById('docsSearchInput');
     const docsSearchBtn = document.getElementById('docsSearchBtn');
     const docsSearchClearBtn = document.getElementById('docsSearchClearBtn');
@@ -1933,8 +2131,29 @@
     const docsEditTextEl = document.getElementById('docsEditText');
     const docsEditPreviewEl = document.getElementById('docsEditPreview');
     const docsEditMetaEl = document.getElementById('docsEditMeta');
+    const docsCoverEditorEl = document.getElementById('docsCoverEditor');
+    const docsCoverDisabledEl = document.getElementById('docsCoverDisabled');
+    const docsCoverFieldsEl = document.getElementById('docsCoverFields');
+    const docsCoverGoFirstBtn = document.getElementById('docsCoverGoFirstBtn');
+    const docsCoverTypeEditEl = document.getElementById('docsCoverTypeEdit');
+    const docsCoverTitleEditEl = document.getElementById('docsCoverTitleEdit');
+    const docsCoverImageEditEl = document.getElementById('docsCoverImageEdit');
+    const docsCoverTextEditEl = document.getElementById('docsCoverTextEdit');
+    const docsCoverVersionEditEl = document.getElementById('docsCoverVersionEdit');
+    const docsCoverDateEditEl = document.getElementById('docsCoverDateEdit');
+    const docsCoverCopyrightEditEl = document.getElementById('docsCoverCopyrightEdit');
+    const docsHeaderLeftEditEl = document.getElementById('docsHeaderLeftEdit');
+    const docsHeaderRightEditEl = document.getElementById('docsHeaderRightEdit');
+    const docsCoverPreviewEl = document.getElementById('docsCoverPreview');
+    const docsCoverPreviewTypeEl = document.getElementById('docsCoverPreviewType');
+    const docsCoverPreviewTitleEl = document.getElementById('docsCoverPreviewTitle');
+    const docsCoverPreviewImageEl = document.getElementById('docsCoverPreviewImage');
+    const docsCoverPreviewTextEl = document.getElementById('docsCoverPreviewText');
+    const docsCoverPreviewFooterEl = document.getElementById('docsCoverPreviewFooter');
+    const docsCoverResetBtn = document.getElementById('docsCoverResetBtn');
     const docsEditStatusEl = document.getElementById('docsEditStatus');
     const docsEditSaveDraftBtn = document.getElementById('docsEditSaveDraftBtn');
+    const docsEditRequestPublishBtn = document.getElementById('docsEditRequestPublishBtn');
     const docsEditPublishBtn = document.getElementById('docsEditPublishBtn');
     const docsEditDiscardBtn = document.getElementById('docsEditDiscardBtn');
     const docsEditResetBaseBtn = document.getElementById('docsEditResetBaseBtn');
@@ -2089,6 +2308,7 @@
 
 	    const running = job?.status === 'running';
 	    if (adminReindexBtnEl) adminReindexBtnEl.disabled = Boolean(running);
+	    if (adminReindexRefreshBtnEl) adminReindexRefreshBtnEl.disabled = Boolean(running);
 	  }
 
 	  async function fetchReindexStatus({ startPoll = true } = {}) {
@@ -2140,8 +2360,141 @@
 	    }
 	  }
 
+	  async function startRefresh() {
+	    const computeEmb = Boolean(adminIngestEmbeddingsEl?.checked);
+	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 448);
+	    const embBatch = Number(adminEmbeddingBatchSizeEl?.value || 8);
+	    const includeEdits = Boolean(adminIncludeEditsEl?.checked);
+
+	    if (!confirm('Refresh index from existing datastore? This keeps current Markdown and rebuilds search/embeddings.')) return;
+	    if (adminReindexStatusEl) adminReindexStatusEl.textContent = 'Starting refresh...';
+	    try {
+	      const payload = await apiJson('/admin/refresh', {
+	        method: 'POST',
+	        body: {
+	          compute_embeddings: computeEmb,
+	          embedding_max_chars: embMax,
+	          embedding_batch_size: embBatch,
+	          include_edits: includeEdits,
+	        }
+	      });
+	      renderReindexStatus(payload);
+	      fetchReindexStatus().catch(() => {});
+	    } catch (e) {
+	      if (adminReindexStatusEl) adminReindexStatusEl.textContent = `Refresh failed: ${e?.raw ? String(e.raw) : String(e)}`;
+	    }
+	  }
+
 		  if (adminReindexBtnEl) adminReindexBtnEl.addEventListener('click', () => startReindex());
-		  if (adminReindexRefreshBtnEl) adminReindexRefreshBtnEl.addEventListener('click', () => fetchReindexStatus());
+		  if (adminReindexRefreshBtnEl) adminReindexRefreshBtnEl.addEventListener('click', () => startRefresh());
+
+	  function setAdminPublishStatus(text, { error = false } = {}) {
+	    if (!adminPublishStatusEl) return;
+	    adminPublishStatusEl.textContent = String(text || '');
+	    adminPublishStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
+	  }
+
+	  function renderPublishRequests(items) {
+	    if (!adminPublishListEl) return;
+	    adminPublishListEl.innerHTML = '';
+	    const list = Array.isArray(items) ? items : [];
+	    if (!list.length) {
+	      adminPublishListEl.innerHTML = `<div class="tiny muted">No pending requests.</div>`;
+	      return;
+	    }
+	    list.forEach((req) => {
+	      const item = document.createElement('div');
+	      item.className = 'item';
+	      const docLabel = `${req.doc_title || req.doc_id} › ${req.page_title || req.page_id}`;
+	      const who = req.author_username ? `${req.author_username}` : (req.author_id || 'unknown');
+	      const when = req.updated_at ? new Date(req.updated_at).toLocaleString() : '';
+	      item.innerHTML = `
+	        <div class="top">
+	          <span class="badge">${docLabel}</span>
+	          <span class="badge">${who}</span>
+	        </div>
+	        <div class="tagline">Updated: ${when}</div>
+	      `;
+	      const actions = document.createElement('div');
+	      actions.className = 'inline';
+	      actions.style.marginTop = '8px';
+
+	      const openBtn = document.createElement('button');
+	      openBtn.className = 'btn ghost small';
+	      openBtn.textContent = 'OPEN';
+	      openBtn.addEventListener('click', () => {
+	        openDocsReader({
+	          doc_id: req.doc_id,
+	          page_id: req.page_id,
+	          version: docsState.version || req.version || null,
+	          fullscreen: true,
+	        });
+	      });
+
+	      const approveBtn = document.createElement('button');
+	      approveBtn.className = 'btn primary small';
+	      approveBtn.textContent = 'APPROVE';
+	      approveBtn.addEventListener('click', async () => {
+	        if (!confirm(`Approve publish for "${docLabel}"?`)) return;
+	        setAdminPublishStatus('Approving…');
+	        try {
+	          await apiJson(
+	            `/admin/publish-requests/${encodeURIComponent(req.doc_id)}/${encodeURIComponent(req.page_id)}/approve`,
+	            { method: 'POST', body: { version: docsState.version || null } }
+	          );
+	          await loadPublishRequests();
+	          setAdminPublishStatus('Approved.');
+	        } catch (e) {
+	          const raw = e?.raw ? String(e.raw) : String(e);
+	          setAdminPublishStatus(`Approve failed: ${raw}`, { error: true });
+	        }
+	      });
+
+	      const rejectBtn = document.createElement('button');
+	      rejectBtn.className = 'btn ghost small';
+	      rejectBtn.textContent = 'REJECT';
+	      rejectBtn.addEventListener('click', async () => {
+	        const note = prompt('Reject reason (optional):', '') || '';
+	        setAdminPublishStatus('Rejecting…');
+	        try {
+	          await apiJson(
+	            `/admin/publish-requests/${encodeURIComponent(req.doc_id)}/${encodeURIComponent(req.page_id)}/reject`,
+	            { method: 'POST', body: { version: docsState.version || null, note: note || null } }
+	          );
+	          await loadPublishRequests();
+	          setAdminPublishStatus('Rejected.');
+	        } catch (e) {
+	          const raw = e?.raw ? String(e.raw) : String(e);
+	          setAdminPublishStatus(`Reject failed: ${raw}`, { error: true });
+	        }
+	      });
+
+	      actions.appendChild(openBtn);
+	      actions.appendChild(approveBtn);
+	      actions.appendChild(rejectBtn);
+	      item.appendChild(actions);
+	      adminPublishListEl.appendChild(item);
+	    });
+	  }
+
+	  async function loadPublishRequests() {
+	    if (!adminPublishListEl) return;
+	    setAdminPublishStatus('Loading…');
+	    try {
+	      const ver = docsState.version || null;
+	      const qs = ver
+	        ? `?version=${encodeURIComponent(ver)}&status=pending`
+	        : '?status=pending';
+	      const payload = await apiJson(`/admin/publish-requests${qs}`);
+	      renderPublishRequests(payload?.requests || []);
+	      setAdminPublishStatus('');
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      setAdminPublishStatus(`Failed to load requests: ${raw}`, { error: true });
+	    }
+	  }
+
+	  adminPublishRefreshBtnEl?.addEventListener('click', () => loadPublishRequests());
 
 			  function setAdminUsersStatus(text, { error = false } = {}) {
 			    if (!adminUsersStatusEl) return;
@@ -2162,6 +2515,8 @@
 			    if (adminEditUserUsernameEl) adminEditUserUsernameEl.value = u.username || '';
 			    if (adminEditUserEmailEl) adminEditUserEmailEl.value = u.email || '';
 			    if (adminEditUserRoleEl) adminEditUserRoleEl.value = String(u.role || 'client');
+			    if (adminEditUserDocsEditEl) adminEditUserDocsEditEl.checked = Boolean(u.docs_edit);
+			    if (adminEditUserDocsPublishEl) adminEditUserDocsPublishEl.checked = Boolean(u.docs_publish);
 			    if (adminEditUserDisabledEl) adminEditUserDisabledEl.checked = adminSelectedUserDisabled;
 			    if (adminEditUserGreetingEl) adminEditUserGreetingEl.value = u.greeting || '';
 			    if (adminEditUserPasswordEl) adminEditUserPasswordEl.value = '';
@@ -2176,6 +2531,8 @@
 			    if (adminEditUserUsernameEl) adminEditUserUsernameEl.value = '';
 			    if (adminEditUserEmailEl) adminEditUserEmailEl.value = '';
 			    if (adminEditUserRoleEl) adminEditUserRoleEl.value = 'client';
+			    if (adminEditUserDocsEditEl) adminEditUserDocsEditEl.checked = false;
+			    if (adminEditUserDocsPublishEl) adminEditUserDocsPublishEl.checked = false;
 			    if (adminEditUserDisabledEl) adminEditUserDisabledEl.checked = false;
 			    if (adminEditUserGreetingEl) adminEditUserGreetingEl.value = '';
 			    if (adminEditUserPasswordEl) adminEditUserPasswordEl.value = '';
@@ -2190,12 +2547,16 @@
 			    }
 			    const emailRaw = String(adminEditUserEmailEl?.value || '').trim();
 			    const role = String(adminEditUserRoleEl?.value || 'client').trim();
+			    const docsEdit = Boolean(adminEditUserDocsEditEl?.checked);
+			    const docsPublish = Boolean(adminEditUserDocsPublishEl?.checked);
 			    const desiredDisabled = Boolean(adminEditUserDisabledEl?.checked);
 			    const greetingRaw = String(adminEditUserGreetingEl?.value || '').trim();
 			    const password = String(adminEditUserPasswordEl?.value || '');
 			    const body = {
 			      email: emailRaw ? emailRaw : null,
 			      role,
+			      docs_edit: docsEdit,
+			      docs_publish: docsPublish,
 			      greeting: greetingRaw,
 			    };
 			    if (desiredDisabled !== adminSelectedUserDisabled) body.disabled = desiredDisabled;
@@ -2322,6 +2683,7 @@
 			    const llm = effective.llm || {};
 			    const web = effective.web || {};
 			    loadAdminUsers().catch(() => {});
+			    loadPublishRequests().catch(() => {});
 
 		    adminRetrievalModeEl.value = retrieval.mode || 'bm25';
 		    adminRetrievalKEl.value = retrieval.k_default ?? 8;
@@ -2583,6 +2945,50 @@
     return u;
   }
 
+  function parseImageWidth(rawUrl) {
+    let src = String(rawUrl || '').trim();
+    if (!src) return { src: '', width: null };
+    let widthSpec = null;
+    const pipeIdx = src.indexOf('|');
+    if (pipeIdx >= 0) {
+      const tail = src.slice(pipeIdx + 1).trim();
+      src = src.slice(0, pipeIdx).trim();
+      const m = tail.match(/^(?:width|w)=(.+)$/i);
+      if (m) widthSpec = m[1].trim();
+    }
+    const hashIdx = src.indexOf('#');
+    const queryIdx = src.indexOf('?');
+    if (!widthSpec && queryIdx >= 0) {
+      const query = src.slice(queryIdx + 1, hashIdx >= 0 ? hashIdx : undefined);
+      const params = new URLSearchParams(query);
+      widthSpec = params.get('width') || params.get('w');
+    }
+    if (!widthSpec && hashIdx >= 0) {
+      const fragment = src.slice(hashIdx + 1);
+      if (fragment.includes('=')) {
+        const params = new URLSearchParams(fragment);
+        widthSpec = params.get('width') || params.get('w');
+      }
+    }
+    if (!widthSpec) return { src, width: null };
+    const m = widthSpec.match(/^(\d+(?:\.\d+)?)(%|px|mm|cm)?$/i);
+    if (!m) return { src, width: null };
+    const value = Number(m[1]);
+    const unit = (m[2] || 'px').toLowerCase();
+    return {
+      src,
+      width: { value, unit, css: `${value}${unit}` },
+    };
+  }
+
+  function applyImageWidthStyle(token, width) {
+    if (!width || !width.css) return;
+    const existing = token.attrGet('style') || '';
+    const suffix = `width:${width.css};height:auto;max-width:100%;`;
+    const merged = existing ? `${existing};${suffix}` : suffix;
+    token.attrSet('style', merged);
+  }
+
   function mdInline(text) {
     const raw = String(text ?? '');
     const stash = [];
@@ -2595,9 +3001,11 @@
     let s = raw;
 
     s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, url) => {
-      const src = normalizeUrl(url);
+      const parsed = parseImageWidth(url);
+      const src = normalizeUrl(parsed.src);
       if (!src) return '';
-      return put(`<img src="${src}" alt="${escapeHtml(alt || '')}">`);
+      const style = parsed.width ? ` style="${parsed.width.css ? `width:${parsed.width.css};height:auto;max-width:100%;` : ''}"` : '';
+      return put(`<img src="${src}" alt="${escapeHtml(alt || '')}"${style}>`);
     });
 
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
@@ -2934,8 +3342,10 @@
     md.renderer.rules.image = (tokens, idx, options, env, self) => {
       const token = tokens[idx];
       const src = token.attrGet('src');
-      const norm = normalizeUrl(src || '');
+      const parsed = parseImageWidth(src || '');
+      const norm = normalizeUrl(parsed.src || '');
       if (norm) token.attrSet('src', norm);
+      applyImageWidthStyle(token, parsed.width);
       token.attrSet('loading', 'lazy');
       return defaultImage(tokens, idx, options, env, self);
     };
@@ -2965,6 +3375,131 @@
     let html = markdownRenderer.render(normalized, env);
     html = wrapCitations(html);
     return html;
+  }
+
+  function stripYamlQuotes(value) {
+    const raw = String(value ?? '').trim();
+    if (raw.length >= 2 && raw[0] === raw[raw.length - 1] && (raw[0] === '"' || raw[0] === "'")) {
+      return raw.slice(1, -1).trim();
+    }
+    return raw;
+  }
+
+  function parseFrontMatterBlock(markdown) {
+    const src = String(markdown || '').replace(/\r\n?/g, '\n');
+    if (!src.startsWith('---')) return { meta: {}, body: src, hasFrontMatter: false };
+    const lines = src.split('\n');
+    if (!lines.length || lines[0].trim() !== '---') return { meta: {}, body: src, hasFrontMatter: false };
+    let endIdx = -1;
+    for (let i = 1; i < lines.length; i += 1) {
+      if (lines[i].trim() === '---') {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx === -1) return { meta: {}, body: src, hasFrontMatter: false };
+    const frontLines = lines.slice(1, endIdx);
+    const body = lines.slice(endIdx + 1).join('\n').replace(/^\n+/, '');
+    const meta = {};
+    let currentKey = null;
+    frontLines.forEach((line) => {
+      if (!line.trim()) return;
+      const top = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+      if (top) {
+        const key = top[1];
+        const val = top[2].trim();
+        if (!val) {
+          meta[key] = {};
+          currentKey = key;
+        } else {
+          meta[key] = stripYamlQuotes(val);
+          currentKey = null;
+        }
+        return;
+      }
+      if (currentKey) {
+        const child = line.match(/^\s+([A-Za-z0-9_-]+):\s*(.*)$/);
+        if (child) {
+          const node = meta[currentKey] && typeof meta[currentKey] === 'object' ? meta[currentKey] : {};
+          node[child[1]] = stripYamlQuotes(child[2]);
+          meta[currentKey] = node;
+        }
+      }
+    });
+    return { meta, body, hasFrontMatter: true };
+  }
+
+  function serializeFrontMatter(meta) {
+    if (!meta || typeof meta !== 'object' || !Object.keys(meta).length) return '';
+    const lines = ['---'];
+    const quote = (val) => {
+      const raw = String(val ?? '');
+      if (!raw) return '';
+      if (/[#:\n]/.test(raw) || /^\s|\s$/.test(raw)) {
+        return `"${raw.replace(/\"/g, '\\"')}"`;
+      }
+      return raw;
+    };
+    Object.keys(meta).forEach((key) => {
+      const value = meta[key];
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        lines.push(`${key}:`);
+        Object.keys(value).forEach((childKey) => {
+          const childVal = value[childKey];
+          if (childVal === null || childVal === undefined || String(childVal).trim() === '') return;
+          lines.push(`  ${childKey}: ${quote(childVal)}`);
+        });
+        return;
+      }
+      if (value === null || value === undefined || String(value).trim() === '') return;
+      lines.push(`${key}: ${quote(value)}`);
+    });
+    lines.push('---');
+    return lines.join('\n');
+  }
+
+  function extractCoverOverrides(meta) {
+    const out = {};
+    if (meta?.cover && typeof meta.cover === 'object') {
+      Object.keys(meta.cover).forEach((key) => {
+        const val = meta.cover[key];
+        if (typeof val === 'string' && val.trim()) out[key] = val.trim();
+      });
+    }
+    const mapping = {
+      guide_type: 'type',
+      cover_type: 'type',
+      cover_title: 'title',
+      cover_image: 'image',
+      cover_text: 'text',
+      cover_version: 'version',
+      cover_date: 'date',
+      cover_copyright: 'copyright',
+    };
+    Object.keys(mapping).forEach((key) => {
+      const val = meta?.[key];
+      if (typeof val === 'string' && val.trim()) out[mapping[key]] = val.trim();
+    });
+    return out;
+  }
+
+  function extractHeaderOverrides(meta) {
+    const out = {};
+    if (meta?.headers && typeof meta.headers === 'object') {
+      Object.keys(meta.headers).forEach((key) => {
+        const val = meta.headers[key];
+        if (typeof val === 'string' && val.trim()) out[key] = val.trim();
+      });
+    }
+    const mapping = {
+      header_left: 'left',
+      header_right: 'right',
+    };
+    Object.keys(mapping).forEach((key) => {
+      const val = meta?.[key];
+      if (typeof val === 'string' && val.trim()) out[mapping[key]] = val.trim();
+    });
+    return out;
   }
 
   function buildChunkImageMap(contextChunks) {
@@ -3233,8 +3768,7 @@
       }
 
     if (role === 'assistant') {
-      const roleName = String(authState?.role || 'anonymous');
-      const canEditDocs = ['admin', 'redactor', 'support'].includes(roleName);
+      const canEditDocs = Boolean(authState?.docs_edit || authState?.role === 'admin');
       if (canEditDocs) {
         const actions = document.createElement('div');
         actions.className = 'actions';
@@ -3380,7 +3914,16 @@
 	  }
 
 	  // ---------- Auth ----------
-		  let authState = { authenticated: false, role: 'anonymous', username: null, email: null, greeting: null };
+		  let authState = {
+		    authenticated: false,
+		    role: 'anonymous',
+		    user_id: null,
+		    username: null,
+		    email: null,
+		    greeting: null,
+		    docs_edit: false,
+		    docs_publish: false
+		  };
 
 	  function setActionVisible(el, visible) {
 	    if (!el) return;
@@ -3416,12 +3959,14 @@
 		    setActionVisible(redactorBtn, isAdmin || isRedactor);
 		    setActionVisible(debugBtn, isAdmin || isRedactor || isSupport);
 		    setActionVisible(historyBtn, isAdmin || isRedactor || isSupport || isClient);
-		    const canEditDocs = isAdmin || isRedactor || isSupport;
+		    const canEditDocs = Boolean(a?.docs_edit || isAdmin);
 		    setActionVisible(docsEditBtn, canEditDocs);
 		    setActionVisible(docsPdfBtn, canEditDocs);
 		    setActionVisible(docsNewGuideBtn, canEditDocs);
 		    setActionVisible(docsNewSectionBtn, canEditDocs);
 		    if (docsEditActionsEl) docsEditActionsEl.style.display = canEditDocs ? '' : 'none';
+		    if (docsManageActionsEl) docsManageActionsEl.style.display = canEditDocs ? '' : 'none';
+        updateDocsManageActions();
 		    if (docsStyleCardEl) docsStyleCardEl.style.display = isAdmin ? '' : 'none';
 
 		    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
@@ -3456,7 +4001,16 @@
 	      const me = await apiJson('/auth/me');
 	      authState = me;
 	    } catch (e) {
-		      authState = { authenticated: false, role: 'anonymous', username: null, email: null, greeting: null };
+		      authState = {
+		        authenticated: false,
+		        role: 'anonymous',
+		        user_id: null,
+		        username: null,
+		        email: null,
+		        greeting: null,
+		        docs_edit: false,
+		        docs_publish: false
+		      };
 	    }
 	    if (userToggle) userToggle.textContent = formatUserLabel(authState);
 	    syncGreeting(authState);
@@ -3478,7 +4032,7 @@
 	    authHintEl.style.color = 'var(--muted)';
 	    try {
 	      const resp = await apiJson('/auth/login', { method: 'POST', body: { username, password } });
-		      authState = resp.user || { authenticated: true, role: 'client', username, email: null, greeting: null };
+		      authState = resp.user || { authenticated: true, role: 'client', user_id: null, username, email: null, greeting: null };
 	      loginPasswordEl.value = '';
 	      userSettings.classList.remove('visible');
 	      session.session_id = null;
@@ -3562,6 +4116,9 @@
     editDirty: false,
     navCollapsed: false,
     scrollLock: false,
+    frontMatter: null,
+    coverOverrides: null,
+    headerOverrides: null,
   };
 
   const DOCS_NAV_STORAGE_KEY = 'luxriot_docs_nav';
@@ -3727,6 +4284,7 @@
     docsState.selectedDocTitle = null;
     docsState.htmlNameToPageId = new Map();
     clearDocsSearch({ keepInput: false });
+    updateDocsManageActions();
   }
 
   async function ensureDocsVersions() {
@@ -3869,6 +4427,61 @@
     }
   }
 
+  function getSelectedDocEntry() {
+    const docs = Array.isArray(docsState.catalog?.docs) ? docsState.catalog.docs : [];
+    const docId = docsState.selectedDocId || docsGuideSelectEl?.value || null;
+    if (!docId) return null;
+    return docs.find((d) => d.doc_id === docId) || null;
+  }
+
+  function updateDocsManageActions() {
+    if (!docsManageActionsEl) return;
+    const role = String(authState?.role || 'anonymous');
+    const isAdmin = role === 'admin';
+    const canEditDocs = Boolean(authState?.docs_edit || isAdmin);
+    if (!canEditDocs) {
+      docsManageActionsEl.style.display = 'none';
+      return;
+    }
+    docsManageActionsEl.style.display = '';
+    const entry = getSelectedDocEntry();
+    const docId = entry?.doc_id || docsState.selectedDocId || null;
+    const docOrigin = String(entry?.origin || 'ingested');
+    const ragExcluded = Boolean(entry?.rag_excluded);
+
+    if (docsExcludeToggleEl) {
+      docsExcludeToggleEl.checked = ragExcluded;
+      docsExcludeToggleEl.disabled = !isAdmin || !docId;
+    }
+    if (docsExcludeWrapEl) docsExcludeWrapEl.style.opacity = !isAdmin || !docId ? '0.5' : '1';
+
+    let canDeleteGuide = false;
+    if (docId && docOrigin === 'custom') {
+      if (isAdmin) {
+        canDeleteGuide = true;
+      } else if (authState?.user_id) {
+        const ownerId = String(authState.user_id);
+        const pages = Array.isArray(docsState.pages) ? docsState.pages : [];
+        if (pages.length) {
+          canDeleteGuide = pages.every((p) => p.custom && String(p.author_id || '') === ownerId);
+        }
+      }
+    }
+
+    if (docsDeleteGuideBtn) docsDeleteGuideBtn.disabled = !canDeleteGuide;
+
+    const page = docsState.page || null;
+    let canDeletePage = false;
+    if (page && page.custom) {
+      if (isAdmin) {
+        canDeletePage = true;
+      } else if (authState?.user_id && String(page.author_id || '') === String(authState.user_id)) {
+        canDeletePage = true;
+      }
+    }
+    if (docsDeletePageBtn) docsDeletePageBtn.disabled = !canDeletePage;
+  }
+
   async function loadDocPages(docId) {
     const ver = docsState.version || null;
     const qs = ver ? `?version=${encodeURIComponent(ver)}` : '';
@@ -3881,6 +4494,7 @@
       const name = normalizeHtmlName(p.source_path).toLowerCase();
       if (name) docsState.htmlNameToPageId.set(name, p.page_id);
     });
+    updateDocsManageActions();
     return data;
   }
 
@@ -3996,33 +4610,218 @@
 	    });
 	  }
 
-	  function setDocsEditMode(enabled) {
-	    docsState.editing = Boolean(enabled);
-	    if (docsContentEl) docsContentEl.classList.toggle('editing', docsState.editing);
-	    if (!docsState.editing) {
-	      docsState.edit = null;
-	      docsState.editDirty = false;
-	      if (docsEditTextEl) docsEditTextEl.value = '';
-	      if (docsEditPreviewEl) docsEditPreviewEl.innerHTML = '';
-	      if (docsEditStatusEl) docsEditStatusEl.textContent = '';
-	      if (docsEditMetaEl) docsEditMetaEl.textContent = 'Edit mode';
-	    }
-	  }
+  function setDocsEditMode(enabled) {
+    docsState.editing = Boolean(enabled);
+    if (docsContentEl) docsContentEl.classList.toggle('editing', docsState.editing);
+    if (!docsState.editing) {
+      docsState.edit = null;
+      docsState.editDirty = false;
+      docsState.frontMatter = null;
+      docsState.coverOverrides = null;
+      docsState.headerOverrides = null;
+      if (docsEditTextEl) docsEditTextEl.value = '';
+      if (docsEditPreviewEl) docsEditPreviewEl.innerHTML = '';
+      if (docsEditStatusEl) docsEditStatusEl.textContent = '';
+      if (docsEditMetaEl) docsEditMetaEl.textContent = 'Edit mode';
+    }
+  }
 
-	  function updateDocsEditPreview() {
-	    if (!docsEditTextEl || !docsEditPreviewEl) return;
-	    docsEditPreviewEl.innerHTML = renderMarkdown(docsEditTextEl.value || '', { addHeadingIds: false });
-	  }
+  function isFirstDocsPage() {
+    const first = Array.isArray(docsState.pages) && docsState.pages.length ? docsState.pages[0].page_id : null;
+    return Boolean(first && docsState.page && docsState.page.page_id === first);
+  }
+
+  function getCoverDefaults() {
+    return {
+      type: String(docsStyleState.cover_type || 'Guide'),
+      title: String(docsState.selectedDocTitle || docsState.selectedDocId || ''),
+      image: String(docsStyleState.cover_image || ''),
+      text: String(docsStyleState.cover_text || ''),
+      version: String(docsState.version || ''),
+      date: '',
+      copyright: String(docsStyleState.cover_copyright || ''),
+    };
+  }
+
+  function updateCoverEditorVisibility() {
+    if (!docsCoverEditorEl) return;
+    const isFirst = isFirstDocsPage();
+    docsCoverEditorEl.classList.toggle('disabled', !isFirst);
+  }
+
+  function applyCoverEditorState() {
+    updateCoverEditorVisibility();
+    const defaults = getCoverDefaults();
+    if (docsCoverTypeEditEl) docsCoverTypeEditEl.placeholder = defaults.type || 'Guide';
+    if (docsCoverTitleEditEl) docsCoverTitleEditEl.placeholder = defaults.title || 'Auto title';
+    if (docsCoverImageEditEl) docsCoverImageEditEl.placeholder = defaults.image || '/assets/...';
+    if (docsCoverTextEditEl) docsCoverTextEditEl.placeholder = defaults.text || 'Optional summary';
+    if (docsCoverVersionEditEl) docsCoverVersionEditEl.placeholder = defaults.version || 'Auto version';
+    if (docsCoverDateEditEl) docsCoverDateEditEl.placeholder = 'Auto date/time';
+    if (docsCoverCopyrightEditEl) docsCoverCopyrightEditEl.placeholder = defaults.copyright || '© Luxriot';
+    if (docsHeaderLeftEditEl) docsHeaderLeftEditEl.placeholder = 'Auto (guide type)';
+    if (docsHeaderRightEditEl) docsHeaderRightEditEl.placeholder = 'Auto (section heading)';
+
+    const overrides = docsState.coverOverrides || {};
+    if (docsCoverTypeEditEl) docsCoverTypeEditEl.value = overrides.type || '';
+    if (docsCoverTitleEditEl) docsCoverTitleEditEl.value = overrides.title || '';
+    if (docsCoverImageEditEl) docsCoverImageEditEl.value = overrides.image || '';
+    if (docsCoverTextEditEl) docsCoverTextEditEl.value = overrides.text || '';
+    if (docsCoverVersionEditEl) docsCoverVersionEditEl.value = overrides.version || '';
+    if (docsCoverDateEditEl) docsCoverDateEditEl.value = overrides.date || '';
+    if (docsCoverCopyrightEditEl) docsCoverCopyrightEditEl.value = overrides.copyright || '';
+    const headers = docsState.headerOverrides || {};
+    if (docsHeaderLeftEditEl) docsHeaderLeftEditEl.value = headers.left || '';
+    if (docsHeaderRightEditEl) docsHeaderRightEditEl.value = headers.right || '';
+    updateCoverPreview();
+  }
+
+  function resolveCoverPreviewValue(val, fallback) {
+    const v = String(val || '').trim();
+    if (v) return v;
+    const f = String(fallback || '').trim();
+    return f;
+  }
+
+  function updateCoverPreview() {
+    if (!docsCoverPreviewEl) return;
+    const defaults = getCoverDefaults();
+    const overrides = collectCoverOverrides();
+    const type = resolveCoverPreviewValue(overrides.type, defaults.type);
+    const title = resolveCoverPreviewValue(overrides.title, defaults.title);
+    const image = resolveCoverPreviewValue(overrides.image, defaults.image);
+    const text = resolveCoverPreviewValue(overrides.text, defaults.text);
+    const version = resolveCoverPreviewValue(overrides.version, defaults.version);
+    let date = resolveCoverPreviewValue(overrides.date, '');
+    if (!date) {
+      const now = new Date();
+      date = now.toLocaleString();
+    }
+    const copyright = resolveCoverPreviewValue(overrides.copyright, defaults.copyright);
+
+    if (docsCoverPreviewTypeEl) docsCoverPreviewTypeEl.textContent = type ? type.toUpperCase() : '';
+    if (docsCoverPreviewTitleEl) docsCoverPreviewTitleEl.textContent = title || '';
+    if (docsCoverPreviewTextEl) docsCoverPreviewTextEl.textContent = text || '';
+    if (docsCoverPreviewFooterEl) {
+      const parts = [];
+      if (version && date) parts.push(`${version} · ${date}`);
+      else if (version) parts.push(version);
+      else if (date) parts.push(date);
+      if (copyright) parts.push(copyright);
+      docsCoverPreviewFooterEl.textContent = parts.join('\n');
+    }
+
+    if (docsCoverPreviewImageEl) {
+      docsCoverPreviewImageEl.innerHTML = '';
+      if (image) {
+        const parsed = parseImageWidth(image);
+        const src = normalizeUrl(parsed.src);
+        if (src) {
+          const img = document.createElement('img');
+          img.src = src;
+          img.alt = 'Cover';
+          docsCoverPreviewImageEl.appendChild(img);
+        }
+      }
+    }
+  }
+
+  function collectCoverOverrides() {
+    if (!isFirstDocsPage()) return {};
+    const take = (el) => String(el?.value || '').trim();
+    const overrides = {};
+    const type = take(docsCoverTypeEditEl);
+    const title = take(docsCoverTitleEditEl);
+    const image = take(docsCoverImageEditEl);
+    const text = take(docsCoverTextEditEl);
+    const version = take(docsCoverVersionEditEl);
+    const date = take(docsCoverDateEditEl);
+    const copyright = take(docsCoverCopyrightEditEl);
+    if (type) overrides.type = type;
+    if (title) overrides.title = title;
+    if (image) overrides.image = image;
+    if (text) overrides.text = text;
+    if (version) overrides.version = version;
+    if (date) overrides.date = date;
+    if (copyright) overrides.copyright = copyright;
+    return overrides;
+  }
+
+  function collectHeaderOverrides() {
+    if (!isFirstDocsPage()) return {};
+    const take = (el) => String(el?.value || '').trim();
+    const headers = {};
+    const left = take(docsHeaderLeftEditEl);
+    const right = take(docsHeaderRightEditEl);
+    if (left) headers.left = left;
+    if (right) headers.right = right;
+    return headers;
+  }
+
+  function setEditorContent(markdown, { markDirty = false } = {}) {
+    const parsed = parseFrontMatterBlock(markdown);
+    docsState.frontMatter = parsed.meta || {};
+    docsState.coverOverrides = extractCoverOverrides(docsState.frontMatter);
+    docsState.headerOverrides = extractHeaderOverrides(docsState.frontMatter);
+    if (docsEditTextEl) docsEditTextEl.value = parsed.body || '';
+    applyCoverEditorState();
+    docsState.editDirty = Boolean(markDirty);
+    updateDocsEditPreview();
+    updateCoverPreview();
+  }
+
+  function composeEditorMarkdown() {
+    const body = String(docsEditTextEl?.value || '');
+    const meta = Object.assign({}, docsState.frontMatter || {});
+    if (isFirstDocsPage()) {
+      const overrides = collectCoverOverrides();
+      if (Object.keys(overrides).length) {
+        meta.cover = overrides;
+      } else if (meta.cover) {
+        delete meta.cover;
+      }
+      const headers = collectHeaderOverrides();
+      if (Object.keys(headers).length) {
+        meta.headers = headers;
+      } else if (meta.headers) {
+        delete meta.headers;
+      }
+    }
+    const front = serializeFrontMatter(meta);
+    if (!front) return body;
+    const cleanedBody = body.replace(/^\n+/, '');
+    return `${front}\n\n${cleanedBody}`;
+  }
+
+  function updateDocsEditPreview() {
+    if (!docsEditTextEl || !docsEditPreviewEl) return;
+    docsEditPreviewEl.innerHTML = renderMarkdown(docsEditTextEl.value || '', { addHeadingIds: false });
+  }
 
 	  function updateDocsEditStatus(edit) {
 	    if (!docsEditStatusEl) return;
 	    const d = edit?.draft;
 	    const p = edit?.published;
+	    const r = edit?.publish_request;
 	    const dState = d?.updated_at ? `Draft: ${d.updated_at}` : 'Draft: none';
 	    const pState = p?.updated_at ? `Published: ${p.updated_at}` : 'Published: none';
-	    docsEditStatusEl.textContent = `${dState} · ${pState}`;
+	    let rState = 'Request: none';
+	    if (r?.status) {
+	      const stamp = r?.updated_at ? ` ${r.updated_at}` : '';
+	      rState = `Request: ${r.status}${stamp}`;
+	    }
+	    docsEditStatusEl.textContent = `${dState} · ${pState} · ${rState}`;
 	    if (docsEditSaveDraftBtn) docsEditSaveDraftBtn.disabled = !edit?.can_edit;
-	    if (docsEditPublishBtn) docsEditPublishBtn.disabled = !edit?.can_publish;
+	    if (docsEditPublishBtn) {
+	      docsEditPublishBtn.disabled = !edit?.can_publish;
+	      docsEditPublishBtn.style.display = edit?.can_publish ? '' : 'none';
+	    }
+	    if (docsEditRequestPublishBtn) {
+	      const canReq = Boolean(edit?.can_request_publish);
+	      const pending = r?.status === 'pending';
+	      docsEditRequestPublishBtn.style.display = canReq ? '' : 'none';
+	      docsEditRequestPublishBtn.disabled = !canReq || pending;
+	    }
 	    if (docsEditDiscardBtn) docsEditDiscardBtn.disabled = !Boolean(edit?.draft);
 	    if (docsEditResetPublishedBtn) docsEditResetPublishedBtn.disabled = !Boolean(edit?.published);
 	  }
@@ -4037,19 +4836,18 @@
 	    );
 	    docsState.edit = edit;
 	    docsState.editDirty = false;
-	    const draftText = edit?.draft?.content_md || '';
-	    const publishedText = edit?.published?.content_md || '';
-	    const baseText = edit?.base_markdown || '';
-	    const seed = draftText || publishedText || baseText;
-	    if (docsEditTextEl) docsEditTextEl.value = seed;
-	    if (docsEditMetaEl) {
-	      const role = authState?.role ? String(authState.role) : 'anonymous';
-	      docsEditMetaEl.textContent = `Version: ${edit?.version || '—'} · Role: ${role}`;
-	    }
-	    updateDocsEditPreview();
-	    updateDocsEditStatus(edit);
-	    return edit;
-	  }
+    const draftText = edit?.draft?.content_md || '';
+    const publishedText = edit?.published?.content_md || '';
+    const baseText = edit?.base_markdown || '';
+    const seed = draftText || publishedText || baseText;
+    setEditorContent(seed, { markDirty: false });
+    if (docsEditMetaEl) {
+      const role = authState?.role ? String(authState.role) : 'anonymous';
+      docsEditMetaEl.textContent = `Version: ${edit?.version || '—'} · Role: ${role}`;
+    }
+    updateDocsEditStatus(edit);
+    return edit;
+  }
 
 	  function insertAtCursor(textarea, text) {
 	    if (!textarea) return;
@@ -4102,10 +4900,27 @@
 	    if (type) handleInsert(type);
 	  });
 
-	  docsEditTextEl?.addEventListener('input', () => {
-	    docsState.editDirty = true;
-	    updateDocsEditPreview();
-	  });
+  docsEditTextEl?.addEventListener('input', () => {
+    docsState.editDirty = true;
+    updateDocsEditPreview();
+  });
+  const coverInputs = [
+    docsCoverTypeEditEl,
+    docsCoverTitleEditEl,
+    docsCoverImageEditEl,
+    docsCoverTextEditEl,
+    docsCoverVersionEditEl,
+    docsCoverDateEditEl,
+    docsCoverCopyrightEditEl,
+    docsHeaderLeftEditEl,
+    docsHeaderRightEditEl,
+  ];
+  coverInputs.forEach((el) => {
+    el?.addEventListener('input', () => {
+      docsState.editDirty = true;
+      updateCoverPreview();
+    });
+  });
 	  docsEditTextEl?.addEventListener('scroll', () => {
 	    if (!docsState.scrollLock) return;
 	    syncDocsScroll(docsEditTextEl, docsEditPreviewEl);
@@ -4115,17 +4930,17 @@
 	    syncDocsScroll(docsEditPreviewEl, docsEditTextEl);
 	  });
 
-	  async function saveDocsEdit(status) {
-	    const page = docsState.page;
-	    if (!page || !docsEditTextEl) return;
-	    const content = String(docsEditTextEl.value || '');
-	    if (!content.trim()) {
-	      if (docsEditStatusEl) docsEditStatusEl.textContent = 'Content is empty.';
-	      return;
-	    }
+  async function saveDocsEdit(status) {
+    const page = docsState.page;
+    if (!page || !docsEditTextEl) return;
+    const content = composeEditorMarkdown();
+    if (!content.trim()) {
+      if (docsEditStatusEl) docsEditStatusEl.textContent = 'Content is empty.';
+      return;
+    }
 	    if (docsEditStatusEl) docsEditStatusEl.textContent = status === 'published' ? 'Publishing…' : 'Saving draft…';
 	    try {
-	      const payload = { content, status, version: docsState.version || null };
+      const payload = { content, status, version: docsState.version || null };
 	      const edit = await apiJson(`/docs/page/${encodeURIComponent(page.doc_id)}/${encodeURIComponent(page.page_id)}/edit`, {
 	        method: 'POST',
 	        body: payload,
@@ -4148,40 +4963,59 @@
 	    if (!page) return;
 	    if (!confirm('Discard the current draft?')) return;
 	    if (docsEditStatusEl) docsEditStatusEl.textContent = 'Discarding draft…';
-	    try {
-	      const edit = await apiJson(
-	        `/docs/page/${encodeURIComponent(page.doc_id)}/${encodeURIComponent(page.page_id)}/edit/delete`,
-	        { method: 'POST', body: { status: 'draft', version: docsState.version || null } }
-	      );
-	      docsState.edit = edit;
-	      docsState.editDirty = false;
-	      const publishedText = edit?.published?.content_md || '';
-	      const baseText = edit?.base_markdown || '';
-	      if (docsEditTextEl) docsEditTextEl.value = publishedText || baseText;
-	      updateDocsEditPreview();
-	      updateDocsEditStatus(edit);
-	    } catch (e) {
-	      const raw = e?.raw ? String(e.raw) : String(e);
-	      if (docsEditStatusEl) docsEditStatusEl.textContent = `Discard failed: ${raw}`;
-	    }
+    try {
+      const edit = await apiJson(
+        `/docs/page/${encodeURIComponent(page.doc_id)}/${encodeURIComponent(page.page_id)}/edit/delete`,
+        { method: 'POST', body: { status: 'draft', version: docsState.version || null } }
+      );
+      docsState.edit = edit;
+      docsState.editDirty = false;
+      const publishedText = edit?.published?.content_md || '';
+      const baseText = edit?.base_markdown || '';
+      setEditorContent(publishedText || baseText, { markDirty: false });
+      updateDocsEditStatus(edit);
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      if (docsEditStatusEl) docsEditStatusEl.textContent = `Discard failed: ${raw}`;
+    }
 	  }
 
 	  docsEditSaveDraftBtn?.addEventListener('click', () => saveDocsEdit('draft'));
 	  docsEditPublishBtn?.addEventListener('click', () => saveDocsEdit('published'));
+	  async function requestDocsPublish() {
+	    const page = docsState.page;
+	    if (!page || !docsEditTextEl) return;
+	    const content = composeEditorMarkdown();
+	    if (!content.trim()) {
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = 'Content is empty.';
+	      return;
+	    }
+	    if (docsEditStatusEl) docsEditStatusEl.textContent = 'Requesting publish…';
+	    try {
+	      const edit = await apiJson(
+	        `/docs/page/${encodeURIComponent(page.doc_id)}/${encodeURIComponent(page.page_id)}/publish/request`,
+	        { method: 'POST', body: { content, version: docsState.version || null } }
+	      );
+	      docsState.edit = edit;
+	      docsState.editDirty = false;
+	      updateDocsEditStatus(edit);
+	      updateDocsEditPreview();
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      if (docsEditStatusEl) docsEditStatusEl.textContent = `Publish request failed: ${raw}`;
+	    }
+	  }
+	  docsEditRequestPublishBtn?.addEventListener('click', () => requestDocsPublish());
 	  docsEditDiscardBtn?.addEventListener('click', () => discardDocsDraft());
-	  docsEditResetBaseBtn?.addEventListener('click', () => {
-	    const base = docsState.edit?.base_markdown || '';
-	    if (docsEditTextEl) docsEditTextEl.value = base;
-	    docsState.editDirty = true;
-	    updateDocsEditPreview();
-	  });
-	  docsEditResetPublishedBtn?.addEventListener('click', () => {
-	    const published = docsState.edit?.published?.content_md || '';
-	    if (!published) return;
-	    if (docsEditTextEl) docsEditTextEl.value = published;
-	    docsState.editDirty = true;
-	    updateDocsEditPreview();
-	  });
+  docsEditResetBaseBtn?.addEventListener('click', () => {
+    const base = docsState.edit?.base_markdown || '';
+    setEditorContent(base, { markDirty: true });
+  });
+  docsEditResetPublishedBtn?.addEventListener('click', () => {
+    const published = docsState.edit?.published?.content_md || '';
+    if (!published) return;
+    setEditorContent(published, { markDirty: true });
+  });
 
 	  docsInsertLinkBtn?.addEventListener('click', () => {
 	    if (!docsEditTextEl) return;
@@ -4237,18 +5071,19 @@
 	    docsState.selectedDocTitle = page.doc_title;
 	    setDocsBreadcrumb(`${page.doc_title} › ${page.page_title}`);
 
-		    if (docsPageEl) {
-		      docsPageEl.innerHTML = renderMarkdown(page.markdown || '', { addHeadingIds: true });
-		      wireDocsInternalLinks();
-		      if (anchor) {
-	        scrollDocsToAnchor(anchor);
-	      } else {
-	        _clearDocsAnchorHighlight();
-	        docsPageEl.scrollTop = 0;
-	      }
-	    }
+    if (docsPageEl) {
+      docsPageEl.innerHTML = renderMarkdown(page.markdown || '', { addHeadingIds: true });
+      wireDocsInternalLinks();
+      if (anchor) {
+        scrollDocsToAnchor(anchor);
+      } else {
+        _clearDocsAnchorHighlight();
+        docsPageEl.scrollTop = 0;
+      }
+    }
     setDocsStatus('');
     highlightDocsActivePage();
+    updateDocsManageActions();
   }
 
   async function openDocsReader({ doc_id = null, page_id = null, anchor = null, fullscreen = null, version = null } = {}) {
@@ -4326,17 +5161,15 @@
     setDocsEditMode(true);
     await loadDocsEdit(docId, pageId);
     const seed = String(seedMarkdown || '').trim();
-    if (seed && docsEditTextEl) {
-      docsEditTextEl.value = seed;
-      docsState.editDirty = true;
-      updateDocsEditPreview();
+    if (seed) {
+      setEditorContent(seed, { markDirty: true });
       if (docsEditStatusEl) docsEditStatusEl.textContent = 'Draft: unsaved · Published: none';
     }
   }
 
   async function openAnswerInDocs({ content, context_chunks } = {}) {
-    const role = String(authState?.role || 'anonymous');
-    if (!['admin', 'redactor', 'support'].includes(role)) return;
+    const canEditDocs = Boolean(authState?.docs_edit || authState?.role === 'admin');
+    if (!canEditDocs) return;
     const raw = String(content || '').trim();
     if (!raw) return;
     if (docsState.editing && docsState.editDirty) {
@@ -4393,6 +5226,92 @@
       setDocsStatus(`Failed to load guide: ${e?.raw ? String(e.raw) : String(e)}`, { error: true });
 	    }
 	  });
+
+  docsExcludeToggleEl?.addEventListener('change', async () => {
+    const docId = docsState.selectedDocId || null;
+    if (!docId) return;
+    const desired = Boolean(docsExcludeToggleEl?.checked);
+    try {
+      await apiJson(`/docs/guide/${encodeURIComponent(docId)}/exclude`, {
+        method: 'POST',
+        body: { version: docsState.version || null, excluded: desired },
+      });
+      if (docsState.catalog && Array.isArray(docsState.catalog.docs)) {
+        const entry = docsState.catalog.docs.find((d) => d.doc_id === docId);
+        if (entry) entry.rag_excluded = desired;
+      }
+      updateDocsManageActions();
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Exclude update failed: ${raw}`, { error: true });
+      if (docsExcludeToggleEl) docsExcludeToggleEl.checked = !desired;
+    }
+  });
+
+  docsDeleteGuideBtn?.addEventListener('click', async () => {
+    const docId = docsState.selectedDocId || null;
+    if (!docId) return;
+    if (!confirm(`Delete guide "${docsState.selectedDocTitle || docId}"? This cannot be undone.`)) return;
+    setDocsStatus('Deleting guide…');
+    try {
+      await apiJson(`/docs/guide/${encodeURIComponent(docId)}/delete`, {
+        method: 'POST',
+        body: { version: docsState.version || null },
+      });
+      docsState.catalog = null;
+      docsState.pages = [];
+      docsState.page = null;
+      docsState.selectedDocId = null;
+      docsState.selectedDocTitle = null;
+      await ensureDocsCatalog();
+      const docs = Array.isArray(docsState.catalog?.docs) ? docsState.catalog.docs : [];
+      renderDocsGuideSelect(docs, null);
+      if (docs.length) {
+        const nextDoc = docsGuideSelectEl?.value || docs[0].doc_id;
+        await loadDocPages(nextDoc);
+        renderDocsPageList();
+        if (docsState.pages.length) {
+          await loadAndRenderDocsPage(nextDoc, docsState.pages[0].page_id, null);
+        } else {
+          setDocsBreadcrumb(`${docsState.selectedDocTitle} › Select a page…`);
+          if (docsPageEl) docsPageEl.innerHTML = '';
+        }
+      } else {
+        setDocsBreadcrumb('Select a page…');
+        if (docsPageEl) docsPageEl.innerHTML = '';
+      }
+      setDocsStatus('');
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Delete failed: ${raw}`, { error: true });
+    }
+  });
+
+  docsDeletePageBtn?.addEventListener('click', async () => {
+    const page = docsState.page || null;
+    if (!page) return;
+    if (!confirm(`Delete page "${page.page_title || page.page_id}"? This cannot be undone.`)) return;
+    setDocsStatus('Deleting page…');
+    try {
+      await apiJson(`/docs/page/${encodeURIComponent(page.doc_id)}/${encodeURIComponent(page.page_id)}/delete`, {
+        method: 'POST',
+        body: { version: docsState.version || null },
+      });
+      await loadDocPages(page.doc_id);
+      renderDocsPageList();
+      if (docsState.pages.length) {
+        await loadAndRenderDocsPage(page.doc_id, docsState.pages[0].page_id, null);
+      } else {
+        docsState.page = null;
+        if (docsPageEl) docsPageEl.innerHTML = '';
+        setDocsBreadcrumb(`${docsState.selectedDocTitle} › Select a page…`);
+      }
+      setDocsStatus('');
+    } catch (e) {
+      const raw = e?.raw ? String(e.raw) : String(e);
+      setDocsStatus(`Delete failed: ${raw}`, { error: true });
+    }
+  });
 
   docsVersionSelectEl?.addEventListener('change', async () => {
     const nextVer = docsVersionSelectEl.value;
@@ -4494,8 +5413,43 @@
 	    clearDocsSearch();
 	    setDocsStatus('');
 	  });
-	  docsHeadingFontEl?.addEventListener('change', () => saveDocsStyle());
-	  docsBodyFontEl?.addEventListener('change', () => saveDocsStyle());
+  docsHeadingFontEl?.addEventListener('change', () => saveDocsStyle());
+  docsBodyFontEl?.addEventListener('change', () => saveDocsStyle());
+  docsCoverTypeEl?.addEventListener('change', () => saveDocsStyle());
+  docsCoverImageEl?.addEventListener('change', () => saveDocsStyle());
+  docsCoverTextEl?.addEventListener('change', () => saveDocsStyle());
+  docsCoverCopyrightEl?.addEventListener('change', () => saveDocsStyle());
+  docsCoverResetBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!isFirstDocsPage()) return;
+    docsState.coverOverrides = {};
+    docsState.headerOverrides = {};
+    if (docsCoverTypeEditEl) docsCoverTypeEditEl.value = '';
+    if (docsCoverTitleEditEl) docsCoverTitleEditEl.value = '';
+    if (docsCoverImageEditEl) docsCoverImageEditEl.value = '';
+    if (docsCoverTextEditEl) docsCoverTextEditEl.value = '';
+    if (docsCoverVersionEditEl) docsCoverVersionEditEl.value = '';
+    if (docsCoverDateEditEl) docsCoverDateEditEl.value = '';
+    if (docsCoverCopyrightEditEl) docsCoverCopyrightEditEl.value = '';
+    if (docsHeaderLeftEditEl) docsHeaderLeftEditEl.value = '';
+    if (docsHeaderRightEditEl) docsHeaderRightEditEl.value = '';
+    applyCoverEditorState();
+    docsState.editDirty = true;
+  });
+  docsCoverGoFirstBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const first = Array.isArray(docsState.pages) && docsState.pages.length ? docsState.pages[0] : null;
+    if (!first || !first.page_id || !docsState.selectedDocId) return;
+    if (docsState.editing && docsState.editDirty) {
+      if (!confirm('You have unsaved edits. Discard and open the first page?')) return;
+      setDocsEditMode(false);
+    }
+    openDocsReader({
+      doc_id: docsState.selectedDocId,
+      page_id: first.page_id,
+      version: docsState.version || null,
+    });
+  });
 	  docsNavToggleBtn?.addEventListener('click', () => setDocsNavCollapsed(!docsState.navCollapsed));
 	  docsScrollLockBtn?.addEventListener('click', () => setDocsScrollLock(!docsState.scrollLock));
   docsSearchInputEl?.addEventListener('keydown', (e) => {
@@ -4511,10 +5465,10 @@
   });
 
   async function downloadDocsPdf() {
-    const role = String(authState?.role || 'anonymous');
-    if (!['admin', 'redactor', 'support'].includes(role)) return;
+    const canEditDocs = Boolean(authState?.docs_edit || authState?.role === 'admin');
+    if (!canEditDocs) return;
     if (docsState.editing && docsEditTextEl) {
-      const markdown = String(docsEditTextEl.value || '').trim();
+      const markdown = String(composeEditorMarkdown() || '').trim();
       if (!markdown) {
         setDocsStatus('Nothing to export.', { error: true });
         return;

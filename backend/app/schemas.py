@@ -139,7 +139,9 @@ class ReindexJob(BaseModel):
     job_id: str
     status: Literal["running", "succeeded", "failed"]
     phase: str
+    mode: Literal["full", "refresh"] = "full"
     docs_dir: str
+    source_datastore: str | None = None
     version: str
     compute_embeddings: bool
     embedding_max_chars: int
@@ -170,6 +172,8 @@ class DocCatalogEntry(BaseModel):
     doc_id: str
     doc_title: str
     page_count: int
+    origin: Literal["ingested", "custom"] = "ingested"
+    rag_excluded: bool = False
 
 
 class DocsCatalogResponse(BaseModel):
@@ -184,11 +188,19 @@ class DocsVersionsResponse(BaseModel):
 class DocsStyleResponse(BaseModel):
     heading_font: str | None = None
     body_font: str | None = None
+    cover_type: str | None = None
+    cover_image: str | None = None
+    cover_text: str | None = None
+    cover_copyright: str | None = None
 
 
 class DocsStyleUpdateRequest(BaseModel):
     heading_font: str | None = None
     body_font: str | None = None
+    cover_type: str | None = None
+    cover_image: str | None = None
+    cover_text: str | None = None
+    cover_copyright: str | None = None
 
 
 class DocPdfRequest(BaseModel):
@@ -203,6 +215,8 @@ class DocPageInfo(BaseModel):
     heading_path: list[str]
     anchor: str | None = None
     source_path: str
+    custom: bool = False
+    author_id: str | None = None
 
 
 class DocCatalogDetailResponse(BaseModel):
@@ -228,6 +242,8 @@ class DocPageResponse(BaseModel):
     source_path: str
     markdown: str
     images: list[PageImage]
+    custom: bool = False
+    author_id: str | None = None
 
 
 class DocEditInfo(BaseModel):
@@ -237,6 +253,17 @@ class DocEditInfo(BaseModel):
     author_id: str
     created_at: str
     updated_at: str
+
+
+class PublishRequestInfo(BaseModel):
+    status: Literal["pending", "approved", "rejected"]
+    content_md: str
+    author_id: str
+    created_at: str
+    updated_at: str
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    review_note: str | None = None
 
 
 class DocEditResponse(BaseModel):
@@ -250,8 +277,10 @@ class DocEditResponse(BaseModel):
     effective_markdown: str
     draft: DocEditInfo | None = None
     published: DocEditInfo | None = None
+    publish_request: PublishRequestInfo | None = None
     can_edit: bool
     can_publish: bool
+    can_request_publish: bool = False
 
 
 class DocEditRequest(BaseModel):
@@ -260,9 +289,55 @@ class DocEditRequest(BaseModel):
     version: str | None = None
 
 
+class DocPublishRequest(BaseModel):
+    content: str = Field(min_length=1)
+    version: str | None = None
+
+
+class PublishRequestDecision(BaseModel):
+    version: str | None = None
+    note: str | None = None
+
+
+class PublishRequestItem(BaseModel):
+    version: str
+    doc_id: str
+    doc_title: str | None = None
+    page_id: str
+    page_title: str | None = None
+    status: Literal["pending", "approved", "rejected"]
+    content_md: str
+    author_id: str
+    author_username: str | None = None
+    created_at: str
+    updated_at: str
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    review_note: str | None = None
+
+
+class PublishRequestListResponse(BaseModel):
+    requests: list[PublishRequestItem]
+
+
 class DocEditDeleteRequest(BaseModel):
     status: Literal["draft", "published"] = "draft"
     version: str | None = None
+
+
+class DocDeleteRequest(BaseModel):
+    version: str | None = None
+
+
+class DocExcludeRequest(BaseModel):
+    version: str | None = None
+    excluded: bool = True
+    reason: str | None = None
+
+
+class DocExcludeResponse(BaseModel):
+    doc_id: str
+    rag_excluded: bool
 
 
 class DocAssetUploadResponse(BaseModel):
@@ -294,9 +369,12 @@ class DocCreateResponse(BaseModel):
 class AuthMeResponse(BaseModel):
     authenticated: bool
     role: Literal["admin", "redactor", "support", "client", "anonymous"]
+    user_id: str | None = None
     username: str | None = None
     email: str | None = None
     greeting: str | None = None
+    docs_edit: bool = False
+    docs_publish: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -313,6 +391,8 @@ class UserInfo(BaseModel):
     username: str
     email: str | None = None
     role: Literal["admin", "redactor", "support", "client"]
+    docs_edit: bool = False
+    docs_publish: bool = False
     greeting: str | None = None
     disabled_at: str | None = None
     created_at: str
@@ -328,12 +408,16 @@ class UserCreateRequest(BaseModel):
     email: str | None = None
     password: str = Field(min_length=6)
     role: Literal["admin", "redactor", "support", "client"] = "client"
+    docs_edit: bool | None = None
+    docs_publish: bool | None = None
     greeting: str | None = None
 
 
 class UserUpdateRequest(BaseModel):
     email: str | None = None
     role: Literal["admin", "redactor", "support", "client"] | None = None
+    docs_edit: bool | None = None
+    docs_publish: bool | None = None
     greeting: str | None = None
     disabled: bool | None = None
     password: str | None = Field(default=None, min_length=6)
