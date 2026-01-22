@@ -1347,12 +1347,12 @@
         <h3>Home cards</h3>
         <label>Max cards</label>
         <input id="adminHomeMaxCards" type="number" min="1" max="12" value="6"/>
-        <label style="margin-top:10px;">Anonymous pinned guides (doc_id per line)</label>
+        <label style="margin-top:10px;">Anonymous pinned cards (doc_id or search:/url:/docs:/chat:)</label>
         <textarea id="adminHomePinnedAnon" rows="3" placeholder="luxriot-evo-global-administration-guide"></textarea>
         <div class="inline" style="margin-top:6px;">
           <span class="pill"><input id="adminHomeTopAnon" type="checkbox"> include top guides</span>
         </div>
-        <label style="margin-top:10px;">Client pinned guides (doc_id per line)</label>
+        <label style="margin-top:10px;">Client pinned cards (doc_id or search:/url:/docs:/chat:)</label>
         <textarea id="adminHomePinnedClient" rows="3" placeholder="luxriot-evo-global-administration-guide"></textarea>
         <div class="inline" style="margin-top:6px;">
           <span class="pill"><input id="adminHomeTopClient" type="checkbox"> include top guides</span>
@@ -3271,20 +3271,30 @@
 	        </div>
 	        ${card.dismissible === false ? '' : '<button class="close" title="Dismiss" aria-label="Dismiss">×</button>'}
 	      `;
-      const openBtn = item.querySelector('.actions button');
-      const closeBtn = item.querySelector('.close');
-      const metaEl = item.querySelector('.meta');
-      const actionsEl = item.querySelector('.actions');
-      if (metaEl && !String(card.meta || '').trim()) metaEl.style.display = 'none';
-      if (actionsEl && !action) actionsEl.style.display = 'none';
-	      openBtn?.addEventListener('click', () => {
+	      const openBtn = item.querySelector('.actions button');
+	      const closeBtn = item.querySelector('.close');
+	      const metaEl = item.querySelector('.meta');
+	      const actionsEl = item.querySelector('.actions');
+	      if (metaEl && !String(card.meta || '').trim()) metaEl.style.display = 'none';
+	      if (actionsEl && !action) actionsEl.style.display = 'none';
+	      openBtn?.addEventListener('click', async () => {
 	        if (!action) return;
 	        if (action.type === 'open_guide' && action.doc_id) {
-	          openDocsReader({ doc_id: action.doc_id, page_id: action.page_id || null, version: docsState.version });
+	          await openDocsReader({ doc_id: action.doc_id, page_id: action.page_id || null, version: docsState.version });
 	          return;
 	        }
 	        if (action.type === 'open_docs') {
-	          openDocsReader({});
+	          await openDocsReader({});
+	          return;
+	        }
+	        if (action.type === 'search' && action.query) {
+	          await openDocsReader({});
+	          if (docsSearchInputEl) docsSearchInputEl.value = String(action.query || '');
+	          await runDocsSearch(action.query, { k: 12 });
+	          return;
+	        }
+	        if (action.type === 'open_chat') {
+	          focusUserInput(String(action.query || ''));
 	          return;
 	        }
 	        if (action.type === 'open_url' && action.url) {
@@ -3339,6 +3349,21 @@
 	    } finally {
 	      homeState.loading = false;
 	    }
+	  }
+
+	  function focusUserInput(prefill = '') {
+	    if (!userInput) return;
+	    if (prefill) userInput.innerText = String(prefill);
+	    userInput.focus();
+	    const range = document.createRange();
+	    range.selectNodeContents(userInput);
+	    range.collapse(false);
+	    const sel = window.getSelection();
+	    if (sel) {
+	      sel.removeAllRanges();
+	      sel.addRange(range);
+	    }
+	    scheduleDockUpdate();
 	  }
 
 	  // ---------- Markdown renderer ----------

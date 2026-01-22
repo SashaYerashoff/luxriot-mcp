@@ -1303,9 +1303,92 @@ def home_cards(
         if len(cards) >= max_cards:
             break
         if isinstance(entry, str):
-            doc_id = entry.strip()
-            if not doc_id:
+            raw = entry.strip()
+            if not raw:
                 continue
+            lower = raw.lower()
+            if lower.startswith("search:"):
+                query = raw.split(":", 1)[1].strip()
+                if not query:
+                    continue
+                card_id = f"search:{query}"
+                add_card(
+                    {
+                        "id": card_id,
+                        "title": f"Search docs: {query}",
+                        "summary": query,
+                        "meta": "Search",
+                        "action": {
+                            "type": "search",
+                            "label": "SEARCH",
+                            "query": query,
+                        },
+                        "dismissible": True,
+                        "source": "pinned",
+                    }
+                )
+                continue
+            if lower.startswith("url:") or lower.startswith("link:"):
+                url = raw.split(":", 1)[1].strip()
+                if not url:
+                    continue
+                card_id = f"url:{url}"
+                add_card(
+                    {
+                        "id": card_id,
+                        "title": "Open link",
+                        "summary": url,
+                        "meta": "External",
+                        "action": {
+                            "type": "open_url",
+                            "label": "OPEN LINK",
+                            "url": url,
+                        },
+                        "dismissible": True,
+                        "source": "pinned",
+                    }
+                )
+                continue
+            if lower.startswith("docs:"):
+                label = raw.split(":", 1)[1].strip() or "Browse documentation"
+                card_id = f"docs:{label}"
+                add_card(
+                    {
+                        "id": card_id,
+                        "title": label,
+                        "summary": "Open the documentation browser.",
+                        "meta": "Docs",
+                        "action": {
+                            "type": "open_docs",
+                            "label": "OPEN DOCS",
+                        },
+                        "dismissible": True,
+                        "source": "pinned",
+                    }
+                )
+                continue
+            if lower.startswith("chat:"):
+                prompt = raw.split(":", 1)[1].strip()
+                if not prompt:
+                    continue
+                card_id = f"chat:{prompt}"
+                add_card(
+                    {
+                        "id": card_id,
+                        "title": "Start a chat",
+                        "summary": prompt,
+                        "meta": "Chat",
+                        "action": {
+                            "type": "open_chat",
+                            "label": "ASK",
+                            "query": prompt,
+                        },
+                        "dismissible": True,
+                        "source": "pinned",
+                    }
+                )
+                continue
+            doc_id = raw
             if not _doc_allowed(doc_id, allow, deny):
                 continue
             doc_title, summary, first_page_id = _summarize_doc_for_home(ver, doc_id)
