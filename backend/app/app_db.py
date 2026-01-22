@@ -141,6 +141,14 @@ def init_db() -> None:
               PRIMARY KEY(version, doc_id, page_id)
             );
 
+            CREATE TABLE IF NOT EXISTS home_card_dismissals (
+              owner_id TEXT NOT NULL,
+              version TEXT NOT NULL,
+              card_id TEXT NOT NULL,
+              dismissed_at TEXT NOT NULL,
+              PRIMARY KEY(owner_id, version, card_id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_created
               ON messages(session_id, created_at);
 
@@ -161,6 +169,9 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_doc_publish_requests_status
               ON doc_publish_requests(status, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_home_card_dismissals_owner
+              ON home_card_dismissals(owner_id, version);
             """
         )
         _migrate_db(conn)
@@ -211,6 +222,20 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_publish_requests_status ON doc_publish_requests(status, updated_at);")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS home_card_dismissals (
+          owner_id TEXT NOT NULL,
+          version TEXT NOT NULL,
+          card_id TEXT NOT NULL,
+          dismissed_at TEXT NOT NULL,
+          PRIMARY KEY(owner_id, version, card_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_home_card_dismissals_owner ON home_card_dismissals(owner_id, version);"
+    )
     _migrate_users(conn)
 
 
@@ -486,6 +511,46 @@ def set_settings(values: dict[str, Any]) -> None:
             ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at
             """,
             rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_home_card_dismissals(*, owner_id: str, version: str) -> set[str]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT card_id FROM home_card_dismissals WHERE owner_id = ? AND version = ?",
+            (owner_id, version),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(r["card_id"]) for r in rows}
+
+
+def add_home_card_dismissal(*, owner_id: str, version: str, card_id: str) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO home_card_dismissals(owner_id, version, card_id, dismissed_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(owner_id, version, card_id) DO UPDATE SET dismissed_at=excluded.dismissed_at
+            """,
+            (owner_id, version, card_id, _utc_now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_home_card_dismissals(*, owner_id: str, version: str) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "DELETE FROM home_card_dismissals WHERE owner_id = ? AND version = ?",
+            (owner_id, version),
         )
         conn.commit()
     finally:

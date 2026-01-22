@@ -3271,8 +3271,12 @@
 	        </div>
 	        ${card.dismissible === false ? '' : '<button class="close" title="Dismiss" aria-label="Dismiss">×</button>'}
 	      `;
-	      const openBtn = item.querySelector('.actions button');
-	      const closeBtn = item.querySelector('.close');
+      const openBtn = item.querySelector('.actions button');
+      const closeBtn = item.querySelector('.close');
+      const metaEl = item.querySelector('.meta');
+      const actionsEl = item.querySelector('.actions');
+      if (metaEl && !String(card.meta || '').trim()) metaEl.style.display = 'none';
+      if (actionsEl && !action) actionsEl.style.display = 'none';
 	      openBtn?.addEventListener('click', () => {
 	        if (!action) return;
 	        if (action.type === 'open_guide' && action.doc_id) {
@@ -3287,10 +3291,16 @@
 	          window.open(action.url, '_blank', 'noopener');
 	        }
 	      });
-	      closeBtn?.addEventListener('click', () => {
-	        homeState.dismissed.add(card.id);
-	        item.remove();
-	      });
+      closeBtn?.addEventListener('click', async () => {
+        homeState.dismissed.add(card.id);
+        item.remove();
+        try {
+          const qs = docsState.version ? `?version=${encodeURIComponent(docsState.version)}` : '';
+          await apiJson(`/home/cards/dismiss${qs}`, { method: 'POST', body: { id: card.id } });
+        } catch (e) {
+          // ignore persistence errors
+        }
+      });
 	      wrap.appendChild(item);
 	    });
 	    return wrap;
@@ -6605,6 +6615,13 @@
     if (hasMessages) {
       const ok = confirm('Start a new chat? This will clear the current conversation.');
       if (!ok) return;
+    }
+    try {
+      const qs = docsState.version ? `?version=${encodeURIComponent(docsState.version)}` : '';
+      await apiJson(`/home/cards/clear${qs}`, { method: 'POST', body: {} });
+      homeState.dismissed.clear();
+    } catch (e) {
+      // ignore persistence errors
     }
     session.session_id = null;
     closeAllModals();

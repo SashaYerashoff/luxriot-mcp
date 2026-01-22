@@ -71,6 +71,7 @@ from .schemas import (
     DocsCatalogResponse,
     DocsVersionsResponse,
     DocSectionCreateRequest,
+    HomeCardDismissRequest,
     HomeCardsResponse,
     ImageResult,
     MessagesResponse,
@@ -1267,7 +1268,9 @@ def _summarize_doc_for_home(version: str, doc_id: str) -> tuple[str | None, str,
 
 
 @app.get("/home/cards", response_model=HomeCardsResponse)
-def home_cards(version: str | None = None, ctx: AuthContext = Depends(resolve_auth)) -> HomeCardsResponse:
+def home_cards(
+    version: str | None = None, response: Response, ctx: AuthContext = Depends(resolve_auth)
+) -> HomeCardsResponse:
     ver = _require_version(version)
     store = _get_docs_store(ver)
     if not store.is_ready():
@@ -1275,6 +1278,7 @@ def home_cards(version: str | None = None, ctx: AuthContext = Depends(resolve_au
             status_code=503,
             detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
         )
+    apply_auth_cookies(response, ctx)
     role = str(ctx.principal.role or "anonymous")
     settings = get_settings_bundle()["effective"]
     enabled, max_cards, pinned, show_top_guides = _get_home_cards_config(settings, role)
@@ -1283,13 +1287,14 @@ def home_cards(version: str | None = None, ctx: AuthContext = Depends(resolve_au
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     excluded = _doc_exclusions(ver)
+    dismissed = app_db.list_home_card_dismissals(owner_id=ctx.principal.owner_id, version=ver)
     cards: list[dict[str, Any]] = []
     seen_doc_ids: set[str] = set()
     seen_ids: set[str] = set()
 
     def add_card(card: dict[str, Any]) -> None:
         cid = str(card.get("id") or "")
-        if not cid or cid in seen_ids:
+        if not cid or cid in seen_ids or cid in dismissed:
             return
         seen_ids.add(cid)
         cards.append(card)
@@ -1394,6 +1399,32 @@ def home_cards(version: str | None = None, ctx: AuthContext = Depends(resolve_au
             seen_doc_ids.add(doc_id)
 
     return HomeCardsResponse(cards=cards)
+
+
+@app.post("/home/cards/dismiss", response_model=OkResponse)
+def home_cards_dismiss(
+    req: HomeCardDismissRequest,
+    version: str | None = None,
+    response: Response,
+    ctx: AuthContext = Depends(resolve_auth),
+) -> OkResponse:
+    ver = _require_version(version)
+    apply_auth_cookies(response, ctx)
+    card_id = str(req.id or "").strip()
+    if not card_id:
+        raise HTTPException(status_code=400, detail="Card id is required")
+    app_db.add_home_card_dismissal(owner_id=ctx.principal.owner_id, version=ver, card_id=card_id)
+    return OkResponse()
+
+
+@app.post("/home/cards/clear", response_model=OkResponse)
+def home_cards_clear(
+    version: str | None = None, response: Response, ctx: AuthContext = Depends(resolve_auth)
+) -> OkResponse:
+    ver = _require_version(version)
+    apply_auth_cookies(response, ctx)
+    app_db.clear_home_card_dismissals(owner_id=ctx.principal.owner_id, version=ver)
+    return OkResponse()
 
 
 @app.get("/docs/page/{doc_id}/{page_id}", response_model=DocPageResponse)

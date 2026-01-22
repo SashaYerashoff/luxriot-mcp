@@ -221,6 +221,10 @@ class HomeCard(BaseModel):
 
 class HomeCardsResponse(BaseModel):
     cards: list[HomeCard]
+
+
+class HomeCardDismissRequest(BaseModel):
+    id: str
     cover_image: str | None = None
     cover_text: str | None = None
     cover_copyright: str | None = None
