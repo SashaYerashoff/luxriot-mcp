@@ -40,13 +40,32 @@
     }
 
     /* Header */
-    .header{display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--muted);}
+    .header{position:relative;display:flex;justify-content:space-between;align-items:center;font-size:14px;color:var(--muted);}
     .logo{display:flex;gap:10px;align-items:center}
     .logo-dot{width:14px;height:14px;background:var(--accent);border-radius:4px}
     .brand{font-weight:700;font-size:22px;color:var(--text);letter-spacing:.5px;font-style:italic}
     .brand-stack{display:flex;flex-direction:column;gap:2px;line-height:1.1}
     .brand-version{font-size:11px;color:var(--muted);letter-spacing:.2px;font-style:normal}
     .header-right{display:flex;align-items:center;gap:14px;}
+    .header-center{
+      position:absolute;
+      left:50%;
+      transform:translateX(-50%);
+      top:0;
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    .home-btn{
+      width:44px;height:44px;border-radius:14px;
+      border:1px solid rgba(63,163,124,.28);
+      background:rgba(63,163,124,.12);
+      color:var(--text);
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;
+    }
+    .home-btn:hover{background:rgba(63,163,124,.2);border-color:rgba(63,163,124,.45);}
+    .home-btn svg{width:20px;height:20px;fill:currentColor;}
 
     /* Center state */
     .center{
@@ -901,6 +920,55 @@
       overflow:auto;
       padding:12px 6px 18px;
     }
+    .home-cards{
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
+      gap:18px;
+      margin:10px 0 24px;
+    }
+    .home-card{
+      position:relative;
+      border-radius:18px;
+      border:1px solid rgba(214,217,223,.18);
+      background:rgba(18,19,21,.72);
+      padding:16px 18px 14px;
+      box-shadow:0 10px 24px rgba(0,0,0,.25);
+    }
+    .home-card .title{
+      font-size:15px;
+      font-weight:600;
+      color:var(--text);
+      margin-bottom:6px;
+    }
+    .home-card .summary{
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.5;
+    }
+    .home-card .meta{
+      margin-top:8px;
+      font-size:11px;
+      color:var(--muted);
+    }
+    .home-card .actions{
+      margin-top:12px;
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+    }
+    .home-card .close{
+      position:absolute;
+      top:10px;
+      right:10px;
+      width:28px;height:28px;
+      border-radius:50%;
+      border:1px solid rgba(214,217,223,.2);
+      background:rgba(0,0,0,.2);
+      color:var(--muted);
+      cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+    }
+    .home-card .close:hover{color:var(--text);border-color:rgba(214,217,223,.45);}
     .msg{
       border:1px solid var(--border);
       border-radius:16px;
@@ -1080,8 +1148,16 @@
       <div class="logo-dot"></div>
       <div class="brand-stack">
         <div class="brand">Luxriot</div>
-        <div class="brand-version" id="appVersion">Luxriot SA 0.2.0</div>
+        <div class="brand-version" id="appVersion">Luxriot SA 0.2.1</div>
       </div>
+    </div>
+
+    <div class="header-center">
+      <button class="home-btn" id="homeBtn" title="Home" aria-label="Home">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3l9 8h-3v9h-5v-6H11v6H6v-9H3l9-8z"/>
+        </svg>
+      </button>
     </div>
 
 	  <div class="header-right">
@@ -1956,6 +2032,7 @@
 
   const thread = document.getElementById('thread');
   const emptyState = document.getElementById('emptyState');
+  const homeBtn = document.getElementById('homeBtn');
 
   const adminPanel = document.getElementById('adminPanel');
   const redactorPanel = document.getElementById('redactorPanel');
@@ -3074,6 +3151,125 @@
 
 	  function setEmptyStateVisible(visible) {
 	    emptyState.style.display = visible ? 'flex' : 'none';
+	  }
+
+	  const homeState = {
+	    cards: [],
+	    dismissed: new Set(),
+	    role: null,
+	    version: null,
+	    loading: false,
+	  };
+
+	  function clearThread({ showHome = false } = {}) {
+	    thread.innerHTML = '';
+	    setEmptyStateVisible(true);
+	    lastUserMessage = 'User input';
+	    lastAssistantMessage = 'Hi, I am ready to assist and learn.';
+	    lastRetrievalPack = null;
+	    if (showHome) showHomeCards({ force: true });
+	  }
+
+	  async function loadTopGuideCards(role, version) {
+	    const allowedRoles = new Set(['anonymous', 'client']);
+	    if (!allowedRoles.has(role)) return [];
+	    const qs = version ? `?version=${encodeURIComponent(version)}` : '';
+	    const catalog = await apiJson(`/docs/catalog${qs}`);
+	    const docs = Array.isArray(catalog?.docs) ? catalog.docs : [];
+	    const topDocs = docs.filter((d) => !d.rag_excluded).slice(0, 6);
+	    const details = await Promise.all(
+	      topDocs.map(async (doc) => {
+	        let summary = '';
+	        let firstPageId = null;
+	        try {
+	          const detail = await apiJson(`/docs/catalog/${encodeURIComponent(doc.doc_id)}${qs}`);
+	          const pages = Array.isArray(detail?.pages) ? detail.pages : [];
+	          const titles = pages
+	            .map((p) => p.page_title || p.page_id)
+	            .filter(Boolean)
+	            .slice(0, 2);
+	          summary = titles.join(' • ');
+	          firstPageId = pages[0]?.page_id || null;
+	        } catch (e) {
+	          summary = '';
+	        }
+	        return {
+	          id: doc.doc_id,
+	          title: doc.doc_title || doc.doc_id,
+	          summary,
+	          page_count: doc.page_count || 0,
+	          doc_id: doc.doc_id,
+	          page_id: firstPageId,
+	        };
+	      })
+	    );
+	    return details;
+	  }
+
+	  function buildHomeCards(cards) {
+	    const wrap = document.createElement('div');
+	    wrap.id = 'homeCards';
+	    wrap.className = 'home-cards';
+	    cards.forEach((card) => {
+	      if (homeState.dismissed.has(card.id)) return;
+	      const item = document.createElement('div');
+	      item.className = 'home-card';
+	      item.innerHTML = `
+	        <div class="title">${escapeHtml(card.title || 'Guide')}</div>
+	        <div class="summary">${escapeHtml(card.summary || 'Overview of key topics in this guide.')}</div>
+	        <div class="meta">${card.page_count ? `${card.page_count} pages` : ''}</div>
+	        <div class="actions">
+	          <button class="btn ghost small">OPEN GUIDE</button>
+	        </div>
+	        <button class="close" title="Dismiss" aria-label="Dismiss">×</button>
+	      `;
+	      const openBtn = item.querySelector('.actions button');
+	      const closeBtn = item.querySelector('.close');
+	      openBtn?.addEventListener('click', () => {
+	        openDocsReader({ doc_id: card.doc_id, page_id: card.page_id || null, version: docsState.version });
+	      });
+	      closeBtn?.addEventListener('click', () => {
+	        homeState.dismissed.add(card.id);
+	        item.remove();
+	      });
+	      wrap.appendChild(item);
+	    });
+	    return wrap;
+	  }
+
+	  async function showHomeCards({ force = false } = {}) {
+	    const role = String(authState?.role || 'anonymous');
+	    if (!['anonymous', 'client'].includes(role)) return;
+	    if (homeState.loading) return;
+	    await ensureDocsVersions();
+	    const version = docsState.version || null;
+	    if (!force && homeState.cards.length && homeState.role === role && homeState.version === version) {
+	      const existing = document.getElementById('homeCards');
+	      if (!existing) {
+	        const rebuilt = buildHomeCards(homeState.cards);
+	        thread.prepend(rebuilt);
+	      }
+	      setEmptyStateVisible(false);
+	      return;
+	    }
+	    homeState.loading = true;
+	    homeState.role = role;
+	    homeState.version = version;
+	    try {
+	      homeState.cards = await loadTopGuideCards(role, version);
+	      homeState.dismissed.clear();
+	      const existing = document.getElementById('homeCards');
+	      if (existing) existing.remove();
+	      if (homeState.cards.length) {
+	        const wrap = buildHomeCards(homeState.cards);
+	        thread.prepend(wrap);
+	        setEmptyStateVisible(false);
+	      }
+	    } catch (e) {
+	      // keep silent if catalog isn't ready
+	    } finally {
+	      homeState.loading = false;
+	    }
 	  }
 
 	  // ---------- Markdown renderer ----------
@@ -4199,6 +4395,10 @@
 		    if (docsStyleCardEl) docsStyleCardEl.style.display = isAdmin ? '' : 'none';
 		    if (docsPanel) docsPanel.classList.toggle('no-edit', !canEditDocs);
 		    if (!canEditDocs && docsState.editing) setDocsEditMode(false);
+		    if (!['anonymous', 'client'].includes(role)) {
+		      const cards = document.getElementById('homeCards');
+		      if (cards) cards.remove();
+		    }
 
 		    if (!isAdmin && adminPanel.classList.contains('visible')) closeAllModals();
 		    if (!(isAdmin || isRedactor) && redactorPanel.classList.contains('visible')) closeAllModals();
@@ -4248,6 +4448,7 @@
 	    renderAuthPanel(authState);
 	    applyRoleUI(authState);
 	    await loadDocsStyle();
+	    if (!thread.children.length) showHomeCards({ force: true });
 	  }
 
 	  async function doLogin() {
@@ -6015,8 +6216,7 @@
       newItem.innerHTML = `<span class="slash">/</span> New chat`;
       newItem.addEventListener('click', () => {
         session.session_id = null;
-        thread.innerHTML = '';
-        setEmptyStateVisible(true);
+        clearThread({ showHome: true });
         historyPanel.classList.remove('visible');
       });
       historyList.appendChild(newItem);
@@ -6048,6 +6248,8 @@
     const data = await apiJson(`/sessions/${encodeURIComponent(sessionId)}/messages`);
     session.session_id = sessionId;
     thread.innerHTML = '';
+    const homeCards = document.getElementById('homeCards');
+    if (homeCards) homeCards.remove();
     setEmptyStateVisible(true);
     const msgs = data.messages || [];
     msgs.forEach((m) => {
@@ -6336,6 +6538,18 @@
       renderList();
       saveHint.textContent = "";
     }
+  });
+
+  homeBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const hasMessages = Boolean(thread?.querySelector('.msg'));
+    if (hasMessages) {
+      const ok = confirm('Start a new chat? This will clear the current conversation.');
+      if (!ok) return;
+    }
+    session.session_id = null;
+    closeAllModals();
+    clearThread({ showHome: true });
   });
 
   docsBtn.addEventListener('click', (e) => {
