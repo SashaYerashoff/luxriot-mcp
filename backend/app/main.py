@@ -71,6 +71,7 @@ from .schemas import (
     DocsCatalogResponse,
     DocsVersionsResponse,
     DocSectionCreateRequest,
+    HomeCardsResponse,
     ImageResult,
     MessagesResponse,
     PageImage,
@@ -1207,6 +1208,192 @@ def docs_catalog_doc(doc_id: str, version: str | None = None, ctx: AuthContext =
     except Exception as e:
         log.exception("Docs catalog doc error")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+def _get_home_cards_config(settings: dict[str, Any], role: str) -> tuple[bool, int, list[Any], bool]:
+    cfg = settings.get("home_cards")
+    if not isinstance(cfg, dict):
+        return False, 0, [], False
+    enabled = bool(cfg.get("enabled", True))
+    max_cards = int(cfg.get("max_cards", 6) or 6)
+    roles_cfg = cfg.get("roles")
+    role_cfg: dict[str, Any] = {}
+    if isinstance(roles_cfg, dict):
+        candidate = roles_cfg.get(role)
+        if isinstance(candidate, dict):
+            role_cfg = candidate
+    pinned = role_cfg.get("pinned")
+    if not isinstance(pinned, list):
+        pinned = []
+    show_top_guides = bool(role_cfg.get("show_top_guides", False))
+    return enabled, max_cards, pinned, show_top_guides
+
+
+def _summarize_doc_for_home(version: str, doc_id: str) -> tuple[str | None, str, str | None]:
+    summary = ""
+    first_page_id: str | None = None
+    doc_title = _get_doc_title(version, doc_id)
+    store = _get_docs_store(version)
+    if store.is_ready():
+        try:
+            data = store.list_pages(doc_id)
+            doc_title = doc_title or data.get("doc_title")
+            pages = data.get("pages") or []
+            titles: list[str] = []
+            for p in pages:
+                title = str(p.get("page_title") or p.get("page_id") or "").strip()
+                if title:
+                    titles.append(title)
+                if len(titles) >= 2:
+                    break
+            summary = " • ".join(titles)
+            if pages:
+                first_page_id = str(pages[0].get("page_id") or "") or None
+        except KeyError:
+            pass
+    if not summary:
+        custom = app_db.list_doc_pages(version=version, doc_id=doc_id)
+        titles: list[str] = []
+        for p in custom:
+            title = str(p.get("page_title") or p.get("page_id") or "").strip()
+            if title:
+                titles.append(title)
+            if len(titles) >= 2:
+                break
+        summary = " • ".join(titles)
+        if custom and not first_page_id:
+            first_page_id = str(custom[0].get("page_id") or "") or None
+    return doc_title, summary, first_page_id
+
+
+@app.get("/home/cards", response_model=HomeCardsResponse)
+def home_cards(version: str | None = None, ctx: AuthContext = Depends(resolve_auth)) -> HomeCardsResponse:
+    ver = _require_version(version)
+    store = _get_docs_store(ver)
+    if not store.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docs catalog not found for version '{ver}'. Run the ingestion CLI first.",
+        )
+    role = str(ctx.principal.role or "anonymous")
+    settings = get_settings_bundle()["effective"]
+    enabled, max_cards, pinned, show_top_guides = _get_home_cards_config(settings, role)
+    if not enabled or max_cards <= 0:
+        return HomeCardsResponse(cards=[])
+
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    excluded = _doc_exclusions(ver)
+    cards: list[dict[str, Any]] = []
+    seen_doc_ids: set[str] = set()
+    seen_ids: set[str] = set()
+
+    def add_card(card: dict[str, Any]) -> None:
+        cid = str(card.get("id") or "")
+        if not cid or cid in seen_ids:
+            return
+        seen_ids.add(cid)
+        cards.append(card)
+
+    for entry in pinned:
+        if len(cards) >= max_cards:
+            break
+        if isinstance(entry, str):
+            doc_id = entry.strip()
+            if not doc_id:
+                continue
+            if not _doc_allowed(doc_id, allow, deny):
+                continue
+            doc_title, summary, first_page_id = _summarize_doc_for_home(ver, doc_id)
+            card_id = f"pin:{doc_id}"
+            add_card(
+                {
+                    "id": card_id,
+                    "title": doc_title or doc_id,
+                    "summary": summary or None,
+                    "meta": None,
+                    "action": {
+                        "type": "open_guide",
+                        "label": "OPEN GUIDE",
+                        "doc_id": doc_id,
+                        "page_id": first_page_id,
+                    },
+                    "dismissible": True,
+                    "source": "pinned",
+                }
+            )
+            seen_doc_ids.add(doc_id)
+            continue
+        if isinstance(entry, dict):
+            action = entry.get("action") if isinstance(entry.get("action"), dict) else {}
+            action_type = str(action.get("type") or entry.get("type") or "open_guide")
+            doc_id = str(action.get("doc_id") or entry.get("doc_id") or "").strip()
+            page_id = str(action.get("page_id") or entry.get("page_id") or "").strip() or None
+            if doc_id and not _doc_allowed(doc_id, allow, deny):
+                continue
+            doc_title, summary, first_page_id = _summarize_doc_for_home(ver, doc_id) if doc_id else (None, "", None)
+            card_id = str(entry.get("id") or (doc_id and f"pin:{doc_id}") or "")
+            if not card_id:
+                continue
+            title = str(entry.get("title") or doc_title or doc_id or "Guide")
+            meta = str(entry.get("meta") or "").strip() or None
+            summary_text = str(entry.get("summary") or summary or "").strip() or None
+            label = str(action.get("label") or entry.get("label") or "").strip() or None
+            add_card(
+                {
+                    "id": card_id,
+                    "title": title,
+                    "summary": summary_text,
+                    "meta": meta,
+                    "action": {
+                        "type": action_type,
+                        "label": label,
+                        "doc_id": doc_id or None,
+                        "page_id": page_id or first_page_id,
+                        "url": action.get("url") or entry.get("url"),
+                        "query": action.get("query") or entry.get("query"),
+                    }
+                    if action_type
+                    else None,
+                    "dismissible": entry.get("dismissible", True),
+                    "source": "pinned",
+                }
+            )
+            if doc_id:
+                seen_doc_ids.add(doc_id)
+
+    if show_top_guides and len(cards) < max_cards:
+        docs = [
+            d
+            for d in store.list_docs()
+            if _doc_allowed(d.get("doc_id"), allow, deny) and d.get("doc_id") not in excluded
+        ]
+        for d in docs:
+            if len(cards) >= max_cards:
+                break
+            doc_id = str(d.get("doc_id") or "").strip()
+            if not doc_id or doc_id in seen_doc_ids:
+                continue
+            doc_title, summary, first_page_id = _summarize_doc_for_home(ver, doc_id)
+            page_count = int(d.get("page_count") or 0)
+            add_card(
+                {
+                    "id": f"guide:{doc_id}",
+                    "title": doc_title or doc_id,
+                    "summary": summary or None,
+                    "meta": f"{page_count} pages" if page_count else None,
+                    "action": {
+                        "type": "open_guide",
+                        "label": "OPEN GUIDE",
+                        "doc_id": doc_id,
+                        "page_id": first_page_id,
+                    },
+                    "dismissible": True,
+                    "source": "top_guides",
+                }
+            )
+            seen_doc_ids.add(doc_id)
+
+    return HomeCardsResponse(cards=cards)
 
 
 @app.get("/docs/page/{doc_id}/{page_id}", response_model=DocPageResponse)

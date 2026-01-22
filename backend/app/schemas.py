@@ -198,6 +198,29 @@ class DocsStyleUpdateRequest(BaseModel):
     heading_font: str | None = None
     body_font: str | None = None
     cover_type: str | None = None
+
+
+class HomeCardAction(BaseModel):
+    type: Literal["open_guide", "open_docs", "search", "open_url", "open_chat"]
+    label: str | None = None
+    doc_id: str | None = None
+    page_id: str | None = None
+    url: str | None = None
+    query: str | None = None
+
+
+class HomeCard(BaseModel):
+    id: str
+    title: str
+    summary: str | None = None
+    meta: str | None = None
+    action: HomeCardAction | None = None
+    dismissible: bool = True
+    source: str | None = None
+
+
+class HomeCardsResponse(BaseModel):
+    cards: list[HomeCard]
     cover_image: str | None = None
     cover_text: str | None = None
     cover_copyright: str | None = None

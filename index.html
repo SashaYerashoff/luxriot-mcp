@@ -1342,6 +1342,23 @@
         <input id="docsCoverCopyright" type="text" placeholder="© Luxriot"/>
         <div class="tiny muted" style="margin-top:6px;">Applies to docs reader + PDF export.</div>
       </div>
+
+      <div class="card" id="homeCardsCard">
+        <h3>Home cards</h3>
+        <label>Max cards</label>
+        <input id="adminHomeMaxCards" type="number" min="1" max="12" value="6"/>
+        <label style="margin-top:10px;">Anonymous pinned guides (doc_id per line)</label>
+        <textarea id="adminHomePinnedAnon" rows="3" placeholder="luxriot-evo-global-administration-guide"></textarea>
+        <div class="inline" style="margin-top:6px;">
+          <span class="pill"><input id="adminHomeTopAnon" type="checkbox"> include top guides</span>
+        </div>
+        <label style="margin-top:10px;">Client pinned guides (doc_id per line)</label>
+        <textarea id="adminHomePinnedClient" rows="3" placeholder="luxriot-evo-global-administration-guide"></textarea>
+        <div class="inline" style="margin-top:6px;">
+          <span class="pill"><input id="adminHomeTopClient" type="checkbox"> include top guides</span>
+        </div>
+        <div class="tiny muted" style="margin-top:6px;">Visible on the home screen for anonymous/client roles.</div>
+      </div>
 	
 		      <div class="card">
 		        <h3>Retrieval</h3>
@@ -2296,6 +2313,12 @@
 		  const adminWebMaxUrlsEl = document.getElementById('adminWebMaxUrls');
 		  const adminWebSearchKEl = document.getElementById('adminWebSearchK');
 
+		  const adminHomeMaxCardsEl = document.getElementById('adminHomeMaxCards');
+		  const adminHomePinnedAnonEl = document.getElementById('adminHomePinnedAnon');
+		  const adminHomeTopAnonEl = document.getElementById('adminHomeTopAnon');
+		  const adminHomePinnedClientEl = document.getElementById('adminHomePinnedClient');
+		  const adminHomeTopClientEl = document.getElementById('adminHomeTopClient');
+
 			  // Admin: users
 			  const adminNewUserUsernameEl = document.getElementById('adminNewUserUsername');
 			  const adminNewUserRoleEl = document.getElementById('adminNewUserRole');
@@ -2963,6 +2986,24 @@
 			    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
 			    adminWebSearchKEl.value = web.search_k ?? 5;
 
+		    const homeCards = effective.home_cards || {};
+		    const homeRoles = homeCards.roles || {};
+		    const homeAnon = homeRoles.anonymous || {};
+		    const homeClient = homeRoles.client || {};
+		    if (adminHomeMaxCardsEl) adminHomeMaxCardsEl.value = homeCards.max_cards ?? 6;
+		    if (adminHomePinnedAnonEl) {
+		      adminHomePinnedAnonEl.value = Array.isArray(homeAnon.pinned)
+		        ? homeAnon.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
+		        : '';
+		    }
+		    if (adminHomeTopAnonEl) adminHomeTopAnonEl.checked = Boolean(homeAnon.show_top_guides ?? true);
+		    if (adminHomePinnedClientEl) {
+		      adminHomePinnedClientEl.value = Array.isArray(homeClient.pinned)
+		        ? homeClient.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
+		        : '';
+		    }
+		    if (adminHomeTopClientEl) adminHomeTopClientEl.checked = Boolean(homeClient.show_top_guides ?? true);
+
 		    _loadPromptTemplates(effective);
 		    const preferredRole = PROMPT_ROLES.includes(String(authState?.role || '')) ? String(authState.role) : 'admin';
 		    _setPromptRole(preferredRole, { preserveCurrent: false });
@@ -3031,6 +3072,24 @@
 		    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
 			    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
 			    adminWebSearchKEl.value = web.search_k ?? 5;
+
+		    const homeCards = d.home_cards || {};
+		    const homeRoles = homeCards.roles || {};
+		    const homeAnon = homeRoles.anonymous || {};
+		    const homeClient = homeRoles.client || {};
+		    if (adminHomeMaxCardsEl) adminHomeMaxCardsEl.value = homeCards.max_cards ?? 6;
+		    if (adminHomePinnedAnonEl) {
+		      adminHomePinnedAnonEl.value = Array.isArray(homeAnon.pinned)
+		        ? homeAnon.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
+		        : '';
+		    }
+		    if (adminHomeTopAnonEl) adminHomeTopAnonEl.checked = Boolean(homeAnon.show_top_guides ?? true);
+		    if (adminHomePinnedClientEl) {
+		      adminHomePinnedClientEl.value = Array.isArray(homeClient.pinned)
+		        ? homeClient.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
+		        : '';
+		    }
+		    if (adminHomeTopClientEl) adminHomeTopClientEl.checked = Boolean(homeClient.show_top_guides ?? true);
 
 		    _loadPromptTemplates(d);
 		    _setPromptRole(adminActivePromptRole || 'admin', { preserveCurrent: false });
@@ -3116,13 +3175,28 @@
 		      max_urls_per_message: Number(adminWebMaxUrlsEl.value || 2),
 		      search_k: Number(adminWebSearchKEl.value || 5)
 		    };
+		    const home_cards = {
+		      enabled: true,
+		      max_cards: Number(adminHomeMaxCardsEl?.value || 6),
+		      roles: {
+		        anonymous: {
+		          show_top_guides: Boolean(adminHomeTopAnonEl?.checked),
+		          pinned: _linesToList(adminHomePinnedAnonEl?.value)
+		        },
+		        client: {
+		          show_top_guides: Boolean(adminHomeTopClientEl?.checked),
+		          pinned: _linesToList(adminHomePinnedClientEl?.value)
+		        }
+		      }
+		    };
 			    const payload = {
 			      settings: {
 			        system_prompt_template: baseTmpl,
 			        system_prompt_templates: templates,
 			        retrieval,
 			        llm,
-			        web
+			        web,
+			        home_cards
 			      }
 			    };
 
@@ -3170,40 +3244,12 @@
 	    if (showHome) showHomeCards({ force: true });
 	  }
 
-	  async function loadTopGuideCards(role, version) {
+	  async function loadHomeCards(role, version) {
 	    const allowedRoles = new Set(['anonymous', 'client']);
 	    if (!allowedRoles.has(role)) return [];
 	    const qs = version ? `?version=${encodeURIComponent(version)}` : '';
-	    const catalog = await apiJson(`/docs/catalog${qs}`);
-	    const docs = Array.isArray(catalog?.docs) ? catalog.docs : [];
-	    const topDocs = docs.filter((d) => !d.rag_excluded).slice(0, 6);
-	    const details = await Promise.all(
-	      topDocs.map(async (doc) => {
-	        let summary = '';
-	        let firstPageId = null;
-	        try {
-	          const detail = await apiJson(`/docs/catalog/${encodeURIComponent(doc.doc_id)}${qs}`);
-	          const pages = Array.isArray(detail?.pages) ? detail.pages : [];
-	          const titles = pages
-	            .map((p) => p.page_title || p.page_id)
-	            .filter(Boolean)
-	            .slice(0, 2);
-	          summary = titles.join(' • ');
-	          firstPageId = pages[0]?.page_id || null;
-	        } catch (e) {
-	          summary = '';
-	        }
-	        return {
-	          id: doc.doc_id,
-	          title: doc.doc_title || doc.doc_id,
-	          summary,
-	          page_count: doc.page_count || 0,
-	          doc_id: doc.doc_id,
-	          page_id: firstPageId,
-	        };
-	      })
-	    );
-	    return details;
+	    const payload = await apiJson(`/home/cards${qs}`);
+	    return Array.isArray(payload?.cards) ? payload.cards : [];
 	  }
 
 	  function buildHomeCards(cards) {
@@ -3214,19 +3260,32 @@
 	      if (homeState.dismissed.has(card.id)) return;
 	      const item = document.createElement('div');
 	      item.className = 'home-card';
+	      const action = card.action || null;
+	      const actionLabel = action?.label || (action?.type === 'open_guide' ? 'OPEN GUIDE' : 'OPEN');
 	      item.innerHTML = `
 	        <div class="title">${escapeHtml(card.title || 'Guide')}</div>
 	        <div class="summary">${escapeHtml(card.summary || 'Overview of key topics in this guide.')}</div>
-	        <div class="meta">${card.page_count ? `${card.page_count} pages` : ''}</div>
+	        <div class="meta">${escapeHtml(card.meta || '')}</div>
 	        <div class="actions">
-	          <button class="btn ghost small">OPEN GUIDE</button>
+	          ${action ? `<button class="btn ghost small">${escapeHtml(actionLabel)}</button>` : ''}
 	        </div>
-	        <button class="close" title="Dismiss" aria-label="Dismiss">×</button>
+	        ${card.dismissible === false ? '' : '<button class="close" title="Dismiss" aria-label="Dismiss">×</button>'}
 	      `;
 	      const openBtn = item.querySelector('.actions button');
 	      const closeBtn = item.querySelector('.close');
 	      openBtn?.addEventListener('click', () => {
-	        openDocsReader({ doc_id: card.doc_id, page_id: card.page_id || null, version: docsState.version });
+	        if (!action) return;
+	        if (action.type === 'open_guide' && action.doc_id) {
+	          openDocsReader({ doc_id: action.doc_id, page_id: action.page_id || null, version: docsState.version });
+	          return;
+	        }
+	        if (action.type === 'open_docs') {
+	          openDocsReader({});
+	          return;
+	        }
+	        if (action.type === 'open_url' && action.url) {
+	          window.open(action.url, '_blank', 'noopener');
+	        }
 	      });
 	      closeBtn?.addEventListener('click', () => {
 	        homeState.dismissed.add(card.id);
@@ -3256,7 +3315,7 @@
 	    homeState.role = role;
 	    homeState.version = version;
 	    try {
-	      homeState.cards = await loadTopGuideCards(role, version);
+	      homeState.cards = await loadHomeCards(role, version);
 	      homeState.dismissed.clear();
 	      const existing = document.getElementById('homeCards');
 	      if (existing) existing.remove();

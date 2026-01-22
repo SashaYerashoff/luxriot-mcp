@@ -76,5 +76,19 @@
   "docs_style": {
     "heading_font": "sans",
     "body_font": "sans"
+  },
+  "home_cards": {
+    "enabled": true,
+    "max_cards": 6,
+    "roles": {
+      "anonymous": {
+        "show_top_guides": true,
+        "pinned": []
+      },
+      "client": {
+        "show_top_guides": true,
+        "pinned": []
+      }
+    }
   }
 }
