@@ -209,6 +209,7 @@ class HomeCardAction(BaseModel):
         "open_chat",
         "open_session",
         "open_admin",
+        "open_debug",
     ]
     label: str | None = None
     doc_id: str | None = None
@@ -243,6 +244,40 @@ class TelemetryEventRequest(BaseModel):
     query: str | None = None
     session_id: str | None = None
     status: str | None = None
+
+
+class TelemetryErrorItem(BaseModel):
+    kind: str
+    status: str | None = None
+    doc_id: str | None = None
+    page_id: str | None = None
+    query: str | None = None
+    created_at: str
+
+
+class TelemetryDocCount(BaseModel):
+    doc_id: str
+    count: int
+
+
+class TelemetryQueryCount(BaseModel):
+    query: str
+    count: int
+
+
+class ReindexStatusSummary(BaseModel):
+    status: str
+    phase: str | None = None
+    updated_at: str | None = None
+
+
+class TelemetrySummaryResponse(BaseModel):
+    error_count_7d: int = 0
+    pending_publish: int = 0
+    reindex_status: ReindexStatusSummary | None = None
+    top_docs: list[TelemetryDocCount] = Field(default_factory=list)
+    top_searches: list[TelemetryQueryCount] = Field(default_factory=list)
+    recent_errors: list[TelemetryErrorItem] = Field(default_factory=list)
     cover_image: str | None = None
     cover_text: str | None = None
     cover_copyright: str | None = None

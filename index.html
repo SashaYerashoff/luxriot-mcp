@@ -784,6 +784,7 @@
       gap:18px;
       align-items:start;
     }
+    .debug-grid .span2{grid-column:1 / -1;}
     .debug-results{
       max-height:520px;
       overflow:auto;
@@ -808,6 +809,10 @@
     .debug-kv{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5;}
     .debug-kv .k{color:rgba(214,217,223,.78);}
     .debug-snippet{margin-top:8px;font-size:12px;color:var(--text);opacity:.92;white-space:pre-wrap;}
+
+    .telemetry-list{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
+    .telemetry-item{border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:rgba(16,17,19,.35);font-size:12px;color:var(--text);}
+    .telemetry-item .meta{color:var(--muted);font-size:11px;margin-top:4px;}
 
     /* Redactor panel */
     .redactor-grid{
@@ -1318,6 +1323,40 @@
         <div class="list" id="adminPublishList" style="max-height:220px;"></div>
       </div>
 
+      <div class="card span2" id="adminTelemetryCard">
+        <h3>Telemetry</h3>
+        <div class="tiny muted">Recent errors, top docs, and top searches (last 30 days).</div>
+        <div class="inline" style="margin-top:8px;">
+          <button class="btn ghost small" id="adminTelemetryRefreshBtn">REFRESH</button>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <div style="flex:1;">
+            <label>Errors (7d)</label>
+            <div class="tiny muted" id="adminTelemetryErrorCount">—</div>
+          </div>
+          <div style="flex:1;">
+            <label>Pending publish</label>
+            <div class="tiny muted" id="adminTelemetryPublishCount">—</div>
+          </div>
+          <div style="flex:1;">
+            <label>Reindex status</label>
+            <div class="tiny muted" id="adminTelemetryReindex">—</div>
+          </div>
+        </div>
+        <div class="inline" style="margin-top:10px;">
+          <div style="flex:1;">
+            <label>Top docs</label>
+            <div class="telemetry-list" id="adminTelemetryTopDocs"></div>
+          </div>
+          <div style="flex:1;">
+            <label>Top searches</label>
+            <div class="telemetry-list" id="adminTelemetryTopSearches"></div>
+          </div>
+        </div>
+        <label style="margin-top:12px;">Recent errors</label>
+        <div class="telemetry-list" id="adminTelemetryErrors"></div>
+      </div>
+
       <div class="card" id="docsStyleCard">
         <h3>Docs style</h3>
         <label>Heading font</label>
@@ -1357,6 +1396,61 @@
         <div class="inline" style="margin-top:6px;">
           <span class="pill"><input id="adminHomeTopClient" type="checkbox"> include top guides</span>
         </div>
+        <label style="margin-top:12px;">Custom cards</label>
+        <div class="inline">
+          <select id="adminHomeCustomRole" style="width:180px;">
+            <option value="anonymous">anonymous</option>
+            <option value="client">client</option>
+          </select>
+          <button class="btn ghost small" id="adminHomeCustomAddBtn">ADD CARD</button>
+        </div>
+        <div class="list" id="adminHomeCustomList" style="max-height:180px;margin-top:8px;"></div>
+        <div class="tiny muted" id="adminHomeCustomStatus" style="margin-top:6px;"></div>
+
+        <div class="card" style="margin-top:10px;">
+          <label>Title</label>
+          <input id="adminHomeCustomTitle" type="text" placeholder="Card title"/>
+          <label>Summary</label>
+          <textarea id="adminHomeCustomSummary" rows="2" placeholder="Short description"></textarea>
+          <label>Meta</label>
+          <input id="adminHomeCustomMeta" type="text" placeholder="Optional meta line"/>
+
+          <label>Action type</label>
+          <select id="adminHomeCustomActionType">
+            <option value="open_guide">open_guide</option>
+            <option value="open_docs">open_docs</option>
+            <option value="search">search</option>
+            <option value="open_chat">open_chat</option>
+            <option value="open_url">open_url</option>
+            <option value="open_session">open_session</option>
+            <option value="open_admin">open_admin</option>
+            <option value="open_debug">open_debug</option>
+          </select>
+          <label>Action label</label>
+          <input id="adminHomeCustomActionLabel" type="text" placeholder="Button label"/>
+          <div class="inline">
+            <div style="flex:1;">
+              <label>Doc ID</label>
+              <input id="adminHomeCustomDocId" type="text" placeholder="doc_id"/>
+            </div>
+            <div style="flex:1;">
+              <label>Page ID</label>
+              <input id="adminHomeCustomPageId" type="text" placeholder="page_id"/>
+            </div>
+          </div>
+          <label>Query</label>
+          <input id="adminHomeCustomQuery" type="text" placeholder="Search or chat prompt"/>
+          <label>URL</label>
+          <input id="adminHomeCustomUrl" type="text" placeholder="https://example.com"/>
+          <label>Session ID</label>
+          <input id="adminHomeCustomSession" type="text" placeholder="session id"/>
+          <div class="inline" style="margin-top:8px;">
+            <span class="pill"><input id="adminHomeCustomDismissible" type="checkbox" checked> dismissible</span>
+            <button class="btn small" id="adminHomeCustomSaveBtn">SAVE CARD</button>
+            <button class="btn ghost small" id="adminHomeCustomDeleteBtn">DELETE</button>
+          </div>
+        </div>
+
         <div class="tiny muted" style="margin-top:6px;">Visible on the home screen for anonymous/client roles.</div>
       </div>
 	
@@ -1923,6 +2017,40 @@
             <pre id="debugRaw"></pre>
           </details>
         </div>
+
+        <div class="card span2" id="debugTelemetryCard">
+          <h3>Telemetry</h3>
+          <div class="tiny muted">Recent errors and top docs/searches.</div>
+          <div class="inline" style="margin-top:8px;">
+            <button class="btn ghost small" id="debugTelemetryRefreshBtn">REFRESH</button>
+          </div>
+          <div class="inline" style="margin-top:10px;">
+            <div style="flex:1;">
+              <label>Errors (7d)</label>
+              <div class="tiny muted" id="debugTelemetryErrorCount">—</div>
+            </div>
+            <div style="flex:1;">
+              <label>Pending publish</label>
+              <div class="tiny muted" id="debugTelemetryPublishCount">—</div>
+            </div>
+            <div style="flex:1;">
+              <label>Reindex status</label>
+              <div class="tiny muted" id="debugTelemetryReindex">—</div>
+            </div>
+          </div>
+          <div class="inline" style="margin-top:10px;">
+            <div style="flex:1;">
+              <label>Top docs</label>
+              <div class="telemetry-list" id="debugTelemetryTopDocs"></div>
+            </div>
+            <div style="flex:1;">
+              <label>Top searches</label>
+              <div class="telemetry-list" id="debugTelemetryTopSearches"></div>
+            </div>
+          </div>
+          <label style="margin-top:12px;">Recent errors</label>
+          <div class="telemetry-list" id="debugTelemetryErrors"></div>
+        </div>
       </div>
     </div>
 
@@ -2318,6 +2446,31 @@
 		  const adminHomeTopAnonEl = document.getElementById('adminHomeTopAnon');
 		  const adminHomePinnedClientEl = document.getElementById('adminHomePinnedClient');
 		  const adminHomeTopClientEl = document.getElementById('adminHomeTopClient');
+		  const adminTelemetryRefreshBtnEl = document.getElementById('adminTelemetryRefreshBtn');
+		  const adminTelemetryErrorCountEl = document.getElementById('adminTelemetryErrorCount');
+		  const adminTelemetryPublishCountEl = document.getElementById('adminTelemetryPublishCount');
+		  const adminTelemetryReindexEl = document.getElementById('adminTelemetryReindex');
+		  const adminTelemetryTopDocsEl = document.getElementById('adminTelemetryTopDocs');
+		  const adminTelemetryTopSearchesEl = document.getElementById('adminTelemetryTopSearches');
+		  const adminTelemetryErrorsEl = document.getElementById('adminTelemetryErrors');
+
+		  const adminHomeCustomRoleEl = document.getElementById('adminHomeCustomRole');
+		  const adminHomeCustomAddBtnEl = document.getElementById('adminHomeCustomAddBtn');
+		  const adminHomeCustomListEl = document.getElementById('adminHomeCustomList');
+		  const adminHomeCustomTitleEl = document.getElementById('adminHomeCustomTitle');
+		  const adminHomeCustomSummaryEl = document.getElementById('adminHomeCustomSummary');
+		  const adminHomeCustomMetaEl = document.getElementById('adminHomeCustomMeta');
+		  const adminHomeCustomActionTypeEl = document.getElementById('adminHomeCustomActionType');
+		  const adminHomeCustomActionLabelEl = document.getElementById('adminHomeCustomActionLabel');
+		  const adminHomeCustomDocIdEl = document.getElementById('adminHomeCustomDocId');
+		  const adminHomeCustomPageIdEl = document.getElementById('adminHomeCustomPageId');
+		  const adminHomeCustomQueryEl = document.getElementById('adminHomeCustomQuery');
+		  const adminHomeCustomUrlEl = document.getElementById('adminHomeCustomUrl');
+		  const adminHomeCustomSessionEl = document.getElementById('adminHomeCustomSession');
+		  const adminHomeCustomDismissibleEl = document.getElementById('adminHomeCustomDismissible');
+		  const adminHomeCustomSaveBtnEl = document.getElementById('adminHomeCustomSaveBtn');
+		  const adminHomeCustomDeleteBtnEl = document.getElementById('adminHomeCustomDeleteBtn');
+		  const adminHomeCustomStatusEl = document.getElementById('adminHomeCustomStatus');
 
 			  // Admin: users
 			  const adminNewUserUsernameEl = document.getElementById('adminNewUserUsername');
@@ -2421,6 +2574,13 @@
     const debugSettingsEl = document.getElementById('debugSettings');
     const debugResultsEl = document.getElementById('debugResults');
     const debugRawEl = document.getElementById('debugRaw');
+    const debugTelemetryRefreshBtnEl = document.getElementById('debugTelemetryRefreshBtn');
+    const debugTelemetryErrorCountEl = document.getElementById('debugTelemetryErrorCount');
+    const debugTelemetryPublishCountEl = document.getElementById('debugTelemetryPublishCount');
+    const debugTelemetryReindexEl = document.getElementById('debugTelemetryReindex');
+    const debugTelemetryTopDocsEl = document.getElementById('debugTelemetryTopDocs');
+    const debugTelemetryTopSearchesEl = document.getElementById('debugTelemetryTopSearches');
+    const debugTelemetryErrorsEl = document.getElementById('debugTelemetryErrors');
 
 			  let adminBundle = null; // {defaults, settings, effective}
 			  const PROMPT_ROLES = ['admin', 'redactor', 'support', 'client', 'anonymous'];
@@ -2438,6 +2598,135 @@
 	      .split('\n')
 	      .map((x) => x.trim())
 	      .filter((x) => x.length);
+	  }
+
+	  const adminHomeCustomCards = { anonymous: [], client: [] };
+	  let adminHomeCustomRole = 'anonymous';
+	  let adminHomeCustomSelectedId = null;
+
+	  function makeCustomCardId() {
+	    return `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+	  }
+
+	  function splitPinnedEntries(entries) {
+	    const strings = [];
+	    const objects = [];
+	    (entries || []).forEach((entry) => {
+	      if (typeof entry === 'string') {
+	        if (entry.trim()) strings.push(entry.trim());
+	        return;
+	      }
+	      if (entry && typeof entry === 'object') {
+	        objects.push(entry);
+	      }
+	    });
+	    return { strings, objects };
+	  }
+
+	  function normalizeCustomCard(raw) {
+	    const card = raw && typeof raw === 'object' ? { ...raw } : {};
+	    if (!card.id) card.id = makeCustomCardId();
+	    if (!card.title) card.title = 'Custom card';
+	    if (typeof card.dismissible !== 'boolean') card.dismissible = true;
+	    const action = card.action && typeof card.action === 'object' ? { ...card.action } : {};
+	    if (!action.type) action.type = 'open_docs';
+	    card.action = action;
+	    return card;
+	  }
+
+	  function renderCustomCardList() {
+	    if (!adminHomeCustomListEl) return;
+	    adminHomeCustomListEl.innerHTML = '';
+	    const list = adminHomeCustomCards[adminHomeCustomRole] || [];
+	    if (!list.length) {
+	      const empty = document.createElement('div');
+	      empty.className = 'tiny muted';
+	      empty.textContent = 'No custom cards.';
+	      adminHomeCustomListEl.appendChild(empty);
+	      return;
+	    }
+	    list.forEach((card) => {
+	      const item = document.createElement('div');
+	      item.className = 'item';
+	      if (card.id && card.id === adminHomeCustomSelectedId) item.classList.add('selected');
+	      const top = document.createElement('div');
+	      top.className = 'top';
+	      const left = document.createElement('div');
+	      left.textContent = card.title || card.id || 'Card';
+	      const badge = document.createElement('div');
+	      badge.className = 'badge';
+	      badge.textContent = card.action?.type || 'action';
+	      top.appendChild(left);
+	      top.appendChild(badge);
+	      item.appendChild(top);
+	      const sub = document.createElement('div');
+	      sub.className = 'tagline';
+	      sub.textContent = card.summary || card.meta || card.id || '';
+	      item.appendChild(sub);
+	      item.addEventListener('click', () => selectCustomCard(card));
+	      adminHomeCustomListEl.appendChild(item);
+	    });
+	  }
+
+	  function selectCustomCard(card) {
+	    const normalized = normalizeCustomCard(card);
+	    adminHomeCustomSelectedId = normalized.id;
+	    if (adminHomeCustomTitleEl) adminHomeCustomTitleEl.value = normalized.title || '';
+	    if (adminHomeCustomSummaryEl) adminHomeCustomSummaryEl.value = normalized.summary || '';
+	    if (adminHomeCustomMetaEl) adminHomeCustomMetaEl.value = normalized.meta || '';
+	    if (adminHomeCustomDismissibleEl) adminHomeCustomDismissibleEl.checked = Boolean(normalized.dismissible);
+	    const action = normalized.action || {};
+	    if (adminHomeCustomActionTypeEl) adminHomeCustomActionTypeEl.value = action.type || 'open_docs';
+	    if (adminHomeCustomActionLabelEl) adminHomeCustomActionLabelEl.value = action.label || '';
+	    if (adminHomeCustomDocIdEl) adminHomeCustomDocIdEl.value = action.doc_id || '';
+	    if (adminHomeCustomPageIdEl) adminHomeCustomPageIdEl.value = action.page_id || '';
+	    if (adminHomeCustomQueryEl) adminHomeCustomQueryEl.value = action.query || '';
+	    if (adminHomeCustomUrlEl) adminHomeCustomUrlEl.value = action.url || '';
+	    if (adminHomeCustomSessionEl) adminHomeCustomSessionEl.value = action.session_id || '';
+	    renderCustomCardList();
+	    updateCustomActionFields();
+	  }
+
+	  function updateCustomActionFields() {
+	    const type = String(adminHomeCustomActionTypeEl?.value || 'open_docs');
+	    const showDoc = type === 'open_guide';
+	    const showQuery = type === 'search' || type === 'open_chat';
+	    const showUrl = type === 'open_url';
+	    const showSession = type === 'open_session';
+	    if (adminHomeCustomDocIdEl) adminHomeCustomDocIdEl.parentElement.style.display = showDoc ? '' : 'none';
+	    if (adminHomeCustomPageIdEl) adminHomeCustomPageIdEl.parentElement.style.display = showDoc ? '' : 'none';
+	    const toggle = (el, show) => {
+	      if (!el) return;
+	      el.style.display = show ? '' : 'none';
+	      const label = el.previousElementSibling;
+	      if (label && label.tagName === 'LABEL') label.style.display = show ? '' : 'none';
+	    };
+	    toggle(adminHomeCustomQueryEl, showQuery);
+	    toggle(adminHomeCustomUrlEl, showUrl);
+	    toggle(adminHomeCustomSessionEl, showSession);
+	  }
+
+	  function serializeCustomCards(role) {
+	    const list = adminHomeCustomCards[role] || [];
+	    return list.map((card) => {
+	      const clean = {
+	        id: String(card.id || '').trim() || makeCustomCardId(),
+	        title: String(card.title || '').trim(),
+	        summary: String(card.summary || '').trim() || null,
+	        meta: String(card.meta || '').trim() || null,
+	        dismissible: Boolean(card.dismissible),
+	        action: {
+	          type: String(card.action?.type || 'open_docs'),
+	          label: String(card.action?.label || '').trim() || null,
+	          doc_id: String(card.action?.doc_id || '').trim() || null,
+	          page_id: String(card.action?.page_id || '').trim() || null,
+	          query: String(card.action?.query || '').trim() || null,
+	          url: String(card.action?.url || '').trim() || null,
+	          session_id: String(card.action?.session_id || '').trim() || null,
+	        },
+	      };
+	      return clean;
+	    });
 	  }
 
 		  function _renderPreview(template) {
@@ -2920,9 +3209,9 @@
 		    }
 		  }
 
-		  async function loadAdminPanel() {
-		    adminSaveHintEl.textContent = '';
-		    adminApiBaseEl.textContent = apiBase;
+	  async function loadAdminPanel() {
+	    adminSaveHintEl.textContent = '';
+	    adminApiBaseEl.textContent = apiBase;
 
 	    await loadHealthInfo();
 
@@ -2992,17 +3281,21 @@
 		    const homeClient = homeRoles.client || {};
 		    if (adminHomeMaxCardsEl) adminHomeMaxCardsEl.value = homeCards.max_cards ?? 6;
 		    if (adminHomePinnedAnonEl) {
-		      adminHomePinnedAnonEl.value = Array.isArray(homeAnon.pinned)
-		        ? homeAnon.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
-		        : '';
+		      const parsed = splitPinnedEntries(Array.isArray(homeAnon.pinned) ? homeAnon.pinned : []);
+		      adminHomePinnedAnonEl.value = parsed.strings.join('\n');
+		      adminHomeCustomCards.anonymous = parsed.objects.map(normalizeCustomCard);
 		    }
 		    if (adminHomeTopAnonEl) adminHomeTopAnonEl.checked = Boolean(homeAnon.show_top_guides ?? true);
 		    if (adminHomePinnedClientEl) {
-		      adminHomePinnedClientEl.value = Array.isArray(homeClient.pinned)
-		        ? homeClient.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
-		        : '';
+		      const parsed = splitPinnedEntries(Array.isArray(homeClient.pinned) ? homeClient.pinned : []);
+		      adminHomePinnedClientEl.value = parsed.strings.join('\n');
+		      adminHomeCustomCards.client = parsed.objects.map(normalizeCustomCard);
 		    }
 		    if (adminHomeTopClientEl) adminHomeTopClientEl.checked = Boolean(homeClient.show_top_guides ?? true);
+		    if (adminHomeCustomRoleEl) adminHomeCustomRole = adminHomeCustomRoleEl.value || 'anonymous';
+		    renderCustomCardList();
+		    updateCustomActionFields();
+		    updateCustomActionFields();
 
 		    _loadPromptTemplates(effective);
 		    const preferredRole = PROMPT_ROLES.includes(String(authState?.role || '')) ? String(authState.role) : 'admin';
@@ -3011,8 +3304,31 @@
 		    chatKDefault = Number(retrieval.k_default ?? 8);
 		    _syncPromptPreview();
 
-		    await fetchReindexStatus().catch(() => {});
-		  }
+	    await fetchReindexStatus().catch(() => {});
+	  }
+
+	  async function openAdminPanel({ scrollTo = null } = {}) {
+	    openModal(adminPanel);
+	    await loadAdminPanel();
+	    await loadTelemetry();
+	    if (scrollTo) {
+	      const el = document.getElementById(scrollTo);
+	      if (el && typeof el.scrollIntoView === 'function') {
+	        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	      }
+	    }
+	  }
+
+	  async function openDebugPanel({ scrollTo = null } = {}) {
+	    openModal(debugPanel);
+	    await loadTelemetry();
+	    if (scrollTo) {
+	      const el = document.getElementById(scrollTo);
+	      if (el && typeof el.scrollIntoView === 'function') {
+	        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	      }
+	    }
+	  }
 
 	  function applyDefaultsToForm() {
 	    if (!adminBundle?.defaults) return;
@@ -3079,17 +3395,19 @@
 		    const homeClient = homeRoles.client || {};
 		    if (adminHomeMaxCardsEl) adminHomeMaxCardsEl.value = homeCards.max_cards ?? 6;
 		    if (adminHomePinnedAnonEl) {
-		      adminHomePinnedAnonEl.value = Array.isArray(homeAnon.pinned)
-		        ? homeAnon.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
-		        : '';
+		      const parsed = splitPinnedEntries(Array.isArray(homeAnon.pinned) ? homeAnon.pinned : []);
+		      adminHomePinnedAnonEl.value = parsed.strings.join('\n');
+		      adminHomeCustomCards.anonymous = parsed.objects.map(normalizeCustomCard);
 		    }
 		    if (adminHomeTopAnonEl) adminHomeTopAnonEl.checked = Boolean(homeAnon.show_top_guides ?? true);
 		    if (adminHomePinnedClientEl) {
-		      adminHomePinnedClientEl.value = Array.isArray(homeClient.pinned)
-		        ? homeClient.pinned.filter((x) => typeof x === 'string' && x.trim()).join('\n')
-		        : '';
+		      const parsed = splitPinnedEntries(Array.isArray(homeClient.pinned) ? homeClient.pinned : []);
+		      adminHomePinnedClientEl.value = parsed.strings.join('\n');
+		      adminHomeCustomCards.client = parsed.objects.map(normalizeCustomCard);
 		    }
 		    if (adminHomeTopClientEl) adminHomeTopClientEl.checked = Boolean(homeClient.show_top_guides ?? true);
+		    if (adminHomeCustomRoleEl) adminHomeCustomRole = adminHomeCustomRoleEl.value || 'anonymous';
+		    renderCustomCardList();
 
 		    _loadPromptTemplates(d);
 		    _setPromptRole(adminActivePromptRole || 'admin', { preserveCurrent: false });
@@ -3181,11 +3499,11 @@
 		      roles: {
 		        anonymous: {
 		          show_top_guides: Boolean(adminHomeTopAnonEl?.checked),
-		          pinned: _linesToList(adminHomePinnedAnonEl?.value)
+		          pinned: [...serializeCustomCards('anonymous'), ..._linesToList(adminHomePinnedAnonEl?.value)]
 		        },
 		        client: {
 		          show_top_guides: Boolean(adminHomeTopClientEl?.checked),
-		          pinned: _linesToList(adminHomePinnedClientEl?.value)
+		          pinned: [...serializeCustomCards('client'), ..._linesToList(adminHomePinnedClientEl?.value)]
 		        }
 		      }
 		    };
@@ -3245,7 +3563,7 @@
 	  }
 
 	  async function loadHomeCards(role, version) {
-	    const allowedRoles = new Set(['anonymous', 'client']);
+	    const allowedRoles = new Set(['anonymous', 'client', 'support', 'admin']);
 	    if (!allowedRoles.has(role)) return [];
 	    const qs = version ? `?version=${encodeURIComponent(version)}` : '';
 	    const payload = await apiJson(`/home/cards${qs}`);
@@ -3269,6 +3587,8 @@
 	          ? 'OPEN CHAT'
 	          : action?.type === 'open_admin'
 	          ? 'OPEN ADMIN'
+	          : action?.type === 'open_debug'
+	          ? 'OPEN DEBUG'
 	          : action?.type === 'search'
 	          ? 'SEARCH'
 	          : 'OPEN');
@@ -3309,11 +3629,14 @@
 	        }
 	        if (action.type === 'open_admin') {
 	          if (authState?.role === 'admin') {
-	            openModal(adminPanel);
-	            loadAdminPanel().catch((err) => {
+	            openAdminPanel({ scrollTo: 'adminTelemetryCard' }).catch((err) => {
 	              adminSaveHintEl.textContent = `Failed to load settings: ${err?.raw ? String(err.raw) : String(err)}`;
 	            });
 	          }
+	          return;
+	        }
+	        if (action.type === 'open_debug') {
+	          openDebugPanel({ scrollTo: 'debugTelemetryCard' }).catch(() => {});
 	          return;
 	        }
 	        if (action.type === 'open_chat') {
@@ -3341,7 +3664,7 @@
 
 	  async function showHomeCards({ force = false } = {}) {
 	    const role = String(authState?.role || 'anonymous');
-	    if (!['anonymous', 'client'].includes(role)) return;
+	    if (!['anonymous', 'client', 'support', 'admin'].includes(role)) return;
 	    if (homeState.loading) return;
 	    await ensureDocsVersions();
 	    const version = docsState.version || null;
@@ -3397,6 +3720,149 @@
 	    } catch (e) {
 	      // ignore telemetry errors
 	    }
+	  }
+
+	  function renderTelemetryList(el, items, renderRow) {
+	    if (!el) return;
+	    el.innerHTML = '';
+	    const rows = Array.isArray(items) ? items : [];
+	    if (!rows.length) {
+	      const empty = document.createElement('div');
+	      empty.className = 'tiny muted';
+	      empty.textContent = 'No data.';
+	      el.appendChild(empty);
+	      return;
+	    }
+	    rows.forEach((item) => {
+	      const row = document.createElement('div');
+	      row.className = 'telemetry-item';
+	      row.innerHTML = renderRow(item);
+	      el.appendChild(row);
+	    });
+	  }
+
+	  function renderTelemetry(payload) {
+	    if (!payload) return;
+	    const errCount = Number(payload.error_count_7d || 0);
+	    const pending = Number(payload.pending_publish || 0);
+	    const reindex = payload.reindex_status || null;
+	    const reindexText = reindex ? `${reindex.status}${reindex.phase ? ` · ${reindex.phase}` : ''}` : 'Idle';
+
+	    const topDocs = Array.isArray(payload.top_docs) ? payload.top_docs : [];
+	    const topSearches = Array.isArray(payload.top_searches) ? payload.top_searches : [];
+	    const recentErrors = Array.isArray(payload.recent_errors) ? payload.recent_errors : [];
+
+	    if (adminTelemetryErrorCountEl) adminTelemetryErrorCountEl.textContent = String(errCount);
+	    if (adminTelemetryPublishCountEl) adminTelemetryPublishCountEl.textContent = String(pending);
+	    if (adminTelemetryReindexEl) adminTelemetryReindexEl.textContent = reindexText;
+	    if (debugTelemetryErrorCountEl) debugTelemetryErrorCountEl.textContent = String(errCount);
+	    if (debugTelemetryPublishCountEl) debugTelemetryPublishCountEl.textContent = String(pending);
+	    if (debugTelemetryReindexEl) debugTelemetryReindexEl.textContent = reindexText;
+
+	    renderTelemetryList(adminTelemetryTopDocsEl, topDocs, (row) => {
+	      const docId = String(row.doc_id || '');
+	      const cnt = Number(row.count || 0);
+	      return `<div>${escapeHtml(docId || '—')}</div><div class="meta">${cnt} views</div>`;
+	    });
+	    renderTelemetryList(debugTelemetryTopDocsEl, topDocs, (row) => {
+	      const docId = String(row.doc_id || '');
+	      const cnt = Number(row.count || 0);
+	      return `<div>${escapeHtml(docId || '—')}</div><div class="meta">${cnt} views</div>`;
+	    });
+
+	    renderTelemetryList(adminTelemetryTopSearchesEl, topSearches, (row) => {
+	      const query = String(row.query || '');
+	      const cnt = Number(row.count || 0);
+	      return `<div>${escapeHtml(query || '—')}</div><div class="meta">${cnt} searches</div>`;
+	    });
+	    renderTelemetryList(debugTelemetryTopSearchesEl, topSearches, (row) => {
+	      const query = String(row.query || '');
+	      const cnt = Number(row.count || 0);
+	      return `<div>${escapeHtml(query || '—')}</div><div class="meta">${cnt} searches</div>`;
+	    });
+
+	    const renderErrorRow = (row) => {
+	      const kind = String(row.kind || '');
+	      const status = String(row.status || '');
+	      const when = String(row.created_at || '');
+	      const label = row.query ? String(row.query) : row.doc_id ? `${row.doc_id}/${row.page_id || ''}` : '';
+	      return `<div>${escapeHtml(kind)} · ${escapeHtml(label)}</div><div class="meta">${escapeHtml(when)}${status ? ` · ${escapeHtml(status)}` : ''}</div>`;
+	    };
+	    renderTelemetryList(adminTelemetryErrorsEl, recentErrors, renderErrorRow);
+	    renderTelemetryList(debugTelemetryErrorsEl, recentErrors, renderErrorRow);
+	  }
+
+	  async function loadTelemetry() {
+	    try {
+	      const payload = await apiJson('/ops/telemetry');
+	      renderTelemetry(payload);
+	    } catch (e) {
+	      // ignore if not allowed
+	    }
+	  }
+
+	  function setHomeCustomStatus(text, { error = false } = {}) {
+	    if (!adminHomeCustomStatusEl) return;
+	    adminHomeCustomStatusEl.textContent = text || '';
+	    adminHomeCustomStatusEl.style.color = error ? 'var(--danger)' : 'var(--muted)';
+	  }
+
+	  function clearCustomForm() {
+	    adminHomeCustomSelectedId = null;
+	    if (adminHomeCustomTitleEl) adminHomeCustomTitleEl.value = '';
+	    if (adminHomeCustomSummaryEl) adminHomeCustomSummaryEl.value = '';
+	    if (adminHomeCustomMetaEl) adminHomeCustomMetaEl.value = '';
+	    if (adminHomeCustomActionTypeEl) adminHomeCustomActionTypeEl.value = 'open_docs';
+	    if (adminHomeCustomActionLabelEl) adminHomeCustomActionLabelEl.value = '';
+	    if (adminHomeCustomDocIdEl) adminHomeCustomDocIdEl.value = '';
+	    if (adminHomeCustomPageIdEl) adminHomeCustomPageIdEl.value = '';
+	    if (adminHomeCustomQueryEl) adminHomeCustomQueryEl.value = '';
+	    if (adminHomeCustomUrlEl) adminHomeCustomUrlEl.value = '';
+	    if (adminHomeCustomSessionEl) adminHomeCustomSessionEl.value = '';
+	    if (adminHomeCustomDismissibleEl) adminHomeCustomDismissibleEl.checked = true;
+	    updateCustomActionFields();
+	    renderCustomCardList();
+	  }
+
+	  function saveCustomCard() {
+	    const role = adminHomeCustomRole || 'anonymous';
+	    const list = adminHomeCustomCards[role] || [];
+	    let card = list.find((c) => c.id === adminHomeCustomSelectedId);
+	    if (!card) {
+	      card = normalizeCustomCard({});
+	      list.push(card);
+	    }
+	    card.title = String(adminHomeCustomTitleEl?.value || '').trim() || 'Custom card';
+	    card.summary = String(adminHomeCustomSummaryEl?.value || '').trim() || null;
+	    card.meta = String(adminHomeCustomMetaEl?.value || '').trim() || null;
+	    card.dismissible = Boolean(adminHomeCustomDismissibleEl?.checked);
+	    card.action = {
+	      type: String(adminHomeCustomActionTypeEl?.value || 'open_docs'),
+	      label: String(adminHomeCustomActionLabelEl?.value || '').trim() || null,
+	      doc_id: String(adminHomeCustomDocIdEl?.value || '').trim() || null,
+	      page_id: String(adminHomeCustomPageIdEl?.value || '').trim() || null,
+	      query: String(adminHomeCustomQueryEl?.value || '').trim() || null,
+	      url: String(adminHomeCustomUrlEl?.value || '').trim() || null,
+	      session_id: String(adminHomeCustomSessionEl?.value || '').trim() || null,
+	    };
+	    adminHomeCustomSelectedId = card.id;
+	    adminHomeCustomCards[role] = list;
+	    renderCustomCardList();
+	    setHomeCustomStatus('Saved custom card.');
+	  }
+
+	  function deleteCustomCard() {
+	    const role = adminHomeCustomRole || 'anonymous';
+	    const list = adminHomeCustomCards[role] || [];
+	    if (!adminHomeCustomSelectedId) {
+	      setHomeCustomStatus('Select a card first.', { error: true });
+	      return;
+	    }
+	    const idx = list.findIndex((c) => c.id === adminHomeCustomSelectedId);
+	    if (idx >= 0) list.splice(idx, 1);
+	    adminHomeCustomCards[role] = list;
+	    clearCustomForm();
+	    setHomeCustomStatus('Deleted custom card.');
 	  }
 
 	  // ---------- Markdown renderer ----------
@@ -4522,7 +4988,7 @@
 		    if (docsStyleCardEl) docsStyleCardEl.style.display = isAdmin ? '' : 'none';
 		    if (docsPanel) docsPanel.classList.toggle('no-edit', !canEditDocs);
 		    if (!canEditDocs && docsState.editing) setDocsEditMode(false);
-		    if (!['anonymous', 'client'].includes(role)) {
+		    if (!['anonymous', 'client', 'support', 'admin'].includes(role)) {
 		      const cards = document.getElementById('homeCards');
 		      if (cards) cards.remove();
 		    }
@@ -6660,8 +7126,7 @@
 	    e.stopPropagation();
 	    if (adminPanel.classList.contains('visible')) closeAllModals();
 	    else {
-	      openModal(adminPanel);
-	      loadAdminPanel().catch((err) => {
+	      openAdminPanel().catch((err) => {
 	        adminSaveHintEl.textContent = `Failed to load settings: ${err?.raw ? String(err.raw) : String(err)}`;
 	      });
 	    }
@@ -6740,7 +7205,7 @@
     e.stopPropagation();
     if (debugPanel.classList.contains('visible')) closeAllModals();
     else {
-      openModal(debugPanel);
+      openDebugPanel().catch(() => {});
       if (debugQueryEl) debugQueryEl.value = String(lastUserMessage || '').trim();
       if (debugKEl) debugKEl.value = String(chatKDefault || 8);
       if (lastRetrievalPack) renderRetrievalDebug(lastRetrievalPack);
@@ -6769,6 +7234,26 @@
 	    applyDefaultsToForm();
 	    pulse(adminPanel);
 	  });
+	  adminTelemetryRefreshBtnEl?.addEventListener('click', () => loadTelemetry());
+	  debugTelemetryRefreshBtnEl?.addEventListener('click', () => loadTelemetry());
+
+	  adminHomeCustomRoleEl?.addEventListener('change', () => {
+	    adminHomeCustomRole = adminHomeCustomRoleEl.value || 'anonymous';
+	    adminHomeCustomSelectedId = null;
+	    clearCustomForm();
+	    renderCustomCardList();
+	  });
+	  adminHomeCustomAddBtnEl?.addEventListener('click', () => {
+	    const role = adminHomeCustomRole || 'anonymous';
+	    const list = adminHomeCustomCards[role] || [];
+	    const card = normalizeCustomCard({ title: 'New card' });
+	    list.push(card);
+	    adminHomeCustomCards[role] = list;
+	    selectCustomCard(card);
+	  });
+	  adminHomeCustomSaveBtnEl?.addEventListener('click', () => saveCustomCard());
+	  adminHomeCustomDeleteBtnEl?.addEventListener('click', () => deleteCustomCard());
+	  adminHomeCustomActionTypeEl?.addEventListener('change', () => updateCustomActionFields());
 
   // Redactor OK
   document.getElementById('redactorOkBtn').addEventListener('click', closeAllModals);

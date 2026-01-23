@@ -74,6 +74,7 @@ from .schemas import (
     HomeCardsResponse,
     ImageResult,
     TelemetryEventRequest,
+    TelemetrySummaryResponse,
     MessagesResponse,
     PageImage,
     ReindexJob,
@@ -1367,6 +1368,42 @@ def home_cards(
                     }
                 )
                 continue
+            if lower.startswith("admin:"):
+                label = raw.split(":", 1)[1].strip() or "Admin tools"
+                card_id = f"admin:{label}"
+                add_card(
+                    {
+                        "id": card_id,
+                        "title": label,
+                        "summary": "Open administrator tools.",
+                        "meta": "Admin",
+                        "action": {
+                            "type": "open_admin",
+                            "label": "OPEN ADMIN",
+                        },
+                        "dismissible": True,
+                        "source": "pinned",
+                    }
+                )
+                continue
+            if lower.startswith("debug:"):
+                label = raw.split(":", 1)[1].strip() or "Diagnostics"
+                card_id = f"debug:{label}"
+                add_card(
+                    {
+                        "id": card_id,
+                        "title": label,
+                        "summary": "Open diagnostics panel.",
+                        "meta": "Debug",
+                        "action": {
+                            "type": "open_debug",
+                            "label": "OPEN DEBUG",
+                        },
+                        "dismissible": True,
+                        "source": "pinned",
+                    }
+                )
+                continue
             if lower.startswith("chat:"):
                 prompt = raw.split(":", 1)[1].strip()
                 if not prompt:
@@ -1544,7 +1581,10 @@ def home_cards(
                     "title": f"Recent errors: {err_count}",
                     "summary": "Chat or docs failures in the last 7 days.",
                     "meta": "Ops",
-                    "action": {"type": "open_admin", "label": "OPEN ADMIN"} if role == "admin" else None,
+                    "action": {
+                        "type": "open_admin" if role == "admin" else "open_debug",
+                        "label": "OPEN ADMIN" if role == "admin" else "OPEN DEBUG",
+                    },
                     "dismissible": True,
                     "source": "telemetry",
                 }
@@ -1616,6 +1656,44 @@ def home_cards(
                 }
             )
 
+    if len(cards) < max_cards and role == "support":
+        pending = app_db.list_doc_publish_requests(version=ver, status="pending")
+        count = len(pending)
+        if count:
+            add_card(
+                {
+                    "id": "support:publish",
+                    "title": f"Publish requests: {count}",
+                    "summary": "Pending doc publish requests (admin approval).",
+                    "meta": "Support",
+                    "action": {"type": "open_debug", "label": "OPEN DEBUG"},
+                    "dismissible": True,
+                    "source": "support",
+                }
+            )
+
+    if len(cards) < max_cards and role in ("admin", "support"):
+        job = _reindex_job
+        if job:
+            status = str(job.get("status") or "unknown")
+            phase = str(job.get("phase") or "")
+            title = f"Reindex: {status}"
+            summary = f"Phase: {phase}" if phase else "Reindex job status."
+            add_card(
+                {
+                    "id": f"reindex:{status}",
+                    "title": title,
+                    "summary": summary,
+                    "meta": "Indexing",
+                    "action": {
+                        "type": "open_admin" if role == "admin" else "open_debug",
+                        "label": "OPEN ADMIN" if role == "admin" else "OPEN DEBUG",
+                    },
+                    "dismissible": True,
+                    "source": "ops",
+                }
+            )
+
     return HomeCardsResponse(cards=cards)
 
 
@@ -1638,6 +1716,44 @@ def telemetry_event(
         status=req.status,
     )
     return OkResponse()
+
+
+@app.get("/ops/telemetry", response_model=TelemetrySummaryResponse)
+def ops_telemetry(ctx: AuthContext = Depends(resolve_auth)) -> TelemetrySummaryResponse:
+    require_role(ctx, {"admin", "support"})
+    since_30 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    since_7 = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    error_count = app_db.count_telemetry_errors(since=since_7)
+    top_docs = app_db.list_top_doc_views(limit=5, since=since_30)
+    top_searches = app_db.list_top_searches(limit=5, since=since_30)
+    recent_errors = app_db.list_recent_errors(limit=10, since=since_7)
+    pending = len(app_db.list_doc_publish_requests(version=DEFAULT_VERSION, status="pending"))
+    job = _reindex_job
+    reindex_status = None
+    if job:
+        reindex_status = {
+            "status": str(job.get("status") or "unknown"),
+            "phase": str(job.get("phase") or "") or None,
+            "updated_at": str(job.get("updated_at") or "") or None,
+        }
+    return TelemetrySummaryResponse(
+        error_count_7d=error_count,
+        pending_publish=pending,
+        reindex_status=reindex_status,
+        top_docs=[{"doc_id": str(r.get("doc_id") or ""), "count": int(r.get("cnt") or 0)} for r in top_docs],
+        top_searches=[{"query": str(r.get("query") or ""), "count": int(r.get("cnt") or 0)} for r in top_searches],
+        recent_errors=[
+            {
+                "kind": str(r.get("kind") or ""),
+                "status": r.get("status"),
+                "doc_id": r.get("doc_id"),
+                "page_id": r.get("page_id"),
+                "query": r.get("query"),
+                "created_at": str(r.get("created_at") or ""),
+            }
+            for r in recent_errors
+        ],
+    )
 
 
 @app.post("/home/cards/dismiss", response_model=OkResponse)

@@ -698,6 +698,29 @@ def list_recent_doc_views(*, owner_id: str, limit: int = 5) -> list[dict[str, An
         conn.close()
 
 
+def list_recent_errors(*, limit: int = 10, since: str | None = None) -> list[dict[str, Any]]:
+    conn = _connect()
+    try:
+        params: list[Any] = []
+        where = "kind IN ('chat_error','docs_search_error','docs_error')"
+        if since:
+            where += " AND created_at >= ?"
+            params.append(str(since))
+        rows = conn.execute(
+            f"""
+            SELECT kind, status, doc_id, page_id, query, created_at
+            FROM telemetry_events
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (*params, int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def count_telemetry_errors(*, since: str | None = None) -> int:
     conn = _connect()
     try:
