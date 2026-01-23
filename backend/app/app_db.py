@@ -149,6 +149,19 @@ def init_db() -> None:
               PRIMARY KEY(owner_id, version, card_id)
             );
 
+            CREATE TABLE IF NOT EXISTS telemetry_events (
+              event_id TEXT PRIMARY KEY,
+              owner_id TEXT NOT NULL,
+              role TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              doc_id TEXT,
+              page_id TEXT,
+              query TEXT,
+              session_id TEXT,
+              status TEXT,
+              created_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session_created
               ON messages(session_id, created_at);
 
@@ -172,6 +185,10 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_home_card_dismissals_owner
               ON home_card_dismissals(owner_id, version);
+            CREATE INDEX IF NOT EXISTS idx_telemetry_kind_time
+              ON telemetry_events(kind, created_at);
+            CREATE INDEX IF NOT EXISTS idx_telemetry_owner_time
+              ON telemetry_events(owner_id, created_at);
             """
         )
         _migrate_db(conn)
@@ -236,6 +253,24 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_home_card_dismissals_owner ON home_card_dismissals(owner_id, version);"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS telemetry_events (
+          event_id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          doc_id TEXT,
+          page_id TEXT,
+          query TEXT,
+          session_id TEXT,
+          status TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_kind_time ON telemetry_events(kind, created_at);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_owner_time ON telemetry_events(owner_id, created_at);")
     _migrate_users(conn)
 
 
@@ -553,6 +588,112 @@ def clear_home_card_dismissals(*, owner_id: str, version: str) -> None:
             (owner_id, version),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def log_telemetry_event(
+    *,
+    owner_id: str,
+    role: str,
+    kind: str,
+    doc_id: str | None = None,
+    page_id: str | None = None,
+    query: str | None = None,
+    session_id: str | None = None,
+    status: str | None = None,
+) -> None:
+    event_id = str(uuid.uuid4())
+    now = _utc_now()
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT INTO telemetry_events(
+              event_id, owner_id, role, kind, doc_id, page_id, query, session_id, status, created_at
+            )
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                event_id,
+                str(owner_id),
+                str(role),
+                str(kind),
+                str(doc_id) if doc_id else None,
+                str(page_id) if page_id else None,
+                str(query) if query else None,
+                str(session_id) if session_id else None,
+                str(status) if status else None,
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_top_doc_views(*, limit: int = 5, since: str | None = None) -> list[dict[str, Any]]:
+    conn = _connect()
+    try:
+        params: list[Any] = []
+        where = "kind = 'doc_view' AND doc_id IS NOT NULL"
+        if since:
+            where += " AND created_at >= ?"
+            params.append(str(since))
+        rows = conn.execute(
+            f"""
+            SELECT doc_id, COUNT(1) AS cnt
+            FROM telemetry_events
+            WHERE {where}
+            GROUP BY doc_id
+            ORDER BY cnt DESC
+            LIMIT ?
+            """,
+            (*params, int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_top_searches(*, limit: int = 5, since: str | None = None) -> list[dict[str, Any]]:
+    conn = _connect()
+    try:
+        params: list[Any] = []
+        where = "kind = 'docs_search' AND query IS NOT NULL AND query != ''"
+        if since:
+            where += " AND created_at >= ?"
+            params.append(str(since))
+        rows = conn.execute(
+            f"""
+            SELECT query, COUNT(1) AS cnt
+            FROM telemetry_events
+            WHERE {where}
+            GROUP BY query
+            ORDER BY cnt DESC
+            LIMIT ?
+            """,
+            (*params, int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_recent_doc_views(*, owner_id: str, limit: int = 5) -> list[dict[str, Any]]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            """
+            SELECT doc_id, page_id, created_at
+            FROM telemetry_events
+            WHERE owner_id = ? AND kind = 'doc_view' AND doc_id IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (str(owner_id), int(limit)),
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 

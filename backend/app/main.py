@@ -3,14 +3,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from datetime import datetime
 import re
 import secrets
 import shutil
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
@@ -74,6 +73,7 @@ from .schemas import (
     HomeCardDismissRequest,
     HomeCardsResponse,
     ImageResult,
+    TelemetryEventRequest,
     MessagesResponse,
     PageImage,
     ReindexJob,
@@ -1269,7 +1269,7 @@ def _summarize_doc_for_home(version: str, doc_id: str) -> tuple[str | None, str,
 
 @app.get("/home/cards", response_model=HomeCardsResponse)
 def home_cards(
-    version: str | None = None, response: Response, ctx: AuthContext = Depends(resolve_auth)
+    response: Response, version: str | None = None, ctx: AuthContext = Depends(resolve_auth)
 ) -> HomeCardsResponse:
     ver = _require_version(version)
     store = _get_docs_store(ver)
@@ -1481,14 +1481,156 @@ def home_cards(
             )
             seen_doc_ids.add(doc_id)
 
+    if len(cards) < max_cards and ctx.principal.authenticated:
+        recent_sessions = app_db.list_sessions(owner_id=ctx.principal.owner_id, limit=3)
+        for sess in recent_sessions:
+            if len(cards) >= max_cards:
+                break
+            session_id = str(sess.get("session_id") or "")
+            if not session_id:
+                continue
+            title = str(sess.get("title") or "Recent chat")
+            add_card(
+                {
+                    "id": f"session:{session_id}",
+                    "title": title,
+                    "summary": "Continue this conversation.",
+                    "meta": "Chat",
+                    "action": {
+                        "type": "open_session",
+                        "label": "OPEN CHAT",
+                        "session_id": session_id,
+                    },
+                    "dismissible": True,
+                    "source": "recent_session",
+                }
+            )
+
+    if len(cards) < max_cards:
+        recent_views = app_db.list_recent_doc_views(owner_id=ctx.principal.owner_id, limit=1)
+        for view in recent_views:
+            if len(cards) >= max_cards:
+                break
+            doc_id = str(view.get("doc_id") or "")
+            if not doc_id or not _doc_allowed(doc_id, allow, deny):
+                continue
+            page_id = str(view.get("page_id") or "") or None
+            doc_title, summary, first_page_id = _summarize_doc_for_home(ver, doc_id)
+            add_card(
+                {
+                    "id": f"recent:{doc_id}",
+                    "title": f"Continue: {doc_title or doc_id}",
+                    "summary": summary or None,
+                    "meta": "Recently viewed",
+                    "action": {
+                        "type": "open_guide",
+                        "label": "OPEN GUIDE",
+                        "doc_id": doc_id,
+                        "page_id": page_id or first_page_id,
+                    },
+                    "dismissible": True,
+                    "source": "recent_view",
+                }
+            )
+
+    if len(cards) < max_cards and role in ("admin", "support"):
+        since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        top_docs = app_db.list_top_doc_views(limit=1, since=since)
+        for row in top_docs:
+            if len(cards) >= max_cards:
+                break
+            doc_id = str(row.get("doc_id") or "")
+            if not doc_id or not _doc_allowed(doc_id, allow, deny):
+                continue
+            doc_title, summary, first_page_id = _summarize_doc_for_home(ver, doc_id)
+            add_card(
+                {
+                    "id": f"top-doc:{doc_id}",
+                    "title": f"Top viewed: {doc_title or doc_id}",
+                    "summary": summary or None,
+                    "meta": "Last 30 days",
+                    "action": {
+                        "type": "open_guide",
+                        "label": "OPEN GUIDE",
+                        "doc_id": doc_id,
+                        "page_id": first_page_id,
+                    },
+                    "dismissible": True,
+                    "source": "telemetry",
+                }
+            )
+
+        top_searches = app_db.list_top_searches(limit=1, since=since)
+        for row in top_searches:
+            if len(cards) >= max_cards:
+                break
+            query = str(row.get("query") or "").strip()
+            if not query:
+                continue
+            add_card(
+                {
+                    "id": f"top-search:{query}",
+                    "title": f"Top search: {query}",
+                    "summary": query,
+                    "meta": "Last 30 days",
+                    "action": {
+                        "type": "search",
+                        "label": "SEARCH",
+                        "query": query,
+                    },
+                    "dismissible": True,
+                    "source": "telemetry",
+                }
+            )
+
+    if len(cards) < max_cards and role == "admin":
+        pending = app_db.list_doc_publish_requests(version=ver, status="pending")
+        count = len(pending)
+        if count:
+            add_card(
+                {
+                    "id": "admin:publish",
+                    "title": f"Publish requests: {count}",
+                    "summary": "Review and approve pending doc changes.",
+                    "meta": "Admin",
+                    "action": {
+                        "type": "open_admin",
+                        "label": "OPEN ADMIN",
+                    },
+                    "dismissible": True,
+                    "source": "admin",
+                }
+            )
+
     return HomeCardsResponse(cards=cards)
+
+
+@app.post("/telemetry/event", response_model=OkResponse)
+def telemetry_event(
+    req: TelemetryEventRequest, response: Response, ctx: AuthContext = Depends(resolve_auth)
+) -> OkResponse:
+    apply_auth_cookies(response, ctx)
+    kind = str(req.kind or "").strip()
+    if not kind:
+        raise HTTPException(status_code=400, detail="Event kind required")
+    app_db.log_telemetry_event(
+        owner_id=ctx.principal.owner_id,
+        role=ctx.principal.role,
+        kind=kind,
+        doc_id=req.doc_id,
+        page_id=req.page_id,
+        query=req.query,
+        session_id=req.session_id,
+        status=req.status,
+    )
+    return OkResponse()
 
 
 @app.post("/home/cards/dismiss", response_model=OkResponse)
 def home_cards_dismiss(
     req: HomeCardDismissRequest,
-    version: str | None = None,
     response: Response,
+    version: str | None = None,
     ctx: AuthContext = Depends(resolve_auth),
 ) -> OkResponse:
     ver = _require_version(version)
@@ -1502,7 +1644,7 @@ def home_cards_dismiss(
 
 @app.post("/home/cards/clear", response_model=OkResponse)
 def home_cards_clear(
-    version: str | None = None, response: Response, ctx: AuthContext = Depends(resolve_auth)
+    response: Response, version: str | None = None, ctx: AuthContext = Depends(resolve_auth)
 ) -> OkResponse:
     ver = _require_version(version)
     apply_auth_cookies(response, ctx)

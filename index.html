@@ -3261,7 +3261,17 @@
 	      const item = document.createElement('div');
 	      item.className = 'home-card';
 	      const action = card.action || null;
-	      const actionLabel = action?.label || (action?.type === 'open_guide' ? 'OPEN GUIDE' : 'OPEN');
+	      const actionLabel =
+	        action?.label ||
+	        (action?.type === 'open_guide'
+	          ? 'OPEN GUIDE'
+	          : action?.type === 'open_session'
+	          ? 'OPEN CHAT'
+	          : action?.type === 'open_admin'
+	          ? 'OPEN ADMIN'
+	          : action?.type === 'search'
+	          ? 'SEARCH'
+	          : 'OPEN');
 	      item.innerHTML = `
 	        <div class="title">${escapeHtml(card.title || 'Guide')}</div>
 	        <div class="summary">${escapeHtml(card.summary || 'Overview of key topics in this guide.')}</div>
@@ -3291,6 +3301,19 @@
 	          await openDocsReader({});
 	          if (docsSearchInputEl) docsSearchInputEl.value = String(action.query || '');
 	          await runDocsSearch(action.query, { k: 12 });
+	          return;
+	        }
+	        if (action.type === 'open_session' && action.session_id) {
+	          await loadSession(action.session_id);
+	          return;
+	        }
+	        if (action.type === 'open_admin') {
+	          if (authState?.role === 'admin') {
+	            openModal(adminPanel);
+	            loadAdminPanel().catch((err) => {
+	              adminSaveHintEl.textContent = `Failed to load settings: ${err?.raw ? String(err.raw) : String(err)}`;
+	            });
+	          }
 	          return;
 	        }
 	        if (action.type === 'open_chat') {
@@ -3364,6 +3387,16 @@
 	      sel.addRange(range);
 	    }
 	    scheduleDockUpdate();
+	  }
+
+	  async function sendTelemetryEvent(kind, payload = {}) {
+	    const k = String(kind || '').trim();
+	    if (!k) return;
+	    try {
+	      await apiJson('/telemetry/event', { method: 'POST', body: { kind: k, ...payload } });
+	    } catch (e) {
+	      // ignore telemetry errors
+	    }
 	  }
 
 	  // ---------- Markdown renderer ----------
@@ -4938,6 +4971,7 @@
       renderDocsSearchResults(pack);
       const found = Array.isArray(pack?.chunks) ? pack.chunks.length : 0;
       setDocsStatus(`Search: ${found} result(s).`);
+      sendTelemetryEvent('docs_search', { query: q, status: String(found) });
     } catch (e) {
       const raw = e?.raw ? String(e.raw) : String(e);
       setDocsStatus(`Search failed: ${raw}`, { error: true });
@@ -5709,6 +5743,7 @@
       }
     }
     setDocsStatus('');
+    sendTelemetryEvent('doc_view', { doc_id: page.doc_id, page_id: page.page_id });
     highlightDocsActivePage();
     updateDocsManageActions();
   }

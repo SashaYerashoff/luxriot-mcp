@@ -201,12 +201,21 @@ class DocsStyleUpdateRequest(BaseModel):
 
 
 class HomeCardAction(BaseModel):
-    type: Literal["open_guide", "open_docs", "search", "open_url", "open_chat"]
+    type: Literal[
+        "open_guide",
+        "open_docs",
+        "search",
+        "open_url",
+        "open_chat",
+        "open_session",
+        "open_admin",
+    ]
     label: str | None = None
     doc_id: str | None = None
     page_id: str | None = None
     url: str | None = None
     query: str | None = None
+    session_id: str | None = None
 
 
 class HomeCard(BaseModel):
@@ -225,6 +234,15 @@ class HomeCardsResponse(BaseModel):
 
 class HomeCardDismissRequest(BaseModel):
     id: str
+
+
+class TelemetryEventRequest(BaseModel):
+    kind: str = Field(min_length=1)
+    doc_id: str | None = None
+    page_id: str | None = None
+    query: str | None = None
+    session_id: str | None = None
+    status: str | None = None
     cover_image: str | None = None
     cover_text: str | None = None
     cover_copyright: str | None = None
