@@ -83,11 +83,19 @@
     "roles": {
       "anonymous": {
         "show_top_guides": true,
-        "pinned": []
+        "pinned": [
+          "docs:Browse documentation",
+          "search:add device",
+          "search:troubleshooting"
+        ]
       },
       "client": {
         "show_top_guides": true,
-        "pinned": []
+        "pinned": [
+          "search:add device",
+          "search:upgrade",
+          "chat:Describe the issue and your setup"
+        ]
       }
     }
   }

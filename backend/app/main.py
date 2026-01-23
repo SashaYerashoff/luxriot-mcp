@@ -1535,6 +1535,20 @@ def home_cards(
 
     if len(cards) < max_cards and role in ("admin", "support"):
         since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        err_since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        err_count = app_db.count_telemetry_errors(since=err_since)
+        if err_count and len(cards) < max_cards:
+            add_card(
+                {
+                    "id": "errors:recent",
+                    "title": f"Recent errors: {err_count}",
+                    "summary": "Chat or docs failures in the last 7 days.",
+                    "meta": "Ops",
+                    "action": {"type": "open_admin", "label": "OPEN ADMIN"} if role == "admin" else None,
+                    "dismissible": True,
+                    "source": "telemetry",
+                }
+            )
         top_docs = app_db.list_top_doc_views(limit=1, since=since)
         for row in top_docs:
             if len(cards) >= max_cards:

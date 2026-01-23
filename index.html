@@ -4975,6 +4975,7 @@
     } catch (e) {
       const raw = e?.raw ? String(e.raw) : String(e);
       setDocsStatus(`Search failed: ${raw}`, { error: true });
+      sendTelemetryEvent('docs_search_error', { query: q, status: raw });
       if (docsSearchResultsEl) docsSearchResultsEl.innerHTML = `<div class="tiny muted">Search failed.</div>`;
     }
   }
@@ -5726,7 +5727,14 @@
 	    setDocsStatus('Loading page…');
 	    const ver = docsState.version || null;
 	    const qs = ver ? `?version=${encodeURIComponent(ver)}` : '';
-	    const page = await apiJson(`/docs/page/${encodeURIComponent(docId)}/${encodeURIComponent(pageId)}${qs}`);
+	    let page;
+	    try {
+	      page = await apiJson(`/docs/page/${encodeURIComponent(docId)}/${encodeURIComponent(pageId)}${qs}`);
+	    } catch (e) {
+	      const raw = e?.raw ? String(e.raw) : String(e);
+	      sendTelemetryEvent('docs_error', { doc_id: docId, page_id: pageId, status: raw });
+	      throw e;
+	    }
 	    docsState.page = page;
 	    docsState.selectedDocId = page.doc_id;
 	    docsState.selectedDocTitle = page.doc_title;
@@ -6585,6 +6593,11 @@
 	      pending.remove();
 	      const raw = e?.raw ? String(e.raw) : String(e);
 	      appendMessage({ role: 'assistant', content: 'Request failed.', errorText: raw });
+	      sendTelemetryEvent('chat_error', {
+	        query: String(text || '').slice(0, 500),
+	        session_id: session.session_id || null,
+	        status: raw,
+	      });
 	    } finally {
 	      sendBtn.disabled = false;
 	      sendBtn.textContent = 'SEND';
