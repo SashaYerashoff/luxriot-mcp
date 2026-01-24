@@ -1518,7 +1518,7 @@ def home_cards(
             )
             seen_doc_ids.add(doc_id)
 
-    if len(cards) < max_cards and ctx.principal.authenticated:
+    if len(cards) < max_cards:
         recent_sessions = app_db.list_sessions(owner_id=ctx.principal.owner_id, limit=3)
         for sess in recent_sessions:
             if len(cards) >= max_cards:
