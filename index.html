@@ -944,6 +944,14 @@
       font-weight:600;
       color:var(--text);
       margin-bottom:6px;
+      padding-right:36px;
+      line-height:1.3;
+      max-height:2.6em;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+      overflow-wrap:anywhere;
     }
     .home-card .summary{
       font-size:12px;
@@ -1153,7 +1161,7 @@
       <div class="logo-dot"></div>
       <div class="brand-stack">
         <div class="brand">Luxriot</div>
-        <div class="brand-version" id="appVersion">Luxriot SA 0.2.2</div>
+        <div class="brand-version" id="appVersion">Luxriot SA 0.2.3</div>
       </div>
     </div>
 
@@ -2291,6 +2299,7 @@
 		    ro.observe(dockEl);
 		  }
 		  window.addEventListener('resize', () => scheduleDockUpdate());
+		  window.addEventListener('resize', () => updateHomeCardTitleTooltips());
 		  scheduleDockUpdate();
 
 	  function resolveDocsFontCss(key) {
@@ -3570,6 +3579,22 @@
 	    return Array.isArray(payload?.cards) ? payload.cards : [];
 	  }
 
+	  function updateHomeCardTitleTooltips(root = document) {
+	    const titles = root.querySelectorAll('.home-card .title');
+	    titles.forEach((titleEl) => {
+	      const text = titleEl.textContent || '';
+	      if (!text.trim()) return;
+	      const truncated =
+	        titleEl.scrollHeight > titleEl.clientHeight + 1 ||
+	        titleEl.scrollWidth > titleEl.clientWidth + 1;
+	      if (truncated) {
+	        titleEl.title = text.trim();
+	      } else {
+	        titleEl.removeAttribute('title');
+	      }
+	    });
+	  }
+
 	  function buildHomeCards(cards) {
 	    const wrap = document.createElement('div');
 	    wrap.id = 'homeCards';
@@ -3673,6 +3698,7 @@
 	      if (!existing) {
 	        const rebuilt = buildHomeCards(homeState.cards);
 	        thread.prepend(rebuilt);
+	        requestAnimationFrame(() => updateHomeCardTitleTooltips(rebuilt));
 	      }
 	      setEmptyStateVisible(false);
 	      return;
@@ -3688,6 +3714,7 @@
 	      if (homeState.cards.length) {
 	        const wrap = buildHomeCards(homeState.cards);
 	        thread.prepend(wrap);
+	        requestAnimationFrame(() => updateHomeCardTitleTooltips(wrap));
 	        setEmptyStateVisible(false);
 	      }
 	    } catch (e) {
