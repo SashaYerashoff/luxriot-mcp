@@ -1,48 +1,46 @@
-# Sprint: RAG 01 — Topological Screenshots + Two‑Pass Retrieval
+# Sprint: DOC 02 — PDF Parity + Doc Composer
 
 ## Objective
-Improve retrieval consistency and enforce topological screenshot placement, so images appear only next to the text that cites their source chunks. Add an optional two‑pass retrieval flow using summary routing.
+Make PDF exports visually match the docs viewer and enable the LLM to generate clean, publish‑ready draft guides (with cover metadata) that open directly in the editor.
 
 ## Principles
-- No unrelated screenshots (only images attached to cited chunks).
-- Evidence-first: answers must cite chunks for each factual step.
-- Keep UI behavior deterministic (no heuristic screenshot dumping).
+- One markdown source of truth for viewer + PDF.
+- Preserve structure (headings, lists, tables, admonitions) exactly.
+- No hidden prompts; composer behavior is transparent and configurable.
+- Drafts are editable and reviewable before publish.
 
 ## Scope
-1. **Chunk → image contract**
-   - Expose chunk-level image lists alongside retrieval results.
-   - Preserve chunk IDs through to the answer pipeline.
-2. **Topological screenshot placement**
-   - Insert images only after paragraphs/steps containing citations for those chunks.
-   - Remove/disable heuristic “Screenshots” block if not tied to citations.
-3. **Summary routing (optional two‑pass retrieval)**
-   - Build a summary index (per page or per section).
-   - Pass 1: BM25 over summaries to select candidate pages/sections.
-   - Pass 2: BM25/embedding/hybrid over chunks within selected candidates.
-4. **Controls + observability**
-   - Admin toggles for summary routing and image placement limits.
-   - Debug output to inspect candidate selection and image attachment.
-
-## Non‑Goals (this sprint)
-- Automated screenshot selection via vision.
-- Full multi‑turn tool‑calling RAG loop in `/chat`.
+1. **PDF layout parity**
+   - Match viewer styles for headings, body text, lists, tables, and admonitions.
+   - Add robust inline emphasis inside lists and paragraphs.
+   - Unicode coverage (Cyrillic + arrows) with font fallback.
+   - Image sizing rules: block vs inline, plus explicit width overrides in markdown.
+   - Cover + headers derived from editor fields only (no auto titles).
+2. **Markdown normalization (non‑AI)**
+   - Normalize input markdown into our conventions (heading levels, list spacing, admonitions).
+   - Prepare for external import without “format drift.”
+3. **Doc Composer flow**
+   - New action: “Compose guide from chat answer” → opens editor with draft markdown.
+   - Composer output includes cover metadata (type, title, image, custom text, version).
+   - Preserve citations as links to the doc viewer anchors.
+   - Allow save as draft → request publish → admin approval.
+4. **Observability & UX**
+   - Show composer metadata (model, prompt version, timestamp) inside editor (not in PDF).
+   - Clear errors when PDF export skips unsupported elements.
 
 ## Deliverables
-- Deterministic screenshot placement tied to cited chunks.
-- Summary index + two‑pass retrieval (behind a toggle).
-- Updated prompts to encourage per‑step citations.
-- Multi‑granularity chunking (topic/section/part) to improve recall and step‑level grounding.
+- PDF rendering that visually matches viewer for all supported markdown elements.
+- Font fallback pipeline that renders non‑Latin text correctly.
+- Markdown normalization utility used on import + composer outputs.
+- Draft‑from‑chat flow for redactor/admin, with cover fields prefilled.
 
 ## Acceptance Criteria
-- If a chunk has no images, no images are inserted for it.
-- Images never appear without a matching chunk citation.
-- Two‑pass retrieval falls back to full search if routing finds nothing.
-- Debug view can show which chunks contributed to each inserted image.
+- Lists + nested lists render identically in viewer and PDF.
+- Tables and admonitions match viewer styling in PDF.
+- Cyrillic + arrow symbols render correctly in PDF using fallback fonts.
+- Composer output opens in editor with correct cover metadata and citations.
 
-## Decisions (confirmed)
-1. **Summary generation:** LLM‑based. Default model: `qwen3-vl-4b` (configurable per deployment).
-2. **Granularity:** dynamic heading level based on token budget (H1 → H2 → H3 … until sections fit).
-3. **Two‑pass retrieval:** ON by default.
-4. **Screenshot placement:** no preference; pick most reliable implementation.
-5. **Answer format:** prompt‑dependent (keep markdown + `[n]` citations by default).
-6. **Image limits:** no artificial limit beyond topological relevance.
+## Open Questions
+- Preferred markdown syntax for explicit image widths (e.g., `{width=60%}` vs `![alt](url "w=60")`)?
+- Should composer drafts include a “Sources” section or inline citations only?
+- Which roles can invoke the composer action (admin + redactor only?)
