@@ -18,6 +18,7 @@ class PageRecord:
     anchor: str | None
     images: list[dict[str, Any]]
     markdown_path: str
+    md_conventions_hash: str | None
 
 
 class DocsStore:
@@ -95,6 +96,8 @@ class DocsStore:
                 markdown_path = str(rec.get("markdown_path") or "").strip()
                 if not markdown_path:
                     continue
+                md_hash = rec.get("md_conventions_hash")
+                md_hash = str(md_hash).strip() if isinstance(md_hash, str) and str(md_hash).strip() else None
 
                 if doc_id not in doc_titles:
                     doc_titles[doc_id] = doc_title
@@ -112,6 +115,7 @@ class DocsStore:
                     anchor=anchor_str,
                     images=images,
                     markdown_path=markdown_path,
+                    md_conventions_hash=md_hash,
                 )
                 doc_pages[doc_id].append(page)
                 pages[(doc_id, page_id)] = page

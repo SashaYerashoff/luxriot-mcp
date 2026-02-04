@@ -125,6 +125,7 @@ class AdminSettingsResponse(BaseModel):
 class ReindexRequest(BaseModel):
     docs_dir: str | None = None
     compute_embeddings: bool = True
+    embedding_model: str | None = None
     embedding_max_chars: int = Field(default=448, ge=256, le=8000)
     embedding_batch_size: int = Field(default=8, ge=1, le=64)
     include_edits: bool = True
@@ -144,6 +145,7 @@ class ReindexJob(BaseModel):
     source_datastore: str | None = None
     version: str
     compute_embeddings: bool
+    embedding_model: str | None = None
     embedding_max_chars: int
     embedding_batch_size: int
     include_edits: bool
@@ -324,6 +326,7 @@ class DocPageResponse(BaseModel):
     images: list[PageImage]
     custom: bool = False
     author_id: str | None = None
+    md_conventions_hash: str | None = None
 
 
 class DocEditInfo(BaseModel):

@@ -30,6 +30,7 @@ uvicorn backend.app.main:app --host 0.0.0.0 --reload --port 8000
 ## Versioning
 
 - App version is stored in `VERSION` (default format: `Luxriot SA 0.x.y`).
+- Release notes live in `CHANGELOG.md`.
 - `/health` now returns `app_version` so the UI can display it.
 - You can override the version with `LUXRIOT_APP_VERSION`.
 

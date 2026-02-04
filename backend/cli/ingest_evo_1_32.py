@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -15,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 import httpx
 from markdownify import markdownify as md
 
@@ -25,6 +26,8 @@ _EMBED_H3_RE = re.compile(r"(?m)^([ \t]*)###(\s+)")
 _CONTROL_RE = re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_LIST_BULLET_RE = re.compile(r"^(\s*)[+*]\s+")
+_LIST_NUM_RE = re.compile(r"^(\s*)(\d+)\)\s+")
 
 
 def log(msg: str) -> None:
@@ -125,21 +128,76 @@ def html_to_markdown(
 
     images: list[dict[str, str]] = []
 
-    # Convert Help+Manual box tables into explicit paragraphs.
+    # Convert Help+Manual box tables into admonition-style blockquotes.
     for box in main.select("table.hs-box"):
         icon = box.select_one("td.hs-box-icon img")
         icon_src = icon.get("src", "") if icon else ""
-        kind = classify_hs_box(str(icon_src))
+        kind = classify_hs_box(str(icon_src)).upper()
 
         content_td = box.select_one("td.hs-box-content")
-        content_text = content_td.get_text(" ", strip=True) if content_td else box.get_text(" ", strip=True)
-
-        p = soup.new_tag("p")
-        strong = soup.new_tag("strong")
-        strong.string = f"{kind}:"
-        p.append(strong)
-        p.append(" " + content_text)
-        box.replace_with(p)
+        block = soup.new_tag("blockquote")
+        head = soup.new_tag("p")
+        head.string = f"[!{kind}]"
+        block.append(head)
+        if content_td is not None:
+            # Keep original inline markup inside the note box. Using get_text() with a newline
+            # separator would split inline spans (e.g., bold words) into separate lines, which
+            # then breaks chunking and hurts retrieval quality.
+            block_tags = {
+                "p",
+                "div",
+                "ul",
+                "ol",
+                "table",
+                "pre",
+                "blockquote",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+                "dl",
+            }
+            has_block = any(isinstance(c, Tag) and c.name in block_tags for c in content_td.contents)
+            moved = False
+            if has_block:
+                for child in list(content_td.contents):
+                    if isinstance(child, NavigableString):
+                        text = str(child).strip()
+                        if not text:
+                            continue
+                        p = soup.new_tag("p")
+                        p.string = text
+                        block.append(p)
+                        moved = True
+                        continue
+                    block.append(child.extract())
+                    moved = True
+            else:
+                p = soup.new_tag("p")
+                for child in list(content_td.contents):
+                    if isinstance(child, NavigableString):
+                        p.append(str(child))
+                        child.extract()
+                        continue
+                    p.append(child.extract())
+                if p.get_text(" ", strip=True):
+                    block.append(p)
+                    moved = True
+            if not moved:
+                text = content_td.get_text(" ", strip=True)
+                if text:
+                    p = soup.new_tag("p")
+                    p.string = text
+                    block.append(p)
+        else:
+            text = box.get_text(" ", strip=True)
+            if text:
+                p = soup.new_tag("p")
+                p.string = text
+                block.append(p)
+        box.replace_with(block)
 
     # Copy and remap images.
     for img in main.select("img[src]"):
@@ -194,6 +252,59 @@ def markdown_images(md_text: str) -> list[dict[str, str]]:
             continue
         images.append({"original": clean, "url": clean, "alt": str(alt or "").strip()})
     return images
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def normalize_markdown(md_text: str) -> str:
+    src = (md_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = src.split("\n")
+    out: list[str] = []
+    in_code = False
+    seen_h1 = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            out.append(line.rstrip())
+            continue
+        if in_code:
+            out.append(line.rstrip())
+            continue
+
+        match = _HEADING_RE.match(line)
+        if match:
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            if level == 1:
+                if not seen_h1:
+                    seen_h1 = True
+                else:
+                    level = 2
+            if level > 5:
+                level = 5
+            out.append("#" * level + " " + title)
+            continue
+
+        line = _LIST_BULLET_RE.sub(r"\1- ", line)
+        line = _LIST_NUM_RE.sub(r"\1\2. ", line)
+        out.append(line.rstrip())
+
+    collapsed: list[str] = []
+    blank_run = 0
+    for line in out:
+        if not line.strip():
+            blank_run += 1
+            if blank_run > 1:
+                continue
+        else:
+            blank_run = 0
+        collapsed.append(line)
+
+    normalized = "\n".join(collapsed).strip()
+    return normalized + "\n" if normalized else ""
 
 
 def _split_long_block(text: str, max_chars: int) -> list[str]:
@@ -510,18 +621,40 @@ def init_index(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _detect_embedding_model_id(base_url: str) -> str:
+class EmbeddingModelLoadError(RuntimeError):
+    pass
+
+
+def _is_model_load_error(message: str) -> bool:
+    low = str(message or "").lower()
+    return (
+        "failed to load model" in low
+        or "model has unloaded" in low
+        or "unloaded or crashed" in low
+        or "model has unloaded or crashed" in low
+    )
+
+
+def _list_embedding_models(base_url: str) -> list[str]:
     resp = httpx.get(f"{base_url}/v1/models", timeout=10.0)
     resp.raise_for_status()
     data = resp.json()
     models = data.get("data") or []
+    out: list[str] = []
     for m in models:
-        mid = str(m.get("id") or "")
+        mid = str(m.get("id") or "").strip()
         if not mid:
             continue
         low = mid.lower()
         if "embedding" in low or low.startswith("text-embedding"):
-            return mid
+            out.append(mid)
+    return out
+
+
+def _detect_embedding_model_id(base_url: str) -> str:
+    models = _list_embedding_models(base_url)
+    if models:
+        return models[0]
     raise RuntimeError("No embedding model found in LM Studio /v1/models. Load an embedding model in LM Studio.")
 
 
@@ -545,7 +678,10 @@ def _embed_texts(base_url: str, model_id: str, texts: list[str]) -> list[list[fl
             body = resp.text
         except Exception:
             body = ""
-        raise RuntimeError(f"Embeddings HTTP {resp.status_code}: {body[:1000]}")
+        msg = f"Embeddings HTTP {resp.status_code}: {body[:1000]}"
+        if _is_model_load_error(body):
+            raise EmbeddingModelLoadError(msg)
+        raise RuntimeError(msg)
 
     data = resp.json()
     items = data.get("data") or []
@@ -593,6 +729,44 @@ def _prepare_embedding_text(text: str, max_chars: int) -> str:
     if max_chars > 0 and len(t) > max_chars:
         t = t[:max_chars]
     return t
+
+
+def _select_embedding_model(base_url: str, preferred: str | None) -> str:
+    preferred = str(preferred or "").strip() or None
+    candidates: list[str] = []
+    if preferred:
+        candidates.append(preferred)
+    try:
+        for mid in _list_embedding_models(base_url):
+            if mid not in candidates:
+                candidates.append(mid)
+    except Exception as e:
+        if preferred:
+            raise RuntimeError(f"Failed to list embedding models from LM Studio: {e}") from e
+        raise
+
+    if not candidates:
+        raise RuntimeError("No embedding models available in LM Studio. Load one and retry.")
+
+    probe_text = "Embedding probe."
+    last_error: Exception | None = None
+    for mid in candidates:
+        try:
+            _embed_texts(base_url, mid, [probe_text])
+            if mid != preferred:
+                log(f"Embedding model fallback selected: {mid}")
+            return mid
+        except EmbeddingModelLoadError as e:
+            last_error = e
+            log(f"Embedding model '{mid}' failed to load; trying next. {e}")
+            continue
+        except Exception as e:
+            last_error = e
+            raise RuntimeError(f"Embedding model '{mid}' failed during probe: {e}") from e
+
+    if last_error:
+        raise RuntimeError(f"No embedding model could be loaded. Last error: {last_error}") from last_error
+    raise RuntimeError("No embedding model could be loaded.")
 
 
 def _summary_prompt() -> str:
@@ -882,6 +1056,8 @@ def _embed_texts_resilient(
     prepared = [_prepare_embedding_text(t, max_chars) for t in raw_texts]
     try:
         return _embed_texts(base_url, model_id, prepared)
+    except EmbeddingModelLoadError:
+        raise
     except Exception as e:
         log(f"Embedding batch failed ({len(prepared)} items); trying fallbacks: {e}")
 
@@ -970,6 +1146,12 @@ def main() -> int:
     ap.add_argument("--chunk-max-chars-section", type=int, default=2600, help="Max chars per section chunk")
     ap.add_argument("--chunk-max-chars-topic", type=int, default=5200, help="Max chars per topic chunk")
     ap.add_argument("--lmstudio-base-url", type=str, default="http://localhost:1234", help="LM Studio base URL")
+    ap.add_argument(
+        "--md-conventions-file",
+        type=Path,
+        default=None,
+        help="Markdown conventions file (used to normalize HTML ingestion and recorded in metadata)",
+    )
     ap.add_argument("--embedding-model", type=str, default="", help="Embedding model id (defaults to first embedding model from /v1/models)")
     ap.add_argument("--embedding-max-chars", type=int, default=448, help="Max characters per chunk sent for embedding")
     ap.add_argument("--embedding-batch-size", type=int, default=8, help="How many chunks to embed per request (lower = more stable)")
@@ -988,6 +1170,9 @@ def main() -> int:
     compute_embeddings: bool = not bool(args.no_embeddings)
     app_db_path: Path = Path(args.app_db)
     include_edits: bool = bool(args.include_edits)
+    md_conventions_file: Path | None = args.md_conventions_file
+    md_conventions_text = ""
+    md_conventions_hash: str | None = None
     summary_enabled: bool = bool(args.summary_enabled)
     summary_model: str = str(args.summary_model or "").strip()
     summary_max_input_chars: int = int(args.summary_max_input_chars)
@@ -1006,6 +1191,15 @@ def main() -> int:
         if not docs_dir.exists():
             log(f"ERROR: docs dir not found: {docs_dir}")
             return 2
+
+    if md_conventions_file is not None:
+        md_conventions_file = md_conventions_file.expanduser()
+        if not md_conventions_file.exists():
+            log(f"ERROR: markdown conventions file not found: {md_conventions_file}")
+            return 2
+        md_conventions_text = read_text(md_conventions_file)
+        if md_conventions_text.strip():
+            md_conventions_hash = _hash_text(md_conventions_text)
 
     if out_dir.exists():
         if args.clean:
@@ -1094,6 +1288,8 @@ def main() -> int:
                 heading_path = entry.get("heading_path") or [doc_title, page_title]
                 source_path = str(entry.get("source_path") or f"{doc_id}/{page_id}.md")
                 anchor = str(entry.get("anchor") or "pagetitle")
+                md_hash = entry.get("md_conventions_hash")
+                md_hash = str(md_hash).strip() if isinstance(md_hash, str) and str(md_hash).strip() else None
                 md_in_path = source_pages / doc_id / f"{page_id}.md"
                 if not md_in_path.exists():
                     log(f"WARNING: missing markdown {md_in_path}")
@@ -1175,6 +1371,7 @@ def main() -> int:
                     "anchor": anchor,
                     "images": images,
                     "markdown_path": str(md_path.relative_to(out_dir)),
+                    "md_conventions_hash": md_hash,
                 }
                 pages_jsonl.write(json.dumps(page_record, ensure_ascii=False) + "\n")
 
@@ -1259,6 +1456,9 @@ def main() -> int:
                 doc_dir=doc_dir,
                 assets_out_dir=assets_out,
             )
+            md_hash = md_conventions_hash
+            if md_conventions_text.strip():
+                md_text = normalize_markdown(md_text)
             edit_text = published_edits.get((doc_id, page_id))
             if edit_text:
                 md_text = edit_text
@@ -1334,6 +1534,7 @@ def main() -> int:
                 "anchor": "pagetitle",
                 "images": images,
                 "markdown_path": str(md_path.relative_to(out_dir)),
+                "md_conventions_hash": md_hash,
             }
             pages_jsonl.write(json.dumps(page_record, ensure_ascii=False) + "\n")
 
@@ -1579,7 +1780,7 @@ def main() -> int:
                     )
 
             if compute_embeddings:
-                embedding_model_id = embedding_model or _detect_embedding_model_id(lmstudio_base_url)
+                embedding_model_id = _select_embedding_model(lmstudio_base_url, embedding_model or None)
                 log(
                     f"Computing embeddings via {lmstudio_base_url} model={embedding_model_id} "
                     f"(batch={embedding_batch_size}, max_chars={embedding_max_chars}) ..."

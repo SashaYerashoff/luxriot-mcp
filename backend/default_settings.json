@@ -1,5 +1,5 @@
 {
-  "required_placeholders": ["context"],
+  "required_placeholders": ["context", "markdown_conventions"],
   "system_prompt_template_file": "backend/prompts/system_prompt.md",
   "system_prompt_templates_files": {
     "admin": "backend/prompts/system_prompt_admin.md",
@@ -14,6 +14,8 @@
     "temperature": 0.2,
     "max_tokens": 800
   },
+  "embedding_model": "text-embedding-qwen3-embedding-0.6b",
+  "markdown_conventions_file": "backend/prompts/markdown_conventions.md",
   "retrieval": {
     "mode": "bm25",
     "k_default": 8,
@@ -44,6 +46,13 @@
       "unit_max_tokens": 900,
       "k": 12,
       "max_pages": 20
+    },
+    "reranker": {
+      "enabled": false,
+      "model": "qwen3-vl-reranker-2b",
+      "top_k": 30,
+      "min_score": 0.0,
+      "max_chars": 1200
     },
     "dedupe": {
       "max_per_page": 3,

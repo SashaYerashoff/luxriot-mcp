@@ -1,0 +1,350 @@
+{
+  "meta": {
+    "name": "Evo S Installation Guide Eval",
+    "version": "evo_1_32",
+    "source_markdown": "Evo S installation guide.md",
+    "doc_id": "luxriot-evo-s-installation-guide"
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "Where are the Luxriot EVO administration and user guides installed, and how can a user access them after installation?",
+      "answer": "Installed in PDF format and available via Windows Start menu.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["introductionblank"],
+        "keywords_all": ["pdf format", "windows start menu"]
+      }
+    },
+    {
+      "id": "Q2",
+      "question": "List the supported Windows operating systems for Luxriot EVO host systems.",
+      "answer": "Windows 10, 11, 11 IoT Enterprise, Server 2016/2019/2022.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_any": ["windows 10", "windows 11", "server 2016", "server 2019", "server 2022"]
+      }
+    },
+    {
+      "id": "Q3",
+      "question": "Which .NET Framework versions are required?",
+      "answer": ".NET Framework 3.5 SP1 and 4.x.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["3.5 sp1", "4.x"]
+      }
+    },
+    {
+      "id": "Q4",
+      "question": "What Windows Server feature must be installed for Server editions?",
+      "answer": "Desktop Experience.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["desktop experience"]
+      }
+    },
+    {
+      "id": "Q5",
+      "question": "What must be installed on Windows 10 N/KN editions for EVO to work?",
+      "answer": "Windows 10 Media Feature Pack (Windows Media Features).",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["media feature pack", "windows 10"]
+      }
+    },
+    {
+      "id": "Q6",
+      "question": "Which default ports are used for EVO Monitor/Console connections and for the Streaming Server/external services?",
+      "answer": "60554 for Monitor/Console and 8080 for Streaming Server/external services.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["60554", "8080"]
+      }
+    },
+    {
+      "id": "Q7",
+      "question": "What antivirus setting should be disabled to ensure external services (LPR/FR) work correctly?",
+      "answer": "Disable HTTP traffic analysis in antivirus.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["http traffic analysis"]
+      }
+    },
+    {
+      "id": "Q8",
+      "question": "Give two storage recommendations for recording.",
+      "answer": "Use RAID 5/6/10 for large loads; disable indexing/defragmentation; avoid system disk; keep free space.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_any": ["raid 5", "raid 6", "raid 10", "defragmentation", "indexing"]
+      }
+    },
+    {
+      "id": "Q9",
+      "question": "What is the recommended minimum free space per recording location?",
+      "answer": "10-15% free space.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["10-15%", "free space"]
+      }
+    },
+    {
+      "id": "Q10",
+      "question": "Should recording be done on the system disk?",
+      "answer": "No, recording to the system disk is strongly not recommended.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["system disk", "not recommended"]
+      }
+    },
+    {
+      "id": "Q11",
+      "question": "What is the warning about Windows 11 IoT vs Windows 11 IoT Enterprise?",
+      "answer": "Windows 11 IoT (non-Enterprise) is not supported.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["prerequisites"],
+        "keywords_all": ["windows 11 iot", "enterprise"]
+      }
+    },
+    {
+      "id": "Q12",
+      "question": "Describe Step 2 of the EVO S installation wizard and provide the default install paths for 32-bit and 64-bit.",
+      "answer": "Select destination folder; defaults are C:\\Program Files (x86)\\Luxriot\\Luxriot EVO S and C:\\Program Files\\Luxriot\\Luxriot EVO S.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinstallation"],
+        "keywords_any": ["program files (x86)", "program files\\luxriot"]
+      }
+    },
+    {
+      "id": "Q13",
+      "question": "Which EVO component is optional in the EVO S installation wizard?",
+      "answer": "Luxriot EVO Monitor.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinstallation"],
+        "keywords_all": ["monitor", "optional"]
+      }
+    },
+    {
+      "id": "Q14",
+      "question": "What is the NDAA compliance option, where is it found, and what happens during upgrade if non-compliant devices are already configured?",
+      "answer": "Option 'NDAA approved cameras only' under EVO Server Service; during upgrade you must cancel and remove those devices first.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinstallation"],
+        "keywords_all": ["ndaa approved cameras only"]
+      }
+    },
+    {
+      "id": "Q15",
+      "question": "After installation, which three follow-up actions are required before use?",
+      "answer": "Run Server Setup Wizard, activate software, complete Setup Wizard in Console.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinstallation"],
+        "keywords_any": ["server setup wizard", "activate", "setup wizard"]
+      }
+    },
+    {
+      "id": "Q16",
+      "question": "What error appears if you try to connect to a server that has not been initialized?",
+      "answer": "The server is not configured.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinitialization"],
+        "keywords_all": ["server is not configured"]
+      }
+    },
+    {
+      "id": "Q17",
+      "question": "In Server Setup Wizard, what is the default server port and what is it used for?",
+      "answer": "TCP 60554 for incoming EVO Monitor and Console connections.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinitialization"],
+        "keywords_all": ["60554", "monitor"]
+      }
+    },
+    {
+      "id": "Q18",
+      "question": "From which version is remote upgrade available, and where is it configured?",
+      "answer": "From version 1.10.0; Console main menu -> System upgrade.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinitialization"],
+        "keywords_any": ["1.10.0", "system upgrade"]
+      }
+    },
+    {
+      "id": "Q19",
+      "question": "What client installation files must be specified for remote upgrade?",
+      "answer": "Paths to 32- and 64-bit installers for EVO Console and EVO Monitor.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["standaloneinitialization"],
+        "keywords_any": ["32", "64", "console", "monitor"]
+      }
+    },
+    {
+      "id": "Q20",
+      "question": "For EVO S vs EVO Global vs Recording Server, where does the license apply?",
+      "answer": "EVO S license applies to that server; Global license applies to Global server; Recording Server does not need a license.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["licenseactivation"],
+        "keywords_any": ["evo s", "global", "recording server"]
+      }
+    },
+    {
+      "id": "Q21",
+      "question": "List at least four license channel types mentioned in the guide.",
+      "answer": "Video channels, VA, CrossLink Basic/Advanced, advanced integrations, data channels.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["licenseactivation"],
+        "keywords_any": ["video channels", "va", "crosslink", "data channels"]
+      }
+    },
+    {
+      "id": "Q22",
+      "question": "How many generic video analytics channels are included free with each EVO license?",
+      "answer": "One generic VA channel.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["licenseactivation"],
+        "keywords_all": ["one", "generic", "video analytics"]
+      }
+    },
+    {
+      "id": "Q23",
+      "question": "In which version was the free Luxriot EVO license discontinued?",
+      "answer": "Starting from version 1.22.0.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["licenseactivation"],
+        "keywords_all": ["1.22.0", "free luxriot evo license"]
+      }
+    },
+    {
+      "id": "Q24",
+      "question": "Outline the three steps of Offline Activation, including the file names involved.",
+      "answer": "Generate system.bin, upload to online activation, download and apply license.dat.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["offlineactivation"],
+        "keywords_all": ["system.bin", "license.dat"]
+      }
+    },
+    {
+      "id": "Q25",
+      "question": "Where can you launch the Activation Wizard if it does not pop up automatically?",
+      "answer": "Start Menu, search 'Activation Wizard', server tray icon -> Manage license, or Console -> About -> Manage license.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["licenseactivation"],
+        "keywords_any": ["activation wizard", "manage license", "start menu"]
+      }
+    },
+    {
+      "id": "Q26",
+      "question": "What are the default EVO Console login credentials after a fresh install?",
+      "answer": "admin / [empty].",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["consoleinstallation"],
+        "keywords_any": ["admin", "empty"]
+      }
+    },
+    {
+      "id": "Q27",
+      "question": "Before upgrading, list three checks recommended in the guide.",
+      "answer": "No pending OS updates, OS stable, stable power/connectivity, check release requirements, verify license subscription.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["softwareupdateuninstall"],
+        "keywords_any": ["updates", "stable", "license subscription", "power"]
+      }
+    },
+    {
+      "id": "Q28",
+      "question": "What should you do if the license subscription does not cover the target upgrade version?",
+      "answer": "Upgrade the license after installation or stop and use an older version; do not proceed without valid license.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["softwareupdateuninstall"],
+        "keywords_any": ["license subscription", "upgrade", "warning"]
+      }
+    },
+    {
+      "id": "Q29",
+      "question": "If files are in use during upgrade/uninstall, what options are available?",
+      "answer": "Ignore, Retry, or Abort.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["softwareupdateuninstall"],
+        "keywords_all": ["ignore", "retry", "abort"]
+      }
+    },
+    {
+      "id": "Q30",
+      "question": "What is the basic sequence for a clean install?",
+      "answer": "Stop EVO services, uninstall, install new version, verify.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["softwareupdateuninstall"],
+        "keywords_any": ["clean install", "stop", "uninstall", "install"]
+      }
+    },
+    {
+      "id": "Q31",
+      "question": "What is the permissions caveat when importing from Luxriot VMS XML into EVO?",
+      "answer": "In 1.6.0, permissions changed; imported XML lacks permissions and must be set after import.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["migrationfromvms"],
+        "keywords_any": ["1.6.0", "permissions"]
+      }
+    },
+    {
+      "id": "Q32",
+      "question": "What is the database filename pattern for import, and where is it stored by default for EVO S?",
+      "answer": "VMSConfig-xxxxxxxxxxxx.db under C:\\ProgramData\\Luxriot\\Luxriot EVO S.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["dbimport"],
+        "keywords_all": ["vmsconfig-", "programdata"]
+      }
+    },
+    {
+      "id": "Q33",
+      "question": "What restriction applies to database import, and what must you do before importing from a Global database?",
+      "answer": "Only single-server databases are allowed; remove recording servers (move devices) first.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["dbimport"],
+        "keywords_any": ["single-server", "recording servers"]
+      }
+    },
+    {
+      "id": "Q34",
+      "question": "What warning is given before confirming database import?",
+      "answer": "The action cannot be undone; review changes before confirming.",
+      "expect": {
+        "doc_id": "luxriot-evo-s-installation-guide",
+        "page_ids": ["dbimport"],
+        "keywords_all": ["cannot be undone"]
+      }
+    }
+  ]
+}

@@ -147,7 +147,7 @@ def _normalize_admonitions(markdown: str) -> str:
             out.append(line)
             i += 1
             continue
-        match = re.match(r"^\s*>\s*\[!(TIP|INFO|WARNING|NOTE)\]\s*(.*)$", line, re.IGNORECASE)
+        match = re.match(r"^\s*>\s*\[!(TIP|INFO|WARNING|CAUTION|NOTE)\]\s*(.*)$", line, re.IGNORECASE)
         if not match:
             out.append(line)
             i += 1
@@ -170,7 +170,9 @@ def _normalize_admonitions(markdown: str) -> str:
 def _build_markdown_parser() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"html": False, "breaks": True})
     md.enable("table")
-    for kind in ("tip", "info", "warning", "note"):
+    for kind in ("tip", "info", "warning", "caution", "note"):
+        md.use(container_plugin, kind)
+    for kind in ("luxriot-page-break", "luxriot-blank-line"):
         md.use(container_plugin, kind)
     return md
 
@@ -864,7 +866,7 @@ def render_markdown_to_pdf(
         safe = _sanitize_pdf_text(text, allow_unicode=allow_unicode)
         if pdf.get_string_width(safe) <= max_width:
             return safe
-        ellipsis = "…" if allow_unicode else "..."
+        ellipsis = "\u2026" if allow_unicode else "..."
         for i in range(len(text), 0, -1):
             candidate = f"{text[:i].rstrip()}{ellipsis}"
             safe_candidate = _sanitize_pdf_text(candidate, allow_unicode=allow_unicode)
@@ -994,7 +996,7 @@ def render_markdown_to_pdf(
 
         footer_lines: list[str] = []
         if cover_version and cover_date:
-            footer_lines.append(f"{cover_version} • {cover_date}")
+            footer_lines.append(f"{cover_version} \u2022 {cover_date}")
         elif cover_version:
             footer_lines.append(cover_version)
         elif cover_date:
@@ -1128,6 +1130,9 @@ def render_markdown_to_pdf(
         if kind == "warning":
             fill = (240, 220, 220)
             stripe = (216, 92, 92)
+        elif kind == "caution":
+            fill = (245, 235, 215)
+            stripe = (230, 163, 63)
         elif kind == "info":
             fill = (220, 230, 245)
             stripe = (88, 155, 219)
@@ -1359,7 +1364,7 @@ def render_markdown_to_pdf(
         top = list_stack[-1]
         if top["type"] == "ol":
             return f"{top['index']}."
-        return "•"
+        return "\u2022"
 
     def list_indent() -> float:
         return indent_step * max(0, len(list_stack) - 1)
@@ -1539,8 +1544,14 @@ def render_markdown_to_pdf(
             parts = info.split(None, 1)
             title_text = parts[1].strip() if len(parts) > 1 else kind.title()
             inner, next_i = parse_block(i, t, f"container_{kind}_close")
-            lines = _tokens_to_lines(inner)
-            write_admonition(kind, title_text, lines)
+            if kind == "luxriot-page-break":
+                if pdf.page_no() > 0:
+                    pdf.add_page()
+            elif kind == "luxriot-blank-line":
+                pdf.ln(6)
+            else:
+                lines = _tokens_to_lines(inner)
+                write_admonition(kind, title_text, lines)
             i = next_i
             continue
 
