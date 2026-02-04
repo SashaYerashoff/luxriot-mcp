@@ -12,7 +12,7 @@ from typing import Any
 
 from .config import DATASTORE_DIR, DEFAULT_VERSION
 from .logging_utils import get_logger
-from .lmstudio import LMStudioError, embeddings as lm_embeddings
+from .lmstudio import LMStudioError, embeddings as lm_embeddings, rerank as lm_rerank
 
 log = get_logger(__name__)
 
@@ -516,6 +516,106 @@ class SearchEngine:
                 break
         return out
 
+    def _truncate_for_rerank(self, text: str, max_chars: int) -> str:
+        s = str(text or "").strip()
+        if max_chars > 0 and len(s) > max_chars:
+            return s[:max_chars]
+        return s
+
+    async def _rerank_candidates(
+        self,
+        query: str,
+        ranked: list[tuple[str, float]],
+        chunk_rows: dict[str, ChunkRow],
+        *,
+        model: str,
+        top_k: int,
+        min_score: float,
+        max_chars: int,
+        debug_out: dict[str, Any] | None = None,
+    ) -> list[tuple[str, float]]:
+        model_id = str(model or "").strip()
+        if not model_id:
+            return ranked
+        if not ranked or top_k <= 0:
+            return ranked
+        take = min(len(ranked), max(1, int(top_k)))
+        docs: list[str] = []
+        cids: list[str] = []
+        for cid, _ in ranked[:take]:
+            row = chunk_rows.get(cid)
+            text = row.text if row else ""
+            docs.append(self._truncate_for_rerank(text, max_chars=max_chars))
+            cids.append(cid)
+        try:
+            scores = await lm_rerank(query, docs, model=model_id)
+        except LMStudioError as e:
+            log.warning("Reranker failed: %s", e)
+            if debug_out is not None:
+                debug_out["reranker"] = {
+                    "enabled": True,
+                    "model": model_id,
+                    "top_k": int(top_k),
+                    "min_score": float(min_score),
+                    "max_chars": int(max_chars),
+                    "applied": False,
+                    "error": str(e),
+                }
+            return ranked
+
+        score_map: dict[str, float] = {}
+        for item in scores:
+            try:
+                idx = int(item.get("index"))
+            except Exception:
+                continue
+            if 0 <= idx < len(cids):
+                try:
+                    score_map[cids[idx]] = float(item.get("score"))
+                except Exception:
+                    continue
+
+        if not score_map:
+            if debug_out is not None:
+                debug_out["reranker"] = {
+                    "enabled": True,
+                    "model": model_id,
+                    "top_k": int(top_k),
+                    "min_score": float(min_score),
+                    "max_chars": int(max_chars),
+                    "applied": False,
+                    "error": "Reranker returned no scores.",
+                }
+            return ranked
+
+        reranked_top: list[tuple[str, float]] = []
+        for cid, _ in ranked[:take]:
+            if cid not in score_map:
+                continue
+            score = float(score_map[cid])
+            if min_score and score < min_score:
+                continue
+            reranked_top.append((cid, score))
+        reranked_top.sort(key=lambda kv: (-kv[1], kv[0]))
+
+        remainder = ranked[take:]
+        combined = reranked_top + remainder
+        if debug_out is not None:
+            debug_out["reranker"] = {
+                "enabled": True,
+                "model": model_id,
+                "top_k": int(top_k),
+                "min_score": float(min_score),
+                "max_chars": int(max_chars),
+                "applied": True,
+                "scores": [
+                    {"chunk_id": cid, "score": float(score_map.get(cid, 0.0))}
+                    for cid in cids
+                    if cid in score_map
+                ][: min(50, len(score_map))],
+            }
+        return combined
+
     def _dot(self, a: array, b: array) -> float:
         if len(a) != len(b):
             return 0.0
@@ -846,6 +946,11 @@ class SearchEngine:
         summary_enabled: bool | None = None,
         summary_k: int | None = None,
         summary_max_pages: int | None = None,
+        reranker_enabled: bool = False,
+        reranker_model: str | None = None,
+        reranker_top_k: int | None = None,
+        reranker_min_score: float = 0.0,
+        reranker_max_chars: int | None = None,
         max_per_page: int = 0,
         max_per_doc: int = 0,
         debug_out: dict[str, Any] | None = None,
@@ -864,6 +969,10 @@ class SearchEngine:
         heading_boost = float(heading_boost or 0.0)
         query_terms_for_heading = {t for t in tokenize(query) if t not in _STOPWORDS}
         want_debug = debug_out is not None
+        reranker_enabled = bool(reranker_enabled)
+        reranker_top_k_val = int(reranker_top_k or 0) or 0
+        reranker_min_score_val = float(reranker_min_score or 0.0)
+        reranker_max_chars_val = int(reranker_max_chars or 0) or 0
         if want_debug:
             debug_out.clear()
             debug_out.update(
@@ -874,6 +983,13 @@ class SearchEngine:
                     "doc_priority_boost": float(doc_priority_boost or 0.0),
                     "heading_boost": float(heading_boost or 0.0),
                     "doc_priority": list(doc_priority),
+                    "reranker": {
+                        "enabled": bool(reranker_enabled),
+                        "model": str(reranker_model or ""),
+                        "top_k": int(reranker_top_k_val),
+                        "min_score": float(reranker_min_score_val),
+                        "max_chars": int(reranker_max_chars_val),
+                    },
                     "dedupe": {"max_per_page": int(max_per_page or 0), "max_per_doc": int(max_per_doc or 0)},
                     "mmr": {
                         "enabled": bool(mmr_enabled),
@@ -991,6 +1107,17 @@ class SearchEngine:
                         "granularity_mult": float(gran_mult),
                     }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
+            if reranker_enabled:
+                adjusted = await self._rerank_candidates(
+                    query,
+                    adjusted,
+                    chunk_rows,
+                    model=str(reranker_model or ""),
+                    top_k=reranker_top_k_val or len(adjusted),
+                    min_score=reranker_min_score_val,
+                    max_chars=reranker_max_chars_val or 0,
+                    debug_out=debug_out if want_debug else None,
+                )
             mmr_trace: list[dict[str, Any]] = []
             if use_mmr:
                 selected = self._mmr_select(
@@ -1067,6 +1194,17 @@ class SearchEngine:
                         "granularity_mult": float(gran_mult),
                     }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
+            if reranker_enabled:
+                adjusted = await self._rerank_candidates(
+                    query,
+                    adjusted,
+                    chunk_rows,
+                    model=str(reranker_model or ""),
+                    top_k=reranker_top_k_val or len(adjusted),
+                    min_score=reranker_min_score_val,
+                    max_chars=reranker_max_chars_val or 0,
+                    debug_out=debug_out if want_debug else None,
+                )
             mmr_trace: list[dict[str, Any]] = []
             if use_mmr:
                 selected = self._mmr_select(
@@ -1170,6 +1308,17 @@ class SearchEngine:
                 }
 
         combined.sort(key=lambda kv: (-kv[1], kv[0]))
+        if reranker_enabled:
+            combined = await self._rerank_candidates(
+                query,
+                combined,
+                chunk_rows,
+                model=str(reranker_model or ""),
+                top_k=reranker_top_k_val or len(combined),
+                min_score=reranker_min_score_val,
+                max_chars=reranker_max_chars_val or 0,
+                debug_out=debug_out if want_debug else None,
+            )
         mmr_trace: list[dict[str, Any]] = []
         if use_mmr:
             trimmed = combined[: (cand_limit if cand_limit else len(combined))]

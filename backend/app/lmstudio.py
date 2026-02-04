@@ -248,3 +248,62 @@ async def embeddings(
                 raise LMStudioError("Embedding response missing 'embedding' list.")
             out.append([float(x) for x in emb])
         return out
+
+
+async def rerank(
+    query: str,
+    documents: list[str],
+    model: str,
+    base_url: str = LMSTUDIO_BASE_URL,
+    timeout_s: float = 60.0,
+) -> list[dict[str, float]]:
+    if not query or not documents:
+        return []
+    model_id = str(model).strip()
+    if not model_id:
+        raise LMStudioError("Reranker model id is required.")
+    payload = {"model": model_id, "query": query, "documents": documents}
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
+        try:
+            resp = await client.post(f"{base_url}/v1/rerank", json=payload)
+            if resp.status_code in (404, 405):
+                raise LMStudioError("LM Studio rerank endpoint is not available.")
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            detail = None
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    detail = e.response.text
+                except Exception:
+                    detail = None
+            raise LMStudioError(f"LM Studio rerank request failed: {e} {detail or ''}".strip()) from e
+
+        data = resp.json()
+        items = data.get("data")
+        if items is None:
+            items = data.get("results")
+        if not isinstance(items, list):
+            raise LMStudioError(f"Unexpected rerank response shape: {data}")
+        out: list[dict[str, float]] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            idx = it.get("index")
+            if idx is None:
+                idx = it.get("document")
+            if idx is None:
+                continue
+            score = it.get("score")
+            if score is None:
+                score = it.get("relevance_score")
+            if score is None:
+                score = it.get("similarity")
+            if score is None:
+                continue
+            try:
+                out.append({"index": int(idx), "score": float(score)})
+            except Exception:
+                continue
+        if not out:
+            raise LMStudioError("Rerank response missing scores.")
+        return out

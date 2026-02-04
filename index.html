@@ -517,6 +517,24 @@
     .docsPage a{color:var(--accent);text-decoration:none;}
     .docsPage a:hover{text-decoration:underline;}
     .docsPage hr{border:none;border-top:1px solid var(--border);margin:12px 0;}
+    .docsPage .md-page-break{
+      border-top:1px dashed var(--border);
+      margin:16px 0;
+      position:relative;
+      opacity:.6;
+    }
+    .docsPage .md-page-break::after{
+      content:"PAGE BREAK";
+      position:absolute;
+      right:0;
+      top:-9px;
+      font-size:10px;
+      color:var(--muted);
+      background:var(--panel2);
+      padding:0 6px;
+      border-radius:10px;
+    }
+    .docsPage .md-spacer{height:16px;}
 		    .docsPage img{max-width:100%;height:auto;display:block;border-radius:14px;border:1px solid var(--border);margin:10px 0;}
 		    .docsPage table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;table-layout:fixed;}
 		    .docsPage th,.docsPage td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;word-break:break-word;}
@@ -539,6 +557,7 @@
       background:rgba(63,163,124,.08);
     }
     .docsPage .admonition.warning{border-left-color:rgba(216,92,92,.55);background:rgba(216,92,92,.08);}
+    .docsPage .admonition.caution{border-left-color:rgba(230,163,63,.65);background:rgba(230,163,63,.10);}
     .docsPage .admonition.info{border-left-color:rgba(88,155,219,.55);background:rgba(88,155,219,.08);}
     .docsPage .admonition-title{font-weight:600;margin-bottom:6px;}
     .docsPage .admonition-body p{margin:0 0 6px;}
@@ -722,11 +741,30 @@
     .docs-edit-preview a{color:var(--accent);text-decoration:none;}
     .docs-edit-preview a:hover{text-decoration:underline;}
     .docs-edit-preview hr{border:none;border-top:1px solid var(--border);margin:12px 0;}
+    .docs-edit-preview .md-page-break{
+      border-top:1px dashed var(--border);
+      margin:16px 0;
+      position:relative;
+      opacity:.6;
+    }
+    .docs-edit-preview .md-page-break::after{
+      content:"PAGE BREAK";
+      position:absolute;
+      right:0;
+      top:-9px;
+      font-size:10px;
+      color:var(--muted);
+      background:var(--panel2);
+      padding:0 6px;
+      border-radius:10px;
+    }
+    .docs-edit-preview .md-spacer{height:16px;}
     .docs-edit-preview table{width:100%;border-collapse:collapse;margin:10px 0;border:1px solid var(--border);border-radius:12px;overflow:hidden;table-layout:fixed;}
     .docs-edit-preview th,.docs-edit-preview td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;font-size:12px;word-break:break-word;}
     .docs-edit-preview th{background:rgba(255,255,255,.06);color:var(--text);font-weight:600;}
     .docs-edit-actions{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;}
     .docs-edit-status{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:4px;}
+    .docs-edit-issues{font-size:11px;color:var(--warn);}
     .docs-edit-preview h1,.docs-edit-preview h2,.docs-edit-preview h3,.docs-edit-preview h4,.docs-edit-preview h5,.docs-edit-preview h6{
       font-family:var(--docs-heading-font);
       margin:20px 0 12px;
@@ -766,6 +804,7 @@
     .docs-edit-preview blockquote{margin:10px 0;padding:8px 12px;border-left:3px solid rgba(214,217,223,.35);background:rgba(255,255,255,.04);border-radius:10px;color:var(--muted);}
     .docs-edit-preview .admonition{margin:12px 0;padding:10px 12px;border-left:3px solid rgba(63,163,124,.45);border-radius:12px;background:rgba(63,163,124,.08);}
     .docs-edit-preview .admonition.warning{border-left-color:rgba(216,92,92,.55);background:rgba(216,92,92,.08);}
+    .docs-edit-preview .admonition.caution{border-left-color:rgba(230,163,63,.65);background:rgba(230,163,63,.10);}
     .docs-edit-preview .admonition.info{border-left-color:rgba(88,155,219,.55);background:rgba(88,155,219,.08);}
     .docs-edit-preview .admonition-title{font-weight:600;margin-bottom:6px;}
     .docs-edit-preview .admonition-body p{margin:0 0 6px;}
@@ -1161,7 +1200,7 @@
       <div class="logo-dot"></div>
       <div class="brand-stack">
         <div class="brand">Luxriot</div>
-        <div class="brand-version" id="appVersion">Luxriot SA 0.2.3</div>
+        <div class="brand-version" id="appVersion">Luxriot SA 0.2.4</div>
       </div>
     </div>
 
@@ -1299,12 +1338,16 @@
         <label>Docs folder (Help+Manual export root)</label>
         <input id="adminDocsDir" type="text" placeholder="/path/to/docs"/>
 	        <div class="inline" style="margin-top:8px;">
-	          <span class="pill"><input id="adminIngestEmbeddings" type="checkbox" checked> embeddings</span>
-	          <span class="pill"><input id="adminIncludeEdits" type="checkbox" checked> include published edits</span>
-	          <div style="flex:1;min-width:160px;">
-	            <label style="margin:0 0 6px;">Emb max chars</label>
-	            <input id="adminEmbeddingMaxChars" type="number" min="256" max="8000" value="448"/>
-	          </div>
+          <span class="pill"><input id="adminIngestEmbeddings" type="checkbox" checked> embeddings</span>
+          <span class="pill"><input id="adminIncludeEdits" type="checkbox" checked> include published edits</span>
+          <div style="flex:1;min-width:220px;">
+            <label style="margin:0 0 6px;">Embedding model id</label>
+            <input id="adminEmbeddingModel" type="text" placeholder="e.g. text-embedding-qwen3-embedding-0.6b"/>
+          </div>
+          <div style="flex:1;min-width:160px;">
+            <label style="margin:0 0 6px;">Emb max chars</label>
+            <input id="adminEmbeddingMaxChars" type="number" min="256" max="8000" value="448"/>
+          </div>
 	          <div style="flex:1;min-width:120px;">
 	            <label style="margin:0 0 6px;">Emb batch</label>
 	            <input id="adminEmbeddingBatchSize" type="number" min="1" max="64" value="8"/>
@@ -1388,6 +1431,25 @@
         <label>Copyright</label>
         <input id="docsCoverCopyright" type="text" placeholder="© Luxriot"/>
         <div class="tiny muted" style="margin-top:6px;">Applies to docs reader + PDF export.</div>
+      </div>
+
+      <div class="card" id="markdownConventionsCard">
+        <h3>Markdown conventions</h3>
+        <label>Global conventions (used for ingestion + LLM output)</label>
+        <textarea id="adminMarkdownConventions" class="mono" rows="12" placeholder="Markdown conventions..."></textarea>
+        <div class="inline" style="margin-top:8px;">
+          <div style="flex:1;">
+            <label>Conventions hash</label>
+            <div class="tiny muted" id="adminMarkdownConventionsHash">—</div>
+          </div>
+          <div style="flex:1;">
+            <label>Updated</label>
+            <div class="tiny muted" id="adminMarkdownConventionsUpdated">—</div>
+          </div>
+        </div>
+        <div class="tiny muted" style="margin-top:6px;">
+          Injected into system prompts as <span class="kbd">{{markdown_conventions}}</span>.
+        </div>
       </div>
 
       <div class="card" id="homeCardsCard">
@@ -1530,9 +1592,9 @@
 		            </div>
 		          </div>
 
-		          <div class="hr"></div>
+          <div class="hr"></div>
 
-		          <div class="tiny muted">Summary routing (two-pass)</div>
+          <div class="tiny muted">Summary routing (two-pass)</div>
 		          <div class="inline" style="margin-top:8px;">
 		            <span class="pill"><input id="adminSummaryEnabled" type="checkbox" checked> enabled</span>
 		          </div>
@@ -1557,15 +1619,38 @@
 		              <label>Max input chars</label>
 		              <input id="adminSummaryMaxChars" type="number" min="500" max="20000" value="6000"/>
 		            </div>
-		            <div style="flex:1;">
-		              <label>Max output tokens</label>
-		              <input id="adminSummaryMaxTokens" type="number" min="32" max="1024" value="280"/>
-		            </div>
-		          </div>
+            <div style="flex:1;">
+              <label>Max output tokens</label>
+              <input id="adminSummaryMaxTokens" type="number" min="32" max="1024" value="280"/>
+            </div>
+          </div>
 
-		          <div class="hr"></div>
+          <div class="hr"></div>
 
-		          <div class="tiny muted">Diversification (MMR)</div>
+          <div class="tiny muted">Reranker (cross-encoder)</div>
+          <div class="inline" style="margin-top:8px;">
+            <span class="pill"><input id="adminRerankerEnabled" type="checkbox"> enabled</span>
+          </div>
+          <label>Reranker model id</label>
+          <input id="adminRerankerModel" type="text" placeholder="qwen3-vl-reranker-2b"/>
+          <div class="inline" style="margin-top:8px;">
+            <div style="flex:1;">
+              <label>Top K rerank</label>
+              <input id="adminRerankerTopK" type="number" min="1" max="200" value="30"/>
+            </div>
+            <div style="flex:1;">
+              <label>Min score</label>
+              <input id="adminRerankerMinScore" type="number" step="0.01" min="-10" max="10" value="0"/>
+            </div>
+            <div style="flex:1;">
+              <label>Max chars/doc</label>
+              <input id="adminRerankerMaxChars" type="number" min="200" max="5000" value="1200"/>
+            </div>
+          </div>
+
+          <div class="hr"></div>
+
+          <div class="tiny muted">Diversification (MMR)</div>
 		          <div class="inline" style="margin-top:8px;">
 		            <span class="pill"><input id="adminMmrEnabled" type="checkbox" checked> enabled</span>
 		            <span class="pill"><input id="adminMmrUseEmbeddings" type="checkbox" checked> use embeddings</span>
@@ -1851,9 +1936,12 @@
               <button type="button" data-insert="quote">Quote</button>
               <button type="button" data-insert="code">Code block</button>
               <button type="button" data-insert="hr">Divider</button>
+              <button type="button" data-insert="page-break">PDF page break</button>
+              <button type="button" data-insert="blank-line">Blank line spacer</button>
               <button type="button" data-insert="tip">Tip</button>
               <button type="button" data-insert="info">Info</button>
               <button type="button" data-insert="warn">Warning</button>
+              <button type="button" data-insert="caution">Caution</button>
               <button type="button" data-insert="link">Link</button>
               <button type="button" data-insert="image">Image</button>
               <button type="button" data-insert="cover">PDF cover front matter</button>
@@ -1966,6 +2054,7 @@
             <div class="docs-edit-status">
               <div class="tiny muted" id="docsEditMeta">Edit mode</div>
               <div id="docsEditStatus">Draft: none · Published: none</div>
+              <div class="docs-edit-issues" id="docsEditIssues" style="display:none;"></div>
             </div>
           </div>
         </div>
@@ -2415,10 +2504,15 @@
 		  const adminSummaryUnitTokensEl = document.getElementById('adminSummaryUnitTokens');
 		  const adminSummaryMaxCharsEl = document.getElementById('adminSummaryMaxChars');
 		  const adminSummaryMaxTokensEl = document.getElementById('adminSummaryMaxTokens');
-		  const adminMmrEnabledEl = document.getElementById('adminMmrEnabled');
-		  const adminMmrUseEmbeddingsEl = document.getElementById('adminMmrUseEmbeddings');
-		  const adminMmrLambdaEl = document.getElementById('adminMmrLambda');
-		  const adminMmrCandidatesEl = document.getElementById('adminMmrCandidates');
+  const adminMmrEnabledEl = document.getElementById('adminMmrEnabled');
+  const adminMmrUseEmbeddingsEl = document.getElementById('adminMmrUseEmbeddings');
+  const adminMmrLambdaEl = document.getElementById('adminMmrLambda');
+  const adminMmrCandidatesEl = document.getElementById('adminMmrCandidates');
+  const adminRerankerEnabledEl = document.getElementById('adminRerankerEnabled');
+  const adminRerankerModelEl = document.getElementById('adminRerankerModel');
+  const adminRerankerTopKEl = document.getElementById('adminRerankerTopK');
+  const adminRerankerMinScoreEl = document.getElementById('adminRerankerMinScore');
+  const adminRerankerMaxCharsEl = document.getElementById('adminRerankerMaxChars');
 		  const adminExpandNeighborsEl = document.getElementById('adminExpandNeighbors');
 		  const adminExpandMaxCharsEl = document.getElementById('adminExpandMaxChars');
 		  const adminExpandIncludeImagesEl = document.getElementById('adminExpandIncludeImages');
@@ -2430,11 +2524,12 @@
 		  const adminTemperatureEl = document.getElementById('adminTemperature');
 	  const adminMaxTokensEl = document.getElementById('adminMaxTokens');
 
-	  const adminDocsDirEl = document.getElementById('adminDocsDir');
-	  const adminIngestEmbeddingsEl = document.getElementById('adminIngestEmbeddings');
-	  const adminIncludeEditsEl = document.getElementById('adminIncludeEdits');
-	  const adminEmbeddingMaxCharsEl = document.getElementById('adminEmbeddingMaxChars');
-	  const adminEmbeddingBatchSizeEl = document.getElementById('adminEmbeddingBatchSize');
+  const adminDocsDirEl = document.getElementById('adminDocsDir');
+  const adminIngestEmbeddingsEl = document.getElementById('adminIngestEmbeddings');
+  const adminIncludeEditsEl = document.getElementById('adminIncludeEdits');
+  const adminEmbeddingModelEl = document.getElementById('adminEmbeddingModel');
+  const adminEmbeddingMaxCharsEl = document.getElementById('adminEmbeddingMaxChars');
+  const adminEmbeddingBatchSizeEl = document.getElementById('adminEmbeddingBatchSize');
 	  const adminReindexBtnEl = document.getElementById('adminReindexBtn');
 	  const adminReindexRefreshBtnEl = document.getElementById('adminReindexRefreshBtn');
 	  const adminReindexStatusEl = document.getElementById('adminReindexStatus');
@@ -2515,6 +2610,9 @@
     const docsCoverImageEl = document.getElementById('docsCoverImage');
     const docsCoverTextEl = document.getElementById('docsCoverText');
     const docsCoverCopyrightEl = document.getElementById('docsCoverCopyright');
+    const adminMarkdownConventionsEl = document.getElementById('adminMarkdownConventions');
+    const adminMarkdownConventionsHashEl = document.getElementById('adminMarkdownConventionsHash');
+    const adminMarkdownConventionsUpdatedEl = document.getElementById('adminMarkdownConventionsUpdated');
     const docsNewGuideBtn = document.getElementById('docsNewGuideBtn');
     const docsNewSectionBtn = document.getElementById('docsNewSectionBtn');
     const docsManageActionsEl = document.getElementById('docsManageActions');
@@ -2539,6 +2637,7 @@
     const docsEditHighlightEl = document.getElementById('docsEditHighlight');
     const docsEditPreviewEl = document.getElementById('docsEditPreview');
     const docsEditMetaEl = document.getElementById('docsEditMeta');
+    const docsEditIssuesEl = document.getElementById('docsEditIssues');
     const docsCoverEditorEl = document.getElementById('docsCoverEditor');
     const docsCoverDisabledEl = document.getElementById('docsCoverDisabled');
     const docsCoverFieldsEl = document.getElementById('docsCoverFields');
@@ -2743,14 +2842,15 @@
 		    const retrievalK = adminRetrievalKEl.value || String(chatKDefault);
 		    const docPriority = _linesToList(adminDocPriorityEl.value).join(', ');
 		    const webEnabled = adminWebEnabledEl ? Boolean(adminWebEnabledEl.checked) : false;
-		    const vars = {
-		      user_role: adminActivePromptRole,
-		      username: (authState && authState.username) ? String(authState.username) : '(user)',
-		      docs_version: adminDocsVersionEl.textContent || '(unknown)',
-		      retrieval_mode: retrievalMode,
-		      retrieval_k: retrievalK,
-		      doc_priority: docPriority,
+	    const vars = {
+	      user_role: adminActivePromptRole,
+	      username: (authState && authState.username) ? String(authState.username) : '(user)',
+	      docs_version: adminDocsVersionEl.textContent || '(unknown)',
+	      retrieval_mode: retrievalMode,
+	      retrieval_k: retrievalK,
+	      doc_priority: docPriority,
 	      web_enabled: String(webEnabled),
+	      markdown_conventions: String(adminMarkdownConventionsEl?.value || '(markdown conventions inserted at runtime)'),
 	      web_context: '(external web context inserted at runtime)',
 	      context: '(documentation context inserted at runtime)'
 	    };
@@ -2798,10 +2898,11 @@
 		  }
 
 		  adminPromptRoleEl?.addEventListener('change', () => _setPromptRole(adminPromptRoleEl.value));
-		  adminSystemPromptEl?.addEventListener('input', () => {
-		    if (adminActivePromptRole) adminPromptTemplates[adminActivePromptRole] = String(adminSystemPromptEl.value || '');
-		    _syncPromptPreview();
-		  });
+	  adminSystemPromptEl?.addEventListener('input', () => {
+	    if (adminActivePromptRole) adminPromptTemplates[adminActivePromptRole] = String(adminSystemPromptEl.value || '');
+	    _syncPromptPreview();
+	  });
+	  adminMarkdownConventionsEl?.addEventListener('input', () => _syncPromptPreview());
 		  adminRetrievalModeEl.addEventListener('change', _syncPromptPreview);
 		  adminRetrievalKEl.addEventListener('input', _syncPromptPreview);
 		  adminDocPriorityEl.addEventListener('input', _syncPromptPreview);
@@ -2875,6 +2976,7 @@
 	  async function startReindex() {
 	    const docsDir = String(adminDocsDirEl?.value || '').trim();
 	    const computeEmb = Boolean(adminIngestEmbeddingsEl?.checked);
+	    const embModel = String(adminEmbeddingModelEl?.value || '').trim();
 	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 448);
 	    const embBatch = Number(adminEmbeddingBatchSizeEl?.value || 8);
 	    const includeEdits = Boolean(adminIncludeEditsEl?.checked);
@@ -2892,6 +2994,7 @@
 	        body: {
 	          docs_dir: docsDir,
 	          compute_embeddings: computeEmb,
+	          embedding_model: embModel || null,
 	          embedding_max_chars: embMax,
 	          embedding_batch_size: embBatch,
 	          include_edits: includeEdits,
@@ -2906,6 +3009,7 @@
 
 	  async function startRefresh() {
 	    const computeEmb = Boolean(adminIngestEmbeddingsEl?.checked);
+	    const embModel = String(adminEmbeddingModelEl?.value || '').trim();
 	    const embMax = Number(adminEmbeddingMaxCharsEl?.value || 448);
 	    const embBatch = Number(adminEmbeddingBatchSizeEl?.value || 8);
 	    const includeEdits = Boolean(adminIncludeEditsEl?.checked);
@@ -2917,6 +3021,7 @@
 	        method: 'POST',
 	        body: {
 	          compute_embeddings: computeEmb,
+	          embedding_model: embModel || null,
 	          embedding_max_chars: embMax,
 	          embedding_batch_size: embBatch,
 	          include_edits: includeEdits,
@@ -3272,6 +3377,13 @@
 		    if (adminSummaryMaxCharsEl) adminSummaryMaxCharsEl.value = summary.max_input_chars ?? 6000;
 		    if (adminSummaryMaxTokensEl) adminSummaryMaxTokensEl.value = summary.max_output_tokens ?? 280;
 
+		    const reranker = retrieval?.reranker || {};
+		    if (adminRerankerEnabledEl) adminRerankerEnabledEl.checked = Boolean(reranker.enabled ?? false);
+		    if (adminRerankerModelEl) adminRerankerModelEl.value = reranker.model ?? '';
+		    if (adminRerankerTopKEl) adminRerankerTopKEl.value = reranker.top_k ?? 30;
+		    if (adminRerankerMinScoreEl) adminRerankerMinScoreEl.value = reranker.min_score ?? 0;
+		    if (adminRerankerMaxCharsEl) adminRerankerMaxCharsEl.value = reranker.max_chars ?? 1200;
+
 		    adminModelIdEl.value = llm.model ?? '';
 		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
 		    adminTemperatureEl.value = llm.temperature ?? 0.2;
@@ -3280,9 +3392,24 @@
 		    adminWebEnabledEl.checked = Boolean(web.enabled ?? true);
 		    adminWebTimeoutSEl.value = web.timeout_s ?? 15;
 		    adminWebMaxCharsEl.value = web.max_chars ?? 20000;
-			    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
-			    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
-			    adminWebSearchKEl.value = web.search_k ?? 5;
+		    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
+		    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
+		    adminWebSearchKEl.value = web.search_k ?? 5;
+		    if (adminEmbeddingModelEl) adminEmbeddingModelEl.value = effective.embedding_model || '';
+
+		    const mdConventions = effective.markdown_conventions || {};
+		    if (adminMarkdownConventionsEl) {
+		      adminMarkdownConventionsEl.value = String(mdConventions.text || '');
+		    }
+		    if (adminMarkdownConventionsHashEl) {
+		      const h = String(mdConventions.hash || '').trim();
+		      adminMarkdownConventionsHashEl.textContent = h ? h.slice(0, 12) : '—';
+		      if (h) adminMarkdownConventionsHashEl.title = h;
+		    }
+		    if (adminMarkdownConventionsUpdatedEl) {
+		      const stamp = String(mdConventions.updated_at || '').trim();
+		      adminMarkdownConventionsUpdatedEl.textContent = stamp || '—';
+		    }
 
 		    const homeCards = effective.home_cards || {};
 		    const homeRoles = homeCards.roles || {};
@@ -3386,6 +3513,13 @@
 		    if (adminSummaryMaxCharsEl) adminSummaryMaxCharsEl.value = summary.max_input_chars ?? 6000;
 		    if (adminSummaryMaxTokensEl) adminSummaryMaxTokensEl.value = summary.max_output_tokens ?? 280;
 
+		    const reranker = retrieval?.reranker || {};
+		    if (adminRerankerEnabledEl) adminRerankerEnabledEl.checked = Boolean(reranker.enabled ?? false);
+		    if (adminRerankerModelEl) adminRerankerModelEl.value = reranker.model ?? '';
+		    if (adminRerankerTopKEl) adminRerankerTopKEl.value = reranker.top_k ?? 30;
+		    if (adminRerankerMinScoreEl) adminRerankerMinScoreEl.value = reranker.min_score ?? 0;
+		    if (adminRerankerMaxCharsEl) adminRerankerMaxCharsEl.value = reranker.max_chars ?? 1200;
+
 		    adminModelIdEl.value = llm.model ?? '';
 		    adminTimeoutSEl.value = llm.timeout_s ?? 180;
 		    adminTemperatureEl.value = llm.temperature ?? 0.2;
@@ -3397,6 +3531,21 @@
 		    adminWebMaxBytesEl.value = web.max_bytes ?? 1000000;
 			    adminWebMaxUrlsEl.value = web.max_urls_per_message ?? 2;
 			    adminWebSearchKEl.value = web.search_k ?? 5;
+		    if (adminEmbeddingModelEl) adminEmbeddingModelEl.value = d.embedding_model || '';
+
+		    const mdConventions = d.markdown_conventions || {};
+		    if (adminMarkdownConventionsEl) {
+		      adminMarkdownConventionsEl.value = String(mdConventions.text || '');
+		    }
+		    if (adminMarkdownConventionsHashEl) {
+		      const h = String(mdConventions.hash || '').trim();
+		      adminMarkdownConventionsHashEl.textContent = h ? h.slice(0, 12) : '—';
+		      if (h) adminMarkdownConventionsHashEl.title = h;
+		    }
+		    if (adminMarkdownConventionsUpdatedEl) {
+		      const stamp = String(mdConventions.updated_at || '').trim();
+		      adminMarkdownConventionsUpdatedEl.textContent = stamp || '—';
+		    }
 
 		    const homeCards = d.home_cards || {};
 		    const homeRoles = homeCards.roles || {};
@@ -3429,20 +3578,33 @@
 		    if (adminActivePromptRole && adminSystemPromptEl) {
 		      adminPromptTemplates[adminActivePromptRole] = String(adminSystemPromptEl.value || '');
 		    }
-		    const templates = {};
-		    PROMPT_ROLES.forEach((r) => { templates[r] = String(adminPromptTemplates[r] ?? ''); });
-		    // Keep legacy single template for backward compatibility (client template is the safest default).
-		    const baseTmpl = (templates.client && templates.client.trim()) ? templates.client : String(adminSystemPromptEl?.value || '');
-		    if (!baseTmpl.includes('{{context}}')) {
-		      adminSaveHintEl.textContent = 'Error: base prompt template must include {{context}}.';
-		      return;
-		    }
-		    for (const [role, t] of Object.entries(templates)) {
-		      if (String(t || '').trim() && !String(t).includes('{{context}}')) {
-		        adminSaveHintEl.textContent = `Error: ${role} prompt must include {{context}}.`;
-		        return;
-		      }
-		    }
+	    const templates = {};
+	    PROMPT_ROLES.forEach((r) => { templates[r] = String(adminPromptTemplates[r] ?? ''); });
+	    // Keep legacy single template for backward compatibility (client template is the safest default).
+	    const baseTmpl = (templates.client && templates.client.trim()) ? templates.client : String(adminSystemPromptEl?.value || '');
+	    if (!baseTmpl.includes('{{context}}')) {
+	      adminSaveHintEl.textContent = 'Error: base prompt template must include {{context}}.';
+	      return;
+	    }
+	    if (!baseTmpl.includes('{{markdown_conventions}}')) {
+	      adminSaveHintEl.textContent = 'Error: base prompt template must include {{markdown_conventions}}.';
+	      return;
+	    }
+	    for (const [role, t] of Object.entries(templates)) {
+	      if (String(t || '').trim() && !String(t).includes('{{context}}')) {
+	        adminSaveHintEl.textContent = `Error: ${role} prompt must include {{context}}.`;
+	        return;
+	      }
+	      if (String(t || '').trim() && !String(t).includes('{{markdown_conventions}}')) {
+	        adminSaveHintEl.textContent = `Error: ${role} prompt must include {{markdown_conventions}}.`;
+	        return;
+	      }
+	    }
+	    const conventionsText = String(adminMarkdownConventionsEl?.value || '').trim();
+	    if (!conventionsText) {
+	      adminSaveHintEl.textContent = 'Error: markdown conventions cannot be empty.';
+	      return;
+	    }
 
 			    const retrieval = {
 			      mode: adminRetrievalModeEl.value || 'bm25',
@@ -3474,6 +3636,13 @@
 		        unit_max_tokens: Number(adminSummaryUnitTokensEl?.value || 900),
 		        max_input_chars: Number(adminSummaryMaxCharsEl?.value || 6000),
 		        max_output_tokens: Number(adminSummaryMaxTokensEl?.value || 280)
+		      },
+		      reranker: {
+		        enabled: Boolean(adminRerankerEnabledEl?.checked),
+		        model: String(adminRerankerModelEl?.value || '').trim(),
+		        top_k: Number(adminRerankerTopKEl?.value || 30),
+		        min_score: Number(adminRerankerMinScoreEl?.value || 0),
+		        max_chars: Number(adminRerankerMaxCharsEl?.value || 1200)
 		      },
 		      dedupe: {
 		        max_per_page: Number(adminMaxPerPageEl.value || 0),
@@ -3516,21 +3685,34 @@
 		        }
 		      }
 		    };
-			    const payload = {
-			      settings: {
-			        system_prompt_template: baseTmpl,
-			        system_prompt_templates: templates,
-			        retrieval,
-			        llm,
-			        web,
-			        home_cards
-			      }
-			    };
+	    const markdown_conventions = { text: conventionsText };
+	    const payload = {
+	      settings: {
+	        system_prompt_template: baseTmpl,
+	        system_prompt_templates: templates,
+	        markdown_conventions,
+	        embedding_model: String(adminEmbeddingModelEl?.value || '').trim(),
+	        retrieval,
+	        llm,
+	        web,
+	        home_cards
+	      }
+	    };
 
 	    try {
 	      adminBundle = await apiJson('/admin/settings', { method: 'POST', body: payload });
 	      const effective = adminBundle.effective || {};
 	      chatKDefault = Number(effective?.retrieval?.k_default ?? retrieval.k_default ?? 8);
+	      const md = effective?.markdown_conventions || {};
+	      if (adminMarkdownConventionsHashEl) {
+	        const h = String(md.hash || '').trim();
+	        adminMarkdownConventionsHashEl.textContent = h ? h.slice(0, 12) : '—';
+	        if (h) adminMarkdownConventionsHashEl.title = h;
+	      }
+	      if (adminMarkdownConventionsUpdatedEl) {
+	        const stamp = String(md.updated_at || '').trim();
+	        adminMarkdownConventionsUpdatedEl.textContent = stamp || '—';
+	      }
 	      adminSaveHintEl.textContent = 'Saved. New settings apply immediately.';
 	    } catch (e) {
 	      adminSaveHintEl.textContent = `Save failed: ${e?.raw ? String(e.raw) : String(e)}`;
@@ -4098,6 +4280,23 @@
         flushQuote();
       }
 
+      const trimmed = line.trim();
+      if (trimmed === ':::luxriot-page-break') {
+        flushParagraph();
+        closeList();
+        html += `<div class="md-page-break"></div>`;
+        continue;
+      }
+      if (trimmed === ':::luxriot-blank-line') {
+        flushParagraph();
+        closeList();
+        html += `<div class="md-spacer"></div>`;
+        continue;
+      }
+      if (trimmed === ':::') {
+        continue;
+      }
+
       if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
         flushParagraph();
         closeList();
@@ -4283,6 +4482,20 @@
       addContainer('info', 'Info');
       addContainer('warning', 'Warning');
       addContainer('note', 'Note');
+
+      const addDirective = (name, className) => {
+        md.use(container, name, {
+          render(tokens, idx) {
+            const token = tokens[idx];
+            if (token.nesting === 1) {
+              return `<div class="${className}"></div>`;
+            }
+            return '';
+          },
+        });
+      };
+      addDirective('luxriot-page-break', 'md-page-break');
+      addDirective('luxriot-blank-line', 'md-spacer');
     }
     const defaultHeading = md.renderer.rules.heading_open || function (tokens, idx, options, env, self) {
       return self.renderToken(tokens, idx, options);
@@ -4341,6 +4554,64 @@
     let html = markdownRenderer.render(normalized, env);
     html = wrapCitations(html);
     return html;
+  }
+
+  const MD_ALLOWED_DIRECTIVES = new Set([
+    'tip',
+    'info',
+    'warning',
+    'note',
+    'luxriot-page-break',
+    'luxriot-blank-line',
+  ]);
+
+  function lintMarkdown(text) {
+    const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+    const issues = [];
+    const stack = [];
+    let inCode = false;
+    lines.forEach((line, idx) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('```')) {
+        inCode = !inCode;
+        return;
+      }
+      if (inCode) return;
+      if (!trimmed.startsWith(':::')) return;
+      const rest = trimmed.slice(3).trim();
+      if (!rest) {
+        if (!stack.length) {
+          issues.push(`Line ${idx + 1}: unexpected directive close (:::)`);
+        } else {
+          stack.pop();
+        }
+        return;
+      }
+      const name = rest.split(/\s+/)[0];
+      if (!MD_ALLOWED_DIRECTIVES.has(name)) {
+        issues.push(`Line ${idx + 1}: unknown directive "${name}"`);
+      }
+      stack.push(name);
+    });
+    if (stack.length) {
+      issues.push(`Unclosed directive: ${stack[stack.length - 1]}`);
+    }
+    if (inCode) {
+      issues.push('Unclosed code fence (```)' );
+    }
+    return issues;
+  }
+
+  function updateDocsEditIssues(text) {
+    if (!docsEditIssuesEl) return;
+    const issues = lintMarkdown(text || '');
+    if (!issues.length) {
+      docsEditIssuesEl.textContent = '';
+      docsEditIssuesEl.style.display = 'none';
+      return;
+    }
+    docsEditIssuesEl.textContent = issues[0];
+    docsEditIssuesEl.style.display = 'block';
   }
 
   function highlightInlineMarkdown(raw) {
@@ -5872,6 +6143,7 @@
     const text = docsEditTextEl.value || '';
     docsEditPreviewEl.innerHTML = renderMarkdown(text, { addHeadingIds: false });
     updateDocsEditHighlight(text);
+    updateDocsEditIssues(text);
   }
 
 	  function updateDocsEditStatus(edit) {
@@ -5919,7 +6191,10 @@
     setEditorContent(seed, { markDirty: false });
     if (docsEditMetaEl) {
       const role = authState?.role ? String(authState.role) : 'anonymous';
-      docsEditMetaEl.textContent = `Version: ${edit?.version || '—'} · Role: ${role}`;
+      const hash = docsState.page?.md_conventions_hash ? String(docsState.page.md_conventions_hash) : '';
+      const hashLabel = hash ? hash.slice(0, 12) : 'manual';
+      docsEditMetaEl.textContent = `Version: ${edit?.version || '—'} · Role: ${role} · Conventions: ${hashLabel}`;
+      if (hash) docsEditMetaEl.title = `Conventions hash: ${hash}`;
     }
     updateDocsEditStatus(edit);
     return edit;
@@ -6003,18 +6278,27 @@
 	      case 'code':
 	        insertAtCursor(docsEditTextEl, '```\ncode\n```\n');
 	        break;
-	      case 'hr':
-	        insertAtCursor(docsEditTextEl, '---\n');
-	        break;
-	      case 'tip':
-	        insertAtCursor(docsEditTextEl, '> [!TIP] Tip\n> Add your tip here.\n');
-	        break;
-	      case 'warn':
-	        insertAtCursor(docsEditTextEl, '> [!WARNING] Warning\n> Add your warning here.\n');
-	        break;
-	      case 'info':
-	        insertAtCursor(docsEditTextEl, '> [!INFO] Info\n> Add your note here.\n');
-	        break;
+      case 'hr':
+        insertAtCursor(docsEditTextEl, '---\n');
+        break;
+      case 'page-break':
+        insertAtCursor(docsEditTextEl, ':::luxriot-page-break\n:::\n');
+        break;
+      case 'blank-line':
+        insertAtCursor(docsEditTextEl, ':::luxriot-blank-line\n:::\n');
+        break;
+      case 'tip':
+        insertAtCursor(docsEditTextEl, '> [!TIP] Tip\n> Add your tip here.\n');
+        break;
+      case 'warn':
+        insertAtCursor(docsEditTextEl, '> [!WARNING] Warning\n> Add your warning here.\n');
+        break;
+      case 'caution':
+        insertAtCursor(docsEditTextEl, '> [!CAUTION] Caution\n> Add your caution here.\n');
+        break;
+      case 'info':
+        insertAtCursor(docsEditTextEl, '> [!INFO] Info\n> Add your note here.\n');
+        break;
 	      case 'link':
 	        insertLinkSnippet();
 	        break;

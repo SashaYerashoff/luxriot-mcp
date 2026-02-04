@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
+import os
 import re
 import secrets
 import shutil
 import sqlite3
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -368,10 +371,12 @@ def auth_update_user(user_id: str, req: UserUpdateRequest, ctx: AuthContext = De
 
 def _job_defaults() -> dict[str, Any]:
     summary = {}
+    embedding_model = ""
     try:
         effective = get_settings_bundle()["effective"]
         retrieval = effective.get("retrieval") if isinstance(effective.get("retrieval"), dict) else {}
         summary = retrieval.get("summary") if isinstance(retrieval.get("summary"), dict) else {}
+        embedding_model = str(effective.get("embedding_model") or "")
     except Exception:
         summary = {}
     return {
@@ -379,6 +384,7 @@ def _job_defaults() -> dict[str, Any]:
         "version": DEFAULT_VERSION,
         "datastore_dir": str((DATASTORE_DIR / DEFAULT_VERSION).resolve()),
         "lmstudio_base_url": LMSTUDIO_BASE_URL,
+        "embedding_model": embedding_model,
         "embedding_max_chars": 448,
         "embedding_batch_size": 8,
         "include_edits": True,
@@ -518,10 +524,35 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
         str(int(job.get("embedding_batch_size") or 8)),
         "--clean",
     ]
+    md_conventions_path: str | None = None
+    md_conventions_text = _get_markdown_conventions_text(get_settings_bundle()["effective"])
+    if md_conventions_text.strip():
+        try:
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w",
+                delete=False,
+                encoding="utf-8",
+                prefix="luxriot_md_conventions_",
+                suffix=".md",
+            )
+            tmp.write(md_conventions_text)
+            tmp.flush()
+            tmp.close()
+            md_conventions_path = tmp.name
+            cmd.extend(["--md-conventions-file", md_conventions_path])
+        except Exception as e:
+            log.exception("Failed to create markdown conventions file")
+            job["error"] = f"Failed to prepare markdown conventions file: {e}"
+            job["status"] = "failed"
+            job["phase"] = "failed"
+            job["updated_at"] = _utc_now()
+            return
     if source_datastore:
         cmd.extend(["--from-datastore", source_datastore])
     else:
         cmd.extend(["--docs-dir", str(docs_dir)])
+    if job.get("embedding_model"):
+        cmd.extend(["--embedding-model", str(job.get("embedding_model"))])
     if not bool(job.get("compute_embeddings", True)):
         cmd.append("--no-embeddings")
     if bool(job.get("include_edits", True)):
@@ -566,8 +597,15 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
     stdout = proc.stdout or asyncio.StreamReader()
     stderr = proc.stderr or asyncio.StreamReader()
 
-    await asyncio.gather(_pump_stream(job, stdout), _pump_stream(job, stderr))
-    exit_code = await proc.wait()
+    try:
+        await asyncio.gather(_pump_stream(job, stdout), _pump_stream(job, stderr))
+        exit_code = await proc.wait()
+    finally:
+        if md_conventions_path:
+            try:
+                os.unlink(md_conventions_path)
+            except Exception:
+                log.exception("Failed to remove markdown conventions temp file")
 
     job["exit_code"] = int(exit_code)
     job["updated_at"] = _utc_now()
@@ -672,6 +710,11 @@ async def admin_reindex_start(req: ReindexRequest, ctx: AuthContext = Depends(re
         defaults = _job_defaults()
         summary_enabled = bool(req.summary_enabled) if req.summary_enabled is not None else bool(defaults.get("summary_enabled"))
         summary_model = req.summary_model if req.summary_model is not None else defaults.get("summary_model")
+        embedding_model = None
+        if req.embedding_model is not None:
+            embedding_model = str(req.embedding_model).strip() or None
+        else:
+            embedding_model = str(defaults.get("embedding_model") or "").strip() or None
         summary_max_input_chars = (
             int(req.summary_max_input_chars) if req.summary_max_input_chars is not None else int(defaults.get("summary_max_input_chars") or 6000)
         )
@@ -689,6 +732,7 @@ async def admin_reindex_start(req: ReindexRequest, ctx: AuthContext = Depends(re
             "docs_dir": str(docs_dir),
             "version": DEFAULT_VERSION,
             "compute_embeddings": bool(req.compute_embeddings),
+            "embedding_model": embedding_model,
             "embedding_max_chars": int(req.embedding_max_chars),
             "embedding_batch_size": int(req.embedding_batch_size),
             "include_edits": bool(req.include_edits),
@@ -732,6 +776,11 @@ async def admin_refresh_start(req: ReindexRequest, ctx: AuthContext = Depends(re
         defaults = _job_defaults()
         summary_enabled = bool(req.summary_enabled) if req.summary_enabled is not None else bool(defaults.get("summary_enabled"))
         summary_model = req.summary_model if req.summary_model is not None else defaults.get("summary_model")
+        embedding_model = None
+        if req.embedding_model is not None:
+            embedding_model = str(req.embedding_model).strip() or None
+        else:
+            embedding_model = str(defaults.get("embedding_model") or "").strip() or None
         summary_max_input_chars = (
             int(req.summary_max_input_chars) if req.summary_max_input_chars is not None else int(defaults.get("summary_max_input_chars") or 6000)
         )
@@ -751,6 +800,7 @@ async def admin_refresh_start(req: ReindexRequest, ctx: AuthContext = Depends(re
             "source_datastore": str(source_store),
             "version": DEFAULT_VERSION,
             "compute_embeddings": bool(req.compute_embeddings),
+            "embedding_model": embedding_model,
             "embedding_max_chars": int(req.embedding_max_chars),
             "embedding_batch_size": int(req.embedding_batch_size),
             "include_edits": bool(req.include_edits),
@@ -811,6 +861,11 @@ def admin_update_settings(req: AdminSettingsUpdateRequest, ctx: AuthContext = De
                 raise HTTPException(status_code=400, detail="system_prompt_template must be a non-empty string")
             if "{{context}}" not in tmpl:
                 raise HTTPException(status_code=400, detail="system_prompt_template must include required placeholder {{context}}")
+            if "{{markdown_conventions}}" not in tmpl:
+                raise HTTPException(
+                    status_code=400,
+                    detail="system_prompt_template must include required placeholder {{markdown_conventions}}",
+                )
         if "system_prompt_templates" in req.settings:
             tmpls = req.settings.get("system_prompt_templates")
             if not isinstance(tmpls, dict):
@@ -827,6 +882,25 @@ def admin_update_settings(req: AdminSettingsUpdateRequest, ctx: AuthContext = De
                         status_code=400,
                         detail=f"system_prompt_templates['{role}'] must include required placeholder {{context}}",
                     )
+                if tmpl.strip() and "{{markdown_conventions}}" not in tmpl:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"system_prompt_templates['{role}'] must include required placeholder {{markdown_conventions}}",
+                    )
+        if "markdown_conventions" in req.settings:
+            raw = req.settings.get("markdown_conventions")
+            text = ""
+            if isinstance(raw, dict):
+                text = str(raw.get("text") or "")
+            elif isinstance(raw, str):
+                text = raw
+            if not text.strip():
+                raise HTTPException(status_code=400, detail="markdown_conventions.text must be a non-empty string")
+            req.settings["markdown_conventions"] = {
+                "text": text,
+                "hash": _hash_text(text),
+                "updated_at": _utc_now(),
+            }
         return update_settings(req.settings)
     except SettingsError as e:
         log.exception("Settings error")
@@ -923,6 +997,7 @@ def _resolve_doc_page(version: str, doc_id: str, page_id: str) -> tuple[dict[str
                     "source_path": page.source_path,
                     "custom": False,
                     "author_id": None,
+                    "md_conventions_hash": page.md_conventions_hash,
                 },
                 md_text,
                 images,
@@ -947,6 +1022,7 @@ def _resolve_doc_page(version: str, doc_id: str, page_id: str) -> tuple[dict[str
             "source_path": str(custom.get("source_path") or ""),
             "custom": True,
             "author_id": custom.get("author_id"),
+            "md_conventions_hash": None,
         },
         str(custom.get("base_markdown") or ""),
         [],
@@ -1005,6 +1081,20 @@ def _select_system_prompt_template(settings: dict[str, Any], *, role: str) -> st
     if isinstance(t, str) and t.strip():
         return t
     raise HTTPException(status_code=500, detail="System prompt template is missing. Set it via /admin/settings.")
+
+
+def _get_markdown_conventions_text(settings: dict[str, Any]) -> str:
+    value = settings.get("markdown_conventions")
+    if isinstance(value, dict):
+        text = value.get("text")
+        return str(text or "")
+    if isinstance(value, str):
+        return value
+    return ""
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _get_docs_style() -> dict[str, str | None]:
@@ -1248,7 +1338,7 @@ def _summarize_doc_for_home(version: str, doc_id: str) -> tuple[str | None, str,
                     titles.append(title)
                 if len(titles) >= 2:
                     break
-            summary = " • ".join(titles)
+            summary = " - ".join(titles)
             if pages:
                 first_page_id = str(pages[0].get("page_id") or "") or None
         except KeyError:
@@ -1262,7 +1352,7 @@ def _summarize_doc_for_home(version: str, doc_id: str) -> tuple[str | None, str,
                 titles.append(title)
             if len(titles) >= 2:
                 break
-        summary = " • ".join(titles)
+        summary = " - ".join(titles)
         if custom and not first_page_id:
             first_page_id = str(custom[0].get("page_id") or "") or None
     return doc_title, summary, first_page_id
@@ -1829,6 +1919,7 @@ def docs_page(
         images=images,
         custom=bool(page_meta.get("custom")),
         author_id=page_meta.get("author_id"),
+        md_conventions_hash=page_meta.get("md_conventions_hash"),
     )
 
 
@@ -2736,6 +2827,12 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
     summary_enabled = bool(summary.get("enabled", False))
     summary_k = int(summary.get("k", 0) or 0)
     summary_max_pages = int(summary.get("max_pages", 0) or 0)
+    reranker = retrieval.get("reranker") if isinstance(retrieval.get("reranker"), dict) else {}
+    reranker_enabled = bool(reranker.get("enabled", False))
+    reranker_model = str(reranker.get("model") or "").strip() or None
+    reranker_top_k = int(reranker.get("top_k", 0) or 0) or None
+    reranker_min_score = float(reranker.get("min_score", 0.0) or 0.0)
+    reranker_max_chars = int(reranker.get("max_chars", 0) or 0) or 0
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     excluded_docs = _doc_exclusions(ver)
@@ -2767,6 +2864,11 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
                 summary_enabled=summary_enabled,
                 summary_k=summary_k,
                 summary_max_pages=summary_max_pages,
+                reranker_enabled=reranker_enabled,
+                reranker_model=reranker_model,
+                reranker_top_k=reranker_top_k,
+                reranker_min_score=reranker_min_score,
+                reranker_max_chars=reranker_max_chars,
                 max_per_page=max_per_page,
                 max_per_doc=max_per_doc,
                 debug_out=debug,
@@ -2882,6 +2984,12 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
     summary_enabled = bool(summary.get("enabled", False))
     summary_k = int(summary.get("k", 0) or 0)
     summary_max_pages = int(summary.get("max_pages", 0) or 0)
+    reranker = retrieval_cfg.get("reranker") if isinstance(retrieval_cfg.get("reranker"), dict) else {}
+    reranker_enabled = bool(reranker.get("enabled", False))
+    reranker_model = str(reranker.get("model") or "").strip() or None
+    reranker_top_k = int(reranker.get("top_k", 0) or 0) or None
+    reranker_min_score = float(reranker.get("min_score", 0.0) or 0.0)
+    reranker_max_chars = int(reranker.get("max_chars", 0) or 0) or 0
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     search_k = int(req.k)
@@ -2982,6 +3090,11 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
                     summary_enabled=summary_enabled,
                     summary_k=summary_k,
                     summary_max_pages=summary_max_pages,
+                    reranker_enabled=reranker_enabled,
+                    reranker_model=reranker_model,
+                    reranker_top_k=reranker_top_k,
+                    reranker_min_score=reranker_min_score,
+                    reranker_max_chars=reranker_max_chars,
                     max_per_page=max_per_page,
                     max_per_doc=max_per_doc,
                 )
@@ -3039,6 +3152,7 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
                     "doc_priority": doc_priority_str,
                     "web_enabled": str(web_enabled),
                     "tool_call_limit": str(tool_calls_limit),
+                    "markdown_conventions": _get_markdown_conventions_text(settings),
                     "context": context_text,
                 },
                 required_placeholders=[str(x) for x in required_placeholders],
@@ -3182,6 +3296,12 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
     summary_enabled = bool(summary.get("enabled", False))
     summary_k = int(summary.get("k", 0) or 0)
     summary_max_pages = int(summary.get("max_pages", 0) or 0)
+    reranker = retrieval_cfg.get("reranker") if isinstance(retrieval_cfg.get("reranker"), dict) else {}
+    reranker_enabled = bool(reranker.get("enabled", False))
+    reranker_model = str(reranker.get("model") or "").strip() or None
+    reranker_top_k = int(reranker.get("top_k", 0) or 0) or None
+    reranker_min_score = float(reranker.get("min_score", 0.0) or 0.0)
+    reranker_max_chars = int(reranker.get("max_chars", 0) or 0) or 0
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
     search_k = int(req.k)
@@ -3216,7 +3336,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                 urls = extract_urls(req.message, max_urls=web_max_urls)
                 search_q = parse_search_query(req.message)
                 if urls:
-                    yield sse("status", {"phase": "fetching_web", "message": f"Fetching {len(urls)} URL(s)…"})
+                    yield sse("status", {"phase": "fetching_web", "message": f"Fetching {len(urls)} URL(s)..."})
                     tasks = [
                         fetch_url(u, timeout_s=web_timeout_s, max_bytes=web_max_bytes, max_chars=web_max_chars)
                         for u in urls
@@ -3241,7 +3361,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                             )
                         )
                 elif search_q:
-                    yield sse("status", {"phase": "searching_web", "message": f"Searching the web ({web_search_k})…"})
+                    yield sse("status", {"phase": "searching_web", "message": f"Searching the web ({web_search_k})..."})
                     ddg_query_url = "https://html.duckduckgo.com/html/?q=" + quote_plus(search_q)
                     try:
                         found = await duckduckgo_search(
@@ -3297,6 +3417,11 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                         summary_enabled=summary_enabled,
                         summary_k=summary_k,
                         summary_max_pages=summary_max_pages,
+                        reranker_enabled=reranker_enabled,
+                        reranker_model=reranker_model,
+                        reranker_top_k=reranker_top_k,
+                        reranker_min_score=reranker_min_score,
+                        reranker_max_chars=reranker_max_chars,
                         max_per_page=max_per_page,
                         max_per_doc=max_per_doc,
                     )
@@ -3328,7 +3453,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                     "status",
                     {
                         "phase": "retrieving_docs",
-                        "message": f"Searching documentation ({retrieval_mode})…",
+                        "message": f"Searching documentation ({retrieval_mode})...",
                         "k": int(current_k),
                         "pass": int(pass_idx),
                     },
@@ -3401,7 +3526,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
 
                 context_text = _build_context_text(all_results, web_context_blocks)
 
-                yield sse("status", {"phase": "building_prompt", "message": "Building prompt…"})
+                yield sse("status", {"phase": "building_prompt", "message": "Building prompt..."})
                 try:
                     system_prompt = render_template(
                         template,
@@ -3414,6 +3539,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                             "doc_priority": doc_priority_str,
                             "web_enabled": str(web_enabled),
                             "tool_call_limit": str(tool_calls_limit),
+                            "markdown_conventions": _get_markdown_conventions_text(settings),
                             "context": context_text,
                         },
                         required_placeholders=[str(x) for x in required_placeholders],
@@ -3431,7 +3557,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                 model_label = llm_model_id or "LM Studio (auto)"
                 request = None
                 if tool_calls_enabled:
-                    yield sse("status", {"phase": "preflight", "message": "Checking for more context…"})
+                    yield sse("status", {"phase": "preflight", "message": "Checking for more context..."})
                     try:
                         preflight = await chat_completion(
                             messages=messages,
@@ -3489,7 +3615,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                     current_page_ids = request.get("page_ids") or None
                     continue
 
-                yield sse("status", {"phase": "calling_llm", "message": f"Generating answer ({model_label})…"})
+                yield sse("status", {"phase": "calling_llm", "message": f"Generating answer ({model_label})..."})
                 parts: list[str] = []
                 llm_started = time.monotonic()
                 q: asyncio.Queue[str] = asyncio.Queue()
@@ -3557,7 +3683,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
             if answer is None:
                 yield sse("error", {"error": "Chat stream failed", "detail": "No answer generated."})
                 return
-            yield sse("status", {"phase": "saving", "message": "Saving answer to session…"})
+            yield sse("status", {"phase": "saving", "message": "Saving answer to session..."})
             app_db.insert_message(session_id=session_id, role="assistant", content=answer)
 
             yield sse(

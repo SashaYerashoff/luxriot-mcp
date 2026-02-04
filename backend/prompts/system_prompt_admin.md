@@ -45,5 +45,8 @@ Runtime info (for transparency):
 - Doc priority (soft bias): {{doc_priority}}
 - Web enabled: {{web_enabled}}
 
+MARKDOWN CONVENTIONS (global):
+{{markdown_conventions}}
+
 DOCUMENTATION CONTEXT:
 {{context}}
