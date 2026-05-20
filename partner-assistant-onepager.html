@@ -1,0 +1,1227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Luxriot Support Assistant - Partner Preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #16202a;
+      --muted: #5d6b78;
+      --line: #dce3e8;
+      --panel: #ffffff;
+      --soft: #f5f7f9;
+      --brand: #0a6f84;
+      --brand-2: #26835f;
+      --amber: #b46b14;
+      --red: #a33b35;
+      --blue: #315f9a;
+      --shadow: 0 18px 60px rgba(22, 32, 42, 0.12);
+      --radius: 8px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #ffffff;
+      line-height: 1.45;
+      letter-spacing: 0;
+    }
+
+    img { max-width: 100%; display: block; }
+    a { color: inherit; text-decoration: none; }
+
+    .progress {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 30;
+      height: 4px;
+      background: #0a6f84;
+      transform-origin: left;
+      transform: scaleX(0);
+    }
+
+    .topbar {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      z-index: 20;
+      width: min(1120px, calc(100% - 32px));
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      box-shadow: 0 10px 30px rgba(22, 32, 42, 0.12);
+      backdrop-filter: blur(18px);
+      border-radius: var(--radius);
+    }
+
+    .brandmark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 210px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .brandmark::before {
+      content: "";
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.75) 1px, transparent 1px) 0 0 / 9px 9px,
+        linear-gradient(0deg, rgba(255,255,255,0.75) 1px, transparent 1px) 0 0 / 9px 9px,
+        #0a6f84;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #41505d;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .nav a {
+      padding: 8px 10px;
+      border-radius: 6px;
+    }
+
+    .nav a:hover { background: #eef4f5; color: #0a5262; }
+
+    .print {
+      border: 1px solid #cdd8df;
+      background: #ffffff;
+      color: #21303c;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 88vh;
+      display: grid;
+      align-items: end;
+      overflow: hidden;
+      padding: 116px max(24px, calc((100vw - 1120px) / 2)) 72px;
+      background: #10212b;
+      color: #ffffff;
+    }
+
+    .hero-media {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 90px max(24px, calc((100vw - 1120px) / 2)) 40px;
+      opacity: 0.82;
+      pointer-events: none;
+    }
+
+    .agent-map {
+      position: relative;
+      width: min(520px, 44vw);
+      min-height: 500px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 12px;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px) 0 0 / 42px 42px,
+        linear-gradient(0deg, rgba(255,255,255,0.08) 1px, transparent 1px) 0 0 / 42px 42px,
+        rgba(255,255,255,0.06);
+      box-shadow: 0 28px 90px rgba(0,0,0,0.36);
+      backdrop-filter: blur(8px);
+    }
+
+    .agent-node {
+      position: absolute;
+      min-width: 128px;
+      padding: 13px 14px;
+      border: 1px solid rgba(255,255,255,0.24);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.12);
+      color: #ffffff;
+      box-shadow: 0 16px 38px rgba(0,0,0,0.22);
+    }
+
+    .agent-node .icon {
+      display: block;
+      font-size: 24px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .agent-node strong {
+      display: block;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+
+    .agent-node span {
+      display: block;
+      margin-top: 4px;
+      color: #d7e2e8;
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    .agent-node.docs { left: 24px; top: 38px; }
+    .agent-node.index { right: 30px; top: 70px; }
+    .agent-node.retrieve { left: 58px; top: 206px; }
+    .agent-node.llm {
+      right: 34px;
+      top: 236px;
+      border-color: rgba(191,230,223,0.54);
+      background: rgba(10,111,132,0.34);
+    }
+    .agent-node.roles { left: 24px; bottom: 52px; }
+    .agent-node.studio { right: 36px; bottom: 34px; }
+
+    .agent-line {
+      position: absolute;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(191,230,223,0.08), rgba(191,230,223,0.72), rgba(191,230,223,0.08));
+      transform-origin: left center;
+    }
+
+    .agent-line.l1 { left: 151px; top: 109px; width: 196px; transform: rotate(-2deg); }
+    .agent-line.l2 { left: 156px; top: 249px; width: 198px; transform: rotate(8deg); }
+    .agent-line.l3 { left: 166px; bottom: 111px; width: 188px; transform: rotate(-5deg); }
+    .agent-line.l4 { right: 102px; top: 166px; width: 145px; transform: rotate(82deg); }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(10, 20, 27, 0.56);
+    }
+
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      width: min(920px, 100%);
+    }
+
+    .eyebrow {
+      margin: 0 0 18px;
+      color: #bfe6df;
+      font-weight: 720;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(48px, 8vw, 104px);
+      line-height: 0.95;
+      letter-spacing: 0;
+      max-width: 920px;
+    }
+
+    .hero-copy {
+      max-width: 760px;
+      margin: 22px 0 0;
+      color: #e5edf1;
+      font-size: clamp(18px, 2.2vw, 24px);
+    }
+
+    .hero-meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 42px;
+      max-width: 920px;
+    }
+
+    .hero-stat {
+      min-height: 96px;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius);
+      backdrop-filter: blur(8px);
+    }
+
+    .hero-stat strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1;
+      color: #ffffff;
+    }
+
+    .hero-stat span {
+      display: block;
+      margin-top: 8px;
+      color: #d7e2e8;
+      font-size: 13px;
+    }
+
+    main { background: #ffffff; }
+    section {
+      padding: 82px max(24px, calc((100vw - 1120px) / 2));
+      border-top: 1px solid var(--line);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+      gap: 42px;
+      align-items: end;
+      margin-bottom: 34px;
+    }
+
+    .section-kicker {
+      color: var(--brand);
+      font-size: 13px;
+      font-weight: 760;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 0 0 10px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 54px);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: 0 1px 0 rgba(22, 32, 42, 0.04);
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .card p,
+    .card li {
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .card p { margin: 0; }
+    ul.clean {
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    ul.clean li {
+      position: relative;
+      padding-left: 18px;
+      margin-top: 10px;
+    }
+
+    ul.clean li::before {
+      content: "";
+      position: absolute;
+      top: 0.72em;
+      left: 0;
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+      background: var(--brand);
+    }
+
+    .capability-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .capability-item {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #f7f9fa;
+    }
+
+    .capability-item b {
+      display: block;
+      color: var(--brand);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 9px;
+    }
+
+    .capability-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .subsection-title {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 34px 0 16px;
+    }
+
+    .subsection-title h3 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .subsection-title p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 560px;
+      font-size: 15px;
+    }
+
+    .role-matrix {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .role-card {
+      min-height: 220px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #ffffff;
+    }
+
+    .role-card strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 17px;
+    }
+
+    .role-card ul {
+      margin: 0;
+      padding-left: 17px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .role-card li { margin-top: 8px; }
+    .role-card.admin { border-top: 4px solid var(--brand); }
+    .role-card.redactor { border-top: 4px solid var(--blue); }
+    .role-card.support { border-top: 4px solid var(--brand-2); }
+    .role-card.client { border-top: 4px solid var(--amber); }
+    .role-card.anonymous { border-top: 4px solid #91a1ad; }
+
+    .docs-capabilities {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .media-card {
+      overflow: hidden;
+      padding: 0;
+    }
+
+    .card-symbol {
+      height: 164px;
+      display: grid;
+      place-items: center;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(90deg, rgba(10,111,132,0.08) 1px, transparent 1px) 0 0 / 28px 28px,
+        linear-gradient(0deg, rgba(10,111,132,0.08) 1px, transparent 1px) 0 0 / 28px 28px,
+        #eef5f6;
+      color: var(--brand);
+      font-size: 54px;
+      line-height: 1;
+    }
+
+    .card-symbol .plain-icon {
+      display: grid;
+      place-items: center;
+      width: 86px;
+      height: 86px;
+      border-radius: 18px;
+      border: 1px solid rgba(10,111,132,0.18);
+      background: rgba(255,255,255,0.76);
+      box-shadow: 0 14px 40px rgba(22,32,42,0.10);
+    }
+
+    .card-symbol .plain-icon svg {
+      width: 48px;
+      height: 48px;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .card-symbol.emoji {
+      font-size: 64px;
+      filter: saturate(0.95);
+    }
+
+    .card-symbol.alt {
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 20% 20%, rgba(38,131,95,0.16), transparent 30%),
+        linear-gradient(90deg, rgba(49,95,154,0.08) 1px, transparent 1px) 0 0 / 26px 26px,
+        #f2f6f8;
+    }
+
+    .media-card .body { padding: 20px; }
+
+    .status-board {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+    }
+
+    .status {
+      border-left: 5px solid var(--brand-2);
+      background: var(--soft);
+    }
+
+    .status.risk { border-left-color: var(--amber); }
+    .status.open { border-left-color: var(--red); }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      counter-reset: phase;
+    }
+
+    .phase {
+      position: relative;
+      min-height: 320px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 24px;
+      overflow: hidden;
+    }
+
+    .phase::before {
+      counter-increment: phase;
+      content: "0" counter(phase);
+      position: absolute;
+      right: 18px;
+      top: 10px;
+      color: #d7e0e5;
+      font-size: 60px;
+      font-weight: 820;
+      line-height: 1;
+    }
+
+    .phase h3 {
+      position: relative;
+      margin: 0 0 18px;
+      font-size: 24px;
+      max-width: 260px;
+    }
+
+    .phase ul {
+      position: relative;
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    .phase li { margin-top: 12px; }
+
+    .vision {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 26px;
+      align-items: stretch;
+    }
+
+    .workflow {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      padding: 22px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: #f7f9fa;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 14px;
+      background: #ffffff;
+      border: 1px solid #e3e9ee;
+      border-radius: 7px;
+    }
+
+    .step b {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 6px;
+      background: #0a6f84;
+      color: #ffffff;
+      font-size: 14px;
+    }
+
+    .step strong { display: block; margin-bottom: 3px; }
+    .step span { color: var(--muted); font-size: 14px; }
+
+    .stacked-shot {
+      min-height: 560px;
+      display: grid;
+      align-content: stretch;
+      gap: 14px;
+      padding: 22px;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #1f2d38;
+      box-shadow: var(--shadow);
+    }
+
+    .board-title {
+      color: #ffffff;
+      font-size: 18px;
+      font-weight: 760;
+    }
+
+    .board-subtitle {
+      color: #b8c7cf;
+      font-size: 13px;
+      margin-top: -8px;
+    }
+
+    .board-flow {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .board-card {
+      min-height: 104px;
+      padding: 14px;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 7px;
+      background: rgba(255,255,255,0.08);
+      color: #ffffff;
+    }
+
+    .board-card b {
+      display: block;
+      margin-bottom: 7px;
+      color: #bfe6df;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .board-card span {
+      color: #d7e2e8;
+      font-size: 13px;
+    }
+
+    .board-terminal {
+      align-self: end;
+      border: 1px solid rgba(191,230,223,0.22);
+      border-radius: 7px;
+      background: rgba(7,13,18,0.56);
+      padding: 14px;
+      color: #bfe6df;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .tech {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .tech-item {
+      min-height: 112px;
+      padding: 16px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .tech-item strong { display: block; margin-bottom: 8px; }
+    .tech-item span { color: var(--muted); font-size: 13px; }
+
+    .ask {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .ask-panel {
+      padding: 30px;
+      border-radius: var(--radius);
+      background: #10212b;
+      color: #ffffff;
+      min-height: 300px;
+      display: grid;
+      align-content: center;
+    }
+
+    .ask-panel h2 { color: #ffffff; }
+    .ask-panel p { color: #d7e2e8; font-size: 18px; }
+
+    .quote-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .quote {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #ffffff;
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    footer {
+      padding: 36px max(24px, calc((100vw - 1120px) / 2));
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      background: #f7f9fa;
+      font-size: 14px;
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 600ms ease, transform 600ms ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 940px) {
+      .topbar { position: absolute; top: 10px; }
+      .nav { display: none; }
+      .brandmark { min-width: 0; }
+      .hero { min-height: 820px; padding-top: 96px; }
+      .hero-media {
+        justify-content: center;
+        align-items: start;
+        padding-top: 92px;
+        opacity: 0.34;
+      }
+      .agent-map {
+        width: min(520px, calc(100vw - 32px));
+        transform: scale(0.92);
+      }
+      .hero-meta,
+      .section-head,
+      .grid-3,
+      .grid-2,
+      .capability-strip,
+      .role-matrix,
+      .docs-capabilities,
+      .status-board,
+      .roadmap,
+      .vision,
+      .ask {
+        grid-template-columns: 1fr;
+      }
+      .tech { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .stacked-shot { min-height: 430px; }
+      .board-flow { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .hero { min-height: 760px; }
+      .hero-meta { grid-template-columns: 1fr 1fr; }
+      section { padding-top: 58px; padding-bottom: 58px; }
+      .tech { grid-template-columns: 1fr; }
+      .print { display: none; }
+    }
+
+    @media print {
+      .topbar,
+      .progress { display: none; }
+      .hero { min-height: auto; color: var(--ink); background: #ffffff; padding-top: 40px; }
+      .hero::after,
+      .hero-media { display: none; }
+      .hero-copy,
+      .hero-stat span { color: var(--muted); }
+      .hero-stat { background: #ffffff; border-color: var(--line); }
+      .hero-stat strong { color: var(--ink); }
+      section { break-inside: avoid; padding-top: 34px; padding-bottom: 34px; }
+      .reveal { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress"></div>
+
+  <header class="topbar" aria-label="Presentation navigation">
+    <a class="brandmark" href="#top">Luxriot Assistant</a>
+    <nav class="nav">
+      <a href="#today">Product</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#access">Access</a>
+      <a href="#platform">Platform</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#partners">Partner ask</a>
+    </nav>
+    <button class="print" type="button" onclick="window.print()">Print</button>
+  </header>
+
+  <section class="hero" id="top">
+    <div class="hero-media" aria-hidden="true">
+      <div class="agent-map">
+        <div class="agent-line l1"></div>
+        <div class="agent-line l2"></div>
+        <div class="agent-line l3"></div>
+        <div class="agent-line l4"></div>
+        <div class="agent-node docs"><span class="icon">📚</span><strong>Docs</strong><span>Markdown, HTML, custom pages</span></div>
+        <div class="agent-node index"><span class="icon">🧭</span><strong>Index</strong><span>Chunks, screenshots, metadata</span></div>
+        <div class="agent-node retrieve"><span class="icon">🔎</span><strong>Retrieval</strong><span>Role-aware source selection</span></div>
+        <div class="agent-node llm"><span class="icon">🤖</span><strong>Local LLM</strong><span>Qwen-class models and beyond</span></div>
+        <div class="agent-node roles"><span class="icon">🔐</span><strong>Access</strong><span>Client, support, redactor, admin</span></div>
+        <div class="agent-node studio"><span class="icon">📝</span><strong>Docs Studio</strong><span>Edit, publish, export PDF</span></div>
+      </div>
+    </div>
+    <div class="hero-inner reveal">
+      <p class="eyebrow">Partner preview</p>
+      <h1>Luxriot Support Assistant</h1>
+      <p class="hero-copy">
+        A local, role-aware support engineer and technical-writing workspace: it answers from controlled documentation,
+        drafts practical guides, opens them in the documentation editor, and exports publishable pages or PDFs.
+      </p>
+      <div class="hero-meta" aria-label="Current status">
+        <div class="hero-stat"><strong>Local</strong><span>Runs on customer-controlled infrastructure and local models.</span></div>
+        <div class="hero-stat"><strong>Role-aware</strong><span>Different users see different information and tools.</span></div>
+        <div class="hero-stat"><strong>Model-flexible</strong><span>Works from small Qwen-class models to stronger 27B/35B setups.</span></div>
+        <div class="hero-stat"><strong>Docs loop</strong><span>Answer, edit, publish, or export PDF from one workflow.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <section id="today">
+      <div class="section-head reveal">
+        <div>
+          <p class="section-kicker">Product shape</p>
+          <h2>Not a generic chatbot. A local support and documentation stack.</h2>
+        </div>
+        <p class="lead">
+          The assistant is built for controlled technical support: run it locally, feed it the documentation you trust,
+          restrict what each role can see, and keep the answer-to-document workflow inside the same system.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <article class="card media-card reveal">
+          <div class="card-symbol emoji" aria-hidden="true">🏠</div>
+          <div class="body">
+            <h3>Local Tier-1 support</h3>
+            <p>Deploy on a customer-controlled server with local LLM runtime. Sensitive support knowledge can stay inside the customer environment.</p>
+          </div>
+        </article>
+        <article class="card media-card reveal">
+          <div class="card-symbol" aria-hidden="true">
+            <span class="plain-icon">
+              <svg viewBox="0 0 64 64">
+                <path d="M22 29a10 10 0 1 0 0-20 10 10 0 0 0 0 20z"/>
+                <path d="M42 29a10 10 0 1 0 0-20 10 10 0 0 0 0 20z"/>
+                <path d="M10 53c2-12 8-18 18-18s16 6 18 18"/>
+                <path d="M34 39c3-3 7-4 12-4 8 0 13 5 15 15"/>
+              </svg>
+            </span>
+          </div>
+          <div class="body">
+            <h3>Role-aware knowledge</h3>
+            <p>Anonymous, client, support, redactor, and administrator roles get different documentation visibility and different tools.</p>
+          </div>
+        </article>
+        <article class="card media-card reveal">
+          <div class="card-symbol alt" aria-hidden="true">
+            <span class="plain-icon">
+              <svg viewBox="0 0 64 64">
+                <path d="M16 8h25l9 9v39H16z"/>
+                <path d="M41 8v12h12"/>
+                <path d="M24 28h20"/>
+                <path d="M24 36h20"/>
+                <path d="M24 44h13"/>
+              </svg>
+            </span>
+          </div>
+          <div class="body">
+            <h3>Technical writer built in</h3>
+            <p>The same answer can become a Markdown guide, be edited in the docs workspace, published, or exported as a presentable PDF.</p>
+          </div>
+        </article>
+      </div>
+
+      <div class="capability-strip reveal" aria-label="Core system capabilities">
+        <div class="capability-item">
+          <b>Ingest</b>
+          <span>Index, ingest, and version existing documentation from Markdown and HTML exports.</span>
+        </div>
+        <div class="capability-item">
+          <b>Retrieve</b>
+          <span>Search trusted manuals, custom pages, instructions, screenshots, and source metadata.</span>
+        </div>
+        <div class="capability-item">
+          <b>Generate</b>
+          <span>Recombine retrieved evidence into practical guides for real operational scenarios.</span>
+        </div>
+        <div class="capability-item">
+          <b>Publish</b>
+          <span>Open generated answers in docs, polish them, publish pages, or export them as PDFs.</span>
+        </div>
+      </div>
+
+      <div class="grid-3" style="margin-top:16px">
+        <article class="card reveal">
+          <h3>Model-flexible by design</h3>
+          <ul class="clean">
+            <li>Works with OpenAI-compatible local model servers such as LM Studio.</li>
+            <li>Usable from Qwen 3.5 4B/9B-class models for smaller installs.</li>
+            <li>Answer quality scales with stronger models such as Qwen 3.6 35B or dense 27B-class setups.</li>
+          </ul>
+        </article>
+        <article class="card reveal">
+          <h3>Portable to other domains</h3>
+          <ul class="clean">
+            <li>Luxriot EVO is the current corpus, not a hard dependency.</li>
+            <li>A customer can bring their own documentation and run the same stack.</li>
+            <li>Prompts and role templates are editable from the UI, so the assistant can become Tier-1 for another domain.</li>
+          </ul>
+        </article>
+        <article class="card reveal">
+          <h3>Engineering controls remain visible</h3>
+          <ul class="clean">
+            <li>Retrieval profiles, model settings, prompt templates, ingest paths, and docs style are operator-controlled.</li>
+            <li>Debug views expose what was retrieved instead of hiding answer quality behind a black box.</li>
+            <li>Eval and telemetry hooks turn partner failures into concrete backlog items.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="workflow">
+      <div class="section-head reveal">
+        <div>
+          <p class="section-kicker">Working loop</p>
+          <h2>From answer to maintained documentation.</h2>
+        </div>
+        <p class="lead">
+          The practical value is not just chat. The assistant can draft a guide, move it into the documentation workspace,
+          let a human correct the details, then publish or export it.
+        </p>
+      </div>
+
+      <div class="vision">
+        <div class="workflow reveal">
+          <div class="step"><b>1</b><div><strong>Ask a support question</strong><span>A partner asks something operational, for example: “connect an ONVIF camera and show it in Monitor”.</span></div></div>
+          <div class="step"><b>2</b><div><strong>Retrieve the evidence</strong><span>The system pulls relevant indexed sections, screenshots, citations, and role-allowed custom pages.</span></div></div>
+          <div class="step"><b>3</b><div><strong>Draft the guide</strong><span>The model combines the sources into a scenario-specific answer instead of copying one manual page.</span></div></div>
+          <div class="step"><b>4</b><div><strong>Open in docs</strong><span>The answer can be opened as Markdown in the built-in documentation editor.</span></div></div>
+          <div class="step"><b>5</b><div><strong>Polish and approve</strong><span>A redactor or support specialist fixes wording, screenshots, warnings, and structure.</span></div></div>
+          <div class="step"><b>6</b><div><strong>Publish or export</strong><span>The result becomes a documentation page or a clean PDF for a partner/customer handoff.</span></div></div>
+        </div>
+        <div class="stacked-shot reveal" aria-label="Answer to documentation workflow diagram">
+          <div class="board-title">Answer-to-Document Pipeline</div>
+          <div class="board-subtitle">Support answer becomes maintained source material.</div>
+          <div class="board-flow">
+            <div class="board-card"><b>Question</b><span>Messy partner/customer request enters the chat.</span></div>
+            <div class="board-card"><b>Retrieval</b><span>Allowed docs, screenshots, FAQs, and custom pages are selected.</span></div>
+            <div class="board-card"><b>Draft</b><span>The model recombines evidence into a guide-shaped answer.</span></div>
+            <div class="board-card"><b>Docs Studio</b><span>Human edits Markdown, images, cautions, and structure.</span></div>
+            <div class="board-card"><b>Publish</b><span>Approved content becomes a page in the indexed corpus.</span></div>
+            <div class="board-card"><b>Export</b><span>The same material can become a clean PDF handoff.</span></div>
+          </div>
+          <div class="board-terminal">
+            retrieval_query = user_question + session_context<br />
+            source_filter = role_permissions + doc_version<br />
+            output = answer | markdown_page | pdf
+          </div>
+        </div>
+      </div>
+
+      <div class="docs-capabilities">
+        <article class="card reveal">
+          <h3>Doc reader can</h3>
+          <ul class="clean">
+            <li>Browse documentation versions, guides, and pages.</li>
+            <li>Search indexed manuals and custom pages.</li>
+            <li>Open source pages from answer citations.</li>
+            <li>Show related screenshots and source context.</li>
+            <li>Use its own light/dark theme independent from the main UI.</li>
+          </ul>
+        </article>
+        <article class="card reveal">
+          <h3>Doc editor can</h3>
+          <ul class="clean">
+            <li>Edit Markdown with live preview and style conventions.</li>
+            <li>Create new guides and sections from assistant answers or manual drafts.</li>
+            <li>Upload and reference documentation images/assets.</li>
+            <li>Request publication or publish directly when the role allows it.</li>
+            <li>Export pages and guides to PDF with usable formatting.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="access">
+      <div class="section-head reveal">
+        <div>
+          <p class="section-kicker">Access model</p>
+          <h2>One assistant, different information boundaries.</h2>
+        </div>
+        <p class="lead">
+          Role separation is part of the product, not an afterthought. The same local system can expose a limited public assistant,
+          a client support assistant, an internal support console, a redactor workspace, and administrator controls.
+        </p>
+      </div>
+
+      <div class="role-matrix">
+        <article class="role-card anonymous reveal">
+          <strong>Anonymous</strong>
+          <ul>
+            <li>Ask documentation-grounded questions.</li>
+            <li>Read and search public documentation.</li>
+            <li>See citations and relevant screenshots.</li>
+            <li>No saved chat history by default.</li>
+            <li>API/internal docs are hidden by default.</li>
+          </ul>
+        </article>
+        <article class="role-card client reveal">
+          <strong>Client</strong>
+          <ul>
+            <li>All anonymous capabilities.</li>
+            <li>Login identity and saved chat sessions.</li>
+            <li>Client-facing home cards and documentation access.</li>
+            <li>Restricted from support/admin tools.</li>
+            <li>Web tools remain disabled by default.</li>
+          </ul>
+        </article>
+        <article class="role-card support reveal">
+          <strong>Support</strong>
+          <ul>
+            <li>Full documentation visibility, including internal/API docs.</li>
+            <li>Retrieval debug and support telemetry views.</li>
+            <li>Can use richer support context than client roles.</li>
+            <li>Can edit/request publication when granted docs permissions.</li>
+            <li>Designed for supervised partner issue triage.</li>
+          </ul>
+        </article>
+        <article class="role-card redactor reveal">
+          <strong>Redactor</strong>
+          <ul>
+            <li>Documentation reader, editor, and annotation workflow.</li>
+            <li>Create guides and sections, upload assets, edit pages.</li>
+            <li>Prepare PDF exports and request publication.</li>
+            <li>Can turn support answers into maintained docs.</li>
+            <li>No user or system administration by default.</li>
+          </ul>
+        </article>
+        <article class="role-card admin reveal">
+          <strong>Administrator</strong>
+          <ul>
+            <li>Manage users, roles, prompts, models, and retrieval settings.</li>
+            <li>Start ingest/reindex jobs and version documentation.</li>
+            <li>Approve or reject publication requests.</li>
+            <li>Full documentation edit, export, delete, and exclusion controls.</li>
+            <li>Controls the business layer on top of the assistant.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="platform">
+      <div class="section-head reveal">
+        <div>
+          <p class="section-kicker">Engineering bones</p>
+          <h2>The architecture is part of the value.</h2>
+        </div>
+        <p class="lead">
+          This is deliberately not flattened into a black-box SaaS pitch. Partners should see that the system is inspectable,
+          configurable, and portable across documentation sets and local model choices.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <article class="card reveal">
+          <h3>Documentation pipeline</h3>
+          <ul class="clean">
+            <li>Markdown and HTML ingest.</li>
+            <li>Versioned indexes and custom published pages.</li>
+            <li>Screenshot extraction, source references, and broken-image reporting.</li>
+            <li>Repair-oriented metadata for missing or moved assets.</li>
+          </ul>
+        </article>
+        <article class="card reveal">
+          <h3>Retrieval and answer layer</h3>
+          <ul class="clean">
+            <li>BM25 profile tuned for demo reliability.</li>
+            <li>Embeddings and reranking available when the local machine can support them.</li>
+            <li>Session-aware follow-up retrieval.</li>
+            <li>Role-aware prompts and source filtering.</li>
+          </ul>
+        </article>
+        <article class="card reveal">
+          <h3>Operator surface</h3>
+          <ul class="clean">
+            <li>Prompt templates editable in the UI.</li>
+            <li>Model, retrieval, ingest, docs style, and publication controls.</li>
+            <li>Telemetry and debug views for real failure analysis.</li>
+            <li>Admin-managed home cards and guided entry points.</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="tech" style="margin-top:18px">
+        <div class="tech-item reveal"><strong>Python</strong><span>FastAPI backend, ingestion tools, eval harness.</span></div>
+        <div class="tech-item reveal"><strong>SQLite</strong><span>App state, sessions, users, settings, and local metadata.</span></div>
+        <div class="tech-item reveal"><strong>Retrieval</strong><span>BM25 first for reliability; embeddings/reranking are optional knobs.</span></div>
+        <div class="tech-item reveal"><strong>LLM runtime</strong><span>OpenAI-compatible local serving via LM Studio or equivalent servers.</span></div>
+        <div class="tech-item reveal"><strong>Docs studio</strong><span>Reader, search, Markdown editor, publication flow, assets, and PDF export.</span></div>
+        <div class="tech-item reveal"><strong>Frontend</strong><span>Single-page browser UI for chat, docs, redaction, admin, and debugging.</span></div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head reveal">
+        <div>
+          <p class="section-kicker">Roadmap</p>
+          <h2>From Luxriot preview to reusable support intelligence.</h2>
+        </div>
+        <p class="lead">
+          The next steps turn partner feedback and support correspondence into structured knowledge, then make documentation
+          creation increasingly assisted rather than fully manual.
+        </p>
+      </div>
+
+      <div class="roadmap">
+        <article class="phase reveal">
+          <h3>Controlled access</h3>
+          <ul>
+            <li>Add OAuth and prepare controlled partner access.</li>
+            <li>Package installation, first launch, model setup, and hardware profiles.</li>
+            <li>Index fresh EVO 1.33 documentation and keep version switching explicit.</li>
+          </ul>
+        </article>
+        <article class="phase reveal">
+          <h3>FAQ ingest pipeline</h3>
+          <ul>
+            <li>Import support correspondence, client feedback, and existing answer bases.</li>
+            <li>Cluster repeated issues by topic, product area, and intent.</li>
+            <li>Draft FAQs and focused guides from the clusters for human review.</li>
+            <li>Explore LoRA-style adaptation for tone, terminology, and correction patterns.</li>
+          </ul>
+        </article>
+        <article class="phase reveal">
+          <h3>Documentation co-pilot</h3>
+          <ul>
+            <li>Describe a feature in a few words, then click through the software.</li>
+            <li>Capture screenshots and UI states from the workflow.</li>
+            <li>Draft a structured guide with steps, cautions, prerequisites, and images.</li>
+            <li>Review, publish, and feed the new document back into the assistant.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section id="partners">
+      <div class="ask">
+        <div class="ask-panel reveal">
+          <p class="section-kicker" style="color:#bfe6df">Partner preview goal</p>
+          <h2>Test the loop, not only the chat.</h2>
+          <p>
+            Ask realistic support questions, inspect the cited sources, open useful answers as documentation,
+            and mark weak cases that should become FAQs, guides, or retrieval tests.
+          </p>
+        </div>
+        <div class="quote-list reveal">
+          <div class="quote">“Can this answer become a clean partner-facing PDF?”</div>
+          <div class="quote">“Which internal docs should support see but clients should not?”</div>
+          <div class="quote">“What happens if we give it our own documentation set?”</div>
+          <div class="quote">“Which repeated support questions should become FAQs first?”</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Luxriot Support Assistant partner preview. Local-first support, role-aware knowledge access, documentation workflow, and engineering controls remain explicit by design.
+  </footer>
+
+  <script>
+    const progress = document.getElementById('progress');
+    const reveals = [...document.querySelectorAll('.reveal')];
+
+    function updateProgress() {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const value = max > 0 ? window.scrollY / max : 0;
+      progress.style.transform = `scaleX(${Math.max(0, Math.min(1, value))})`;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      }
+    }, { threshold: 0.14 });
+
+    reveals.forEach((el) => observer.observe(el));
+    window.addEventListener('scroll', updateProgress, { passive: true });
+    window.addEventListener('resize', updateProgress);
+    updateProgress();
+  </script>
+</body>
+</html>

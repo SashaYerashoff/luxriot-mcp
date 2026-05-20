@@ -1,5 +1,18 @@
 # Changelog
 
+## Luxriot SA 0.2.6
+
+- Retrieval:
+  - Tuned documentation search intent routing for camera, folders, Modbus, storage, license, and upgrade scenarios.
+  - Added session-aware retrieval query expansion for follow-up questions.
+  - Set demo-safe defaults to BM25 without summary/MMR routing.
+- Documentation workflow:
+  - Improved related screenshot placement and filtering in assistant answers.
+  - Added support-oriented ingest/reporting improvements for broken and repaired images.
+  - Added partner preview one-page HTML presentation.
+- UI:
+  - Restored the assistant UI toward the stable dark layout while keeping docs-reader controls and screenshot fixes.
+
 ## Luxriot SA 0.2.4
 
 - Markdown conventions (global):
