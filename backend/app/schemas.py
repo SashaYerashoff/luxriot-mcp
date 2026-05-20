@@ -26,6 +26,9 @@ class ImageResult(BaseModel):
     doc_id: str
     page_id: str
     near_heading: str | None = None
+    alt: str | None = None
+    source_chunk_id: str | None = None
+    score: float | None = None
 
 
 class ContextChunk(BaseModel):
@@ -131,9 +134,9 @@ class ReindexRequest(BaseModel):
     include_edits: bool = True
     summary_enabled: bool | None = None
     summary_model: str | None = None
-    summary_max_input_chars: int | None = None
-    summary_max_output_tokens: int | None = None
-    summary_unit_max_tokens: int | None = None
+    summary_max_input_chars: int | None = Field(default=None, ge=500, le=8000)
+    summary_max_output_tokens: int | None = Field(default=None, ge=32, le=512)
+    summary_unit_max_tokens: int | None = Field(default=None, ge=200, le=1600)
 
 
 class ReindexJob(BaseModel):

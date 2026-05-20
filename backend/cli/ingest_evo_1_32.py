@@ -7,6 +7,7 @@ import math
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import time
 import unicodedata
@@ -15,6 +16,7 @@ from array import array
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 import httpx
@@ -28,6 +30,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 _LIST_BULLET_RE = re.compile(r"^(\s*)[+*]\s+")
 _LIST_NUM_RE = re.compile(r"^(\s*)(\d+)\)\s+")
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".svg"}
 
 
 def log(msg: str) -> None:
@@ -108,6 +111,711 @@ def classify_hs_box(icon_src: str) -> str:
     if "note" in s:
         return "Note"
     return "Note"
+
+
+def _normal_path(text: str) -> str:
+    return unquote(str(text or "")).replace("\\", "/").strip()
+
+
+def _strip_windows_drive(path_text: str) -> str:
+    out = _normal_path(path_text)
+    if re.match(r"^/[A-Za-z]:/", out):
+        out = out[1:]
+    return out
+
+
+def _image_src_local_path(src: str) -> str:
+    raw = str(src or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("file:"):
+        parsed = urlparse(raw)
+        return _strip_windows_drive(parsed.path or "")
+    parsed = urlparse(raw)
+    path = parsed.path or raw
+    if path.startswith("./"):
+        path = path[2:]
+    return _normal_path(path).lstrip("/")
+
+
+def _image_src_basename(src: str) -> str:
+    local_path = _image_src_local_path(src)
+    return local_path.rsplit("/", 1)[-1] if local_path else ""
+
+
+def _doc_image_rel_candidates(src: str) -> list[str]:
+    local_path = _image_src_local_path(src)
+    if not local_path:
+        return []
+
+    candidates: list[str] = []
+    if str(src or "").strip().startswith("file:"):
+        lower = local_path.lower()
+        images_idx = lower.rfind("/images/")
+        if images_idx >= 0:
+            candidates.append(local_path[images_idx + 1 :])
+        basename = local_path.rsplit("/", 1)[-1]
+        if basename:
+            candidates.append(f"images/{basename}")
+    else:
+        candidates.append(local_path)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for rel in candidates:
+        rel = rel.strip().lstrip("/")
+        if not rel or rel in seen:
+            continue
+        seen.add(rel)
+        out.append(rel)
+    return out
+
+
+def resolve_doc_image_src(src: str, doc_dir: Path) -> tuple[Path, str] | None:
+    doc_root = doc_dir.resolve()
+
+    for rel in _doc_image_rel_candidates(src):
+        src_path = (doc_dir / rel).resolve()
+        try:
+            src_path.relative_to(doc_root)
+        except Exception:
+            continue
+        if src_path.exists() and src_path.is_file():
+            return src_path, rel
+    return None
+
+
+def audit_docs_dir(docs_dir: Path) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "docs_dir": str(docs_dir),
+        "doc_dirs": 0,
+        "html_pages": 0,
+        "image_refs": 0,
+        "file_uri_refs": 0,
+        "file_uri_image_refs": 0,
+        "recoverable_file_uri_images": 0,
+        "missing_file_uri_images": 0,
+        "missing_relative_images": 0,
+        "data_uri_images": 0,
+        "http_images": 0,
+        "empty_pages": 0,
+        "broken_images": [],
+        "warnings": [],
+    }
+    warnings: list[dict[str, Any]] = []
+    broken_images: list[dict[str, Any]] = []
+
+    doc_dirs = sorted([p for p in docs_dir.iterdir() if p.is_dir()]) if docs_dir.exists() else []
+    report["doc_dirs"] = len(doc_dirs)
+
+    def add_warning(
+        kind: str,
+        html_path: Path,
+        detail: str,
+        src: str | None = None,
+        page_title: str | None = None,
+    ) -> None:
+        item: dict[str, Any] = {
+            "kind": kind,
+            "page": str(html_path.relative_to(docs_dir)),
+            "detail": detail,
+        }
+        if page_title:
+            item["page_title"] = page_title
+        if src:
+            item["src"] = src
+            item["basename"] = _image_src_basename(src)
+            item["candidate_paths"] = _doc_image_rel_candidates(src)
+        warnings.append(item)
+        if kind in {"missing_file_uri_image", "missing_relative_image"}:
+            broken_images.append(item)
+
+    for doc_dir in doc_dirs:
+        html_files = sorted([p for p in doc_dir.glob("*.html") if not p.name.startswith("__")])
+        for html_path in html_files:
+            report["html_pages"] += 1
+            html_text = read_text(html_path)
+            file_refs = re.findall(r"file:///[^\s\"'<>)]*", html_text)
+            report["file_uri_refs"] += len(file_refs)
+
+            soup = BeautifulSoup(html_text, "html.parser")
+            main = soup.select_one("#mainbody") or soup.body
+            title_el = soup.select_one("#pagetitle")
+            page_title = title_el.get_text(" ", strip=True) if title_el else html_path.stem
+            text = main.get_text(" ", strip=True) if main is not None else ""
+            if not text:
+                report["empty_pages"] += 1
+                add_warning("empty_page", html_path, "No visible text found in page body.", page_title=page_title)
+
+            for img in soup.select("img[src]"):
+                src = str(img.get("src") or "").strip()
+                if not src:
+                    continue
+                report["image_refs"] += 1
+                if src.startswith("data:"):
+                    report["data_uri_images"] += 1
+                    continue
+                if src.startswith("http"):
+                    report["http_images"] += 1
+                    continue
+
+                resolved = resolve_doc_image_src(src, doc_dir)
+                if src.startswith("file:"):
+                    report["file_uri_image_refs"] += 1
+                    if resolved is None:
+                        report["missing_file_uri_images"] += 1
+                        add_warning(
+                            "missing_file_uri_image",
+                            html_path,
+                            "File URI image is not present in local export.",
+                            src,
+                            page_title=page_title,
+                        )
+                    else:
+                        report["recoverable_file_uri_images"] += 1
+                    continue
+
+                if resolved is None:
+                    report["missing_relative_images"] += 1
+                    add_warning(
+                        "missing_relative_image",
+                        html_path,
+                        "Relative image is not present in local export.",
+                        src,
+                        page_title=page_title,
+                    )
+
+    by_basename: dict[str, dict[str, Any]] = {}
+    for item in broken_images:
+        basename = str(item.get("basename") or "").strip() or "(unknown)"
+        bucket = by_basename.setdefault(basename, {"basename": basename, "count": 0, "pages": [], "kinds": []})
+        bucket["count"] += 1
+        page = str(item.get("page") or "")
+        if page and page not in bucket["pages"]:
+            bucket["pages"].append(page)
+        kind = str(item.get("kind") or "")
+        if kind and kind not in bucket["kinds"]:
+            bucket["kinds"].append(kind)
+
+    report["broken_images"] = broken_images
+    report["broken_images_total"] = len(broken_images)
+    report["broken_images_by_basename"] = sorted(
+        by_basename.values(),
+        key=lambda x: (-int(x.get("count") or 0), str(x.get("basename") or "").lower()),
+    )
+    report["warnings"] = warnings
+    report["warnings_total"] = len(warnings)
+    report["ok"] = (
+        report["doc_dirs"] > 0
+        and report["html_pages"] > 0
+        and report["missing_file_uri_images"] == 0
+        and report["missing_relative_images"] == 0
+        and report["file_uri_refs"] == report["file_uri_image_refs"]
+    )
+    return report
+
+
+def print_audit_report(report: dict[str, Any]) -> None:
+    log("Ingest preflight audit:")
+    for key in (
+        "docs_dir",
+        "doc_dirs",
+        "html_pages",
+        "image_refs",
+        "file_uri_refs",
+        "file_uri_image_refs",
+        "recoverable_file_uri_images",
+        "missing_file_uri_images",
+        "missing_relative_images",
+        "data_uri_images",
+        "http_images",
+        "empty_pages",
+        "broken_images_total",
+        "warnings_total",
+    ):
+        log(f"  {key}: {report.get(key)}")
+    warnings = report.get("warnings") if isinstance(report.get("warnings"), list) else []
+    for item in warnings[:20]:
+        src = f" src={item.get('src')}" if item.get("src") else ""
+        log(f"  WARNING {item.get('kind')}: {item.get('page')}: {item.get('detail')}{src}")
+    if int(report.get("warnings_total") or 0) > 20:
+        log(f"  ... {int(report.get('warnings_total') or 0) - 20} more warning(s)")
+
+
+def _md_cell(value: Any, *, max_len: int = 180) -> str:
+    text = str(value if value is not None else "")
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > max_len:
+        text = text[: max(0, max_len - 1)].rstrip() + "..."
+    return text.replace("|", "\\|")
+
+
+def build_broken_images_markdown_report(report: dict[str, Any]) -> str:
+    broken = report.get("broken_images") if isinstance(report.get("broken_images"), list) else []
+    by_basename = (
+        report.get("broken_images_by_basename")
+        if isinstance(report.get("broken_images_by_basename"), list)
+        else []
+    )
+    lines: list[str] = [
+        "# Broken Image Report",
+        "",
+        f"- Docs dir: `{report.get('docs_dir')}`",
+        f"- HTML pages: {int(report.get('html_pages') or 0)}",
+        f"- Image refs: {int(report.get('image_refs') or 0)}",
+        f"- Missing file URI images: {int(report.get('missing_file_uri_images') or 0)}",
+        f"- Missing relative images: {int(report.get('missing_relative_images') or 0)}",
+        f"- Broken images total: {int(report.get('broken_images_total') or 0)}",
+        "",
+    ]
+
+    if not broken:
+        lines.extend(["No broken images found.", ""])
+        return "\n".join(lines).rstrip() + "\n"
+
+    lines.extend(
+        [
+            "## By Basename",
+            "",
+            "| Basename | Count | Pages |",
+            "| --- | ---: | --- |",
+        ]
+    )
+    for item in by_basename:
+        pages = item.get("pages") if isinstance(item.get("pages"), list) else []
+        page_text = "; ".join(str(p) for p in pages[:8])
+        if len(pages) > 8:
+            page_text += f"; +{len(pages) - 8} more"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _md_cell(item.get("basename"), max_len=80),
+                    str(int(item.get("count") or 0)),
+                    _md_cell(page_text, max_len=220),
+                ]
+            )
+            + " |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Details",
+            "",
+            "| Kind | Basename | Page | Title | Original src | Candidate local paths |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for item in broken:
+        candidates = item.get("candidate_paths") if isinstance(item.get("candidate_paths"), list) else []
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _md_cell(item.get("kind"), max_len=40),
+                    _md_cell(item.get("basename"), max_len=80),
+                    _md_cell(item.get("page"), max_len=120),
+                    _md_cell(item.get("page_title"), max_len=120),
+                    _md_cell(item.get("src"), max_len=240),
+                    _md_cell("; ".join(str(c) for c in candidates), max_len=180),
+                ]
+            )
+            + " |"
+        )
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_broken_images_markdown_report(report: dict[str, Any], path: Path) -> None:
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(build_broken_images_markdown_report(report), encoding="utf-8")
+    log(f"Broken image report written to {path}")
+
+
+def _image_file_paths(source_dirs: list[Path]) -> list[Path]:
+    out: list[Path] = []
+    for raw in source_dirs:
+        root = raw.expanduser()
+        if not root.exists():
+            log(f"WARNING: repair image source not found: {root}")
+            continue
+        if root.is_file():
+            if root.suffix.lower() in _IMAGE_EXTS:
+                out.append(root.resolve())
+            continue
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in _IMAGE_EXTS:
+                out.append(path.resolve())
+    return sorted(set(out), key=lambda p: str(p).lower())
+
+
+def _build_image_source_index(source_dirs: list[Path]) -> dict[str, list[Path]]:
+    index: dict[str, list[Path]] = {}
+    for path in _image_file_paths(source_dirs):
+        index.setdefault(path.name.lower(), []).append(path)
+    return index
+
+
+def _source_match_score(src: str, candidate: Path, page: str) -> int:
+    hint = _image_src_local_path(src).lower()
+    hint_parts = [p for p in hint.split("/") if p]
+    candidate_norm = _normal_path(str(candidate)).lower()
+    score = 0
+    max_suffix = min(5, len(hint_parts))
+    for n in range(max_suffix, 1, -1):
+        suffix = "/".join(hint_parts[-n:])
+        if suffix and candidate_norm.endswith(suffix):
+            score = max(score, 100 * n)
+            break
+
+    page_stem = Path(page).stem.lower().strip()
+    if page_stem and page_stem in candidate_norm:
+        score += 20
+    return score
+
+
+def _choose_repair_source(
+    item: dict[str, Any],
+    source_index: dict[str, list[Path]],
+    *,
+    allow_ambiguous: bool,
+) -> tuple[str, Path | None, list[Path]]:
+    basename = str(item.get("basename") or "").strip().lower()
+    candidates = source_index.get(basename, [])
+    if not candidates:
+        return "not_found", None, []
+    if len(candidates) == 1:
+        return "matched", candidates[0], candidates
+
+    scored = sorted(
+        ((_source_match_score(str(item.get("src") or ""), c, str(item.get("page") or "")), c) for c in candidates),
+        key=lambda x: (-x[0], str(x[1]).lower()),
+    )
+    best_score, best_path = scored[0]
+    same_score = [p for score, p in scored if score == best_score]
+    if best_score > 0 and len(same_score) == 1:
+        return "matched", best_path, candidates
+    if allow_ambiguous:
+        return "matched_ambiguous", best_path, candidates
+    return "ambiguous", None, candidates
+
+
+def _safe_image_basename(name: str, src: str) -> str:
+    basename = Path(str(name or "")).name.strip()
+    if not basename:
+        digest = hashlib.sha1(str(src or "").encode("utf-8")).hexdigest()[:10]
+        basename = f"image-{digest}.png"
+    return basename.replace("/", "_").replace("\\", "_")
+
+
+def _repair_target_rel(item: dict[str, Any]) -> str:
+    basename = _safe_image_basename(str(item.get("basename") or ""), str(item.get("src") or ""))
+    kind = str(item.get("kind") or "")
+    candidates = item.get("candidate_paths") if isinstance(item.get("candidate_paths"), list) else []
+    if kind == "missing_relative_image" and candidates:
+        rel = str(candidates[0] or "").strip().lstrip("/")
+        if rel and ".." not in Path(rel).parts:
+            return rel
+    page_stem = slugify(Path(str(item.get("page") or "page")).stem)
+    return f"images/_recovered/{page_stem}/{basename}"
+
+
+def _file_sha1(path: Path) -> str:
+    h = hashlib.sha1()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _target_path_for_copy(doc_dir: Path, target_rel: str, source_path: Path) -> tuple[str, Path]:
+    doc_root = doc_dir.resolve()
+    target_rel = target_rel.strip().lstrip("/")
+    target_path = (doc_dir / target_rel).resolve()
+    try:
+        target_path.relative_to(doc_root)
+    except Exception as e:
+        raise RuntimeError(f"Repair target escapes doc dir: {target_rel}") from e
+
+    if not target_path.exists():
+        return target_rel, target_path
+    if target_path.is_file() and target_path.stat().st_size == source_path.stat().st_size:
+        if _file_sha1(target_path) == _file_sha1(source_path):
+            return target_rel, target_path
+
+    suffix = source_path.suffix
+    stem = Path(target_rel).with_suffix("").as_posix()
+    digest = _file_sha1(source_path)[:10]
+    unique_rel = f"{stem}-{digest}{suffix}"
+    unique_path = (doc_dir / unique_rel).resolve()
+    try:
+        unique_path.relative_to(doc_root)
+    except Exception as e:
+        raise RuntimeError(f"Repair target escapes doc dir: {unique_rel}") from e
+    return unique_rel, unique_path
+
+
+def _replace_img_src(html_text: str, old_src: str, new_src: str) -> tuple[str, int]:
+    variants = [old_src]
+    amp = old_src.replace("&", "&amp;")
+    if amp != old_src:
+        variants.append(amp)
+    for src in variants:
+        pattern = re.compile(r"(\bsrc\s*=\s*)([\"'])" + re.escape(src) + r"\2")
+        html_text, count = pattern.subn(lambda m: f"{m.group(1)}{m.group(2)}{new_src}{m.group(2)}", html_text)
+        if count:
+            return html_text, count
+    return html_text, 0
+
+
+def repair_missing_images(
+    docs_dir: Path,
+    source_dirs: list[Path],
+    *,
+    dry_run: bool,
+    allow_ambiguous: bool,
+) -> dict[str, Any]:
+    source_index = _build_image_source_index(source_dirs)
+    audit = audit_docs_dir(docs_dir)
+    broken = audit.get("broken_images") if isinstance(audit.get("broken_images"), list) else []
+    report: dict[str, Any] = {
+        "docs_dir": str(docs_dir),
+        "source_dirs": [str(p) for p in source_dirs],
+        "source_images": sum(len(v) for v in source_index.values()),
+        "dry_run": bool(dry_run),
+        "allow_ambiguous": bool(allow_ambiguous),
+        "total_broken": len(broken),
+        "repaired": 0,
+        "would_repair": 0,
+        "not_found": 0,
+        "ambiguous": 0,
+        "errors": 0,
+        "skipped_duplicates": 0,
+        "actions": [],
+    }
+    actions: list[dict[str, Any]] = []
+    seen_page_src: set[tuple[str, str]] = set()
+
+    for item in broken:
+        page_key = str(item.get("page") or "")
+        src_key = str(item.get("src") or "")
+        action: dict[str, Any] = {
+            "page": page_key,
+            "page_title": item.get("page_title"),
+            "kind": item.get("kind"),
+            "src": src_key,
+            "basename": item.get("basename"),
+        }
+        duplicate_key = (page_key, src_key)
+        if duplicate_key in seen_page_src:
+            report["skipped_duplicates"] += 1
+            action["status"] = "duplicate_ref"
+            actions.append(action)
+            continue
+        seen_page_src.add(duplicate_key)
+
+        status, source_path, candidates = _choose_repair_source(
+            item,
+            source_index,
+            allow_ambiguous=allow_ambiguous,
+        )
+        action["status"] = status
+        action["candidate_count"] = len(candidates)
+        action["candidates"] = [str(p) for p in candidates[:20]]
+        if source_path is not None:
+            action["source"] = str(source_path)
+
+        if status == "not_found":
+            report["not_found"] += 1
+            actions.append(action)
+            continue
+        if status == "ambiguous":
+            report["ambiguous"] += 1
+            actions.append(action)
+            continue
+        if source_path is None:
+            report["errors"] += 1
+            action["status"] = "error"
+            action["error"] = "No source path selected"
+            actions.append(action)
+            continue
+
+        try:
+            page_rel = Path(str(item.get("page") or ""))
+            html_path = (docs_dir / page_rel).resolve()
+            doc_dir = html_path.parent
+            target_rel = _repair_target_rel(item)
+            target_rel, target_path = _target_path_for_copy(doc_dir, target_rel, source_path)
+            action["target_rel"] = target_rel
+            action["target"] = str(target_path)
+
+            if dry_run:
+                report["would_repair"] += 1
+                action["status"] = "would_repair"
+                actions.append(action)
+                continue
+
+            html_text = read_text(html_path)
+            patched, count = _replace_img_src(html_text, str(item.get("src") or ""), target_rel)
+            if count <= 0:
+                raise RuntimeError("Could not replace img src in HTML")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            if not target_path.exists():
+                shutil.copy2(source_path, target_path)
+            html_path.write_text(patched, encoding="utf-8")
+            report["repaired"] += 1
+            action["status"] = "repaired"
+            action["replacements"] = count
+        except Exception as e:
+            report["errors"] += 1
+            action["status"] = "error"
+            action["error"] = str(e)
+        actions.append(action)
+
+    report["actions"] = actions
+    if not dry_run:
+        final_audit = audit_docs_dir(docs_dir)
+        report["remaining_broken"] = int(final_audit.get("broken_images_total") or 0)
+    report["ok"] = (
+        int(report.get("errors") or 0) == 0
+        and int(report.get("not_found") or 0) == 0
+        and int(report.get("ambiguous") or 0) == 0
+    )
+    return report
+
+
+def print_repair_report(report: dict[str, Any]) -> None:
+    log("Image repair report:")
+    for key in (
+        "docs_dir",
+        "source_images",
+        "total_broken",
+        "would_repair",
+        "repaired",
+        "remaining_broken",
+        "not_found",
+        "ambiguous",
+        "errors",
+        "skipped_duplicates",
+    ):
+        if key in report:
+            log(f"  {key}: {report.get(key)}")
+    actions = report.get("actions") if isinstance(report.get("actions"), list) else []
+    for action in actions[:20]:
+        status = action.get("status")
+        page = action.get("page")
+        src = action.get("src")
+        source = action.get("source")
+        extra = f" source={source}" if source else ""
+        log(f"  {status}: {page}: {src}{extra}")
+    if len(actions) > 20:
+        log(f"  ... {len(actions) - 20} more action(s)")
+
+
+def _pdf_title(pdf_path: Path) -> str:
+    name = pdf_path.stem.replace("_", " ").replace("-", " ")
+    name = re.sub(r"\s+", " ", name).strip()
+    return name or "PDF export"
+
+
+def pdf_text_to_markdown(text: str, title: str) -> str:
+    src = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    src = src.replace("\f", "\n\n").replace("\u00a0", " ")
+    src = src.replace("\u2022", "-")
+    src = re.sub(r"[ \t]+\n", "\n", src)
+    src = re.sub(r"\n{3,}", "\n\n", src)
+
+    paragraphs = [p.strip() for p in src.split("\n\n") if p.strip()]
+    out: list[str] = [f"# {title}"]
+    last_heading = title.lower()
+
+    for para in paragraphs:
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in para.splitlines() if ln.strip()]
+        if not lines:
+            continue
+        joined = " ".join(lines).strip()
+        if not joined:
+            continue
+
+        words = joined.split()
+        looks_like_heading = (
+            len(joined) <= 90
+            and len(words) <= 12
+            and not joined.endswith((".", ",", ";"))
+            and not joined.startswith(("-", "http://", "https://"))
+        )
+        if looks_like_heading and joined.lower() != last_heading:
+            out.append(f"## {joined.rstrip(':')}")
+            last_heading = joined.lower()
+            continue
+
+        normalized_lines: list[str] = []
+        for line in lines:
+            if line.startswith("- "):
+                normalized_lines.append(line)
+            elif line.startswith("-"):
+                normalized_lines.append("- " + line.lstrip("- ").strip())
+            else:
+                normalized_lines.append(line)
+        out.append("\n".join(normalized_lines))
+
+    return "\n\n".join(out).strip() + "\n"
+
+
+def extract_pdf_markdown(pdf_path: Path) -> str:
+    exe = shutil.which("pdftotext")
+    if not exe:
+        raise RuntimeError("pdftotext is not installed")
+    proc = subprocess.run(
+        [exe, "-layout", "-enc", "UTF-8", "-nopgbrk", str(pdf_path), "-"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        msg = (proc.stderr or "").strip()
+        raise RuntimeError(msg or f"pdftotext exited with code {proc.returncode}")
+    return pdf_text_to_markdown(proc.stdout, _pdf_title(pdf_path))
+
+
+def write_pdf_markdown_sidecars(docs_dir: Path, out_dir: Path) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "docs_dir": str(docs_dir),
+        "out_dir": str(out_dir),
+        "pdf_files": 0,
+        "written": 0,
+        "errors": [],
+    }
+    errors: list[dict[str, str]] = []
+    pdf_files = sorted([p for p in docs_dir.rglob("*.pdf") if p.is_file()]) if docs_dir.exists() else []
+    report["pdf_files"] = len(pdf_files)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for pdf_path in pdf_files:
+        try:
+            rel = pdf_path.relative_to(docs_dir)
+        except ValueError:
+            rel = Path(pdf_path.name)
+        try:
+            md_text = extract_pdf_markdown(pdf_path)
+            md_rel = rel.with_suffix(rel.suffix + ".md")
+            md_path = out_dir / md_rel
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+            md_path.write_text(md_text, encoding="utf-8")
+            report["written"] += 1
+            log(f"PDF markdown sidecar: {pdf_path} -> {md_path}")
+        except Exception as e:
+            errors.append({"pdf": str(pdf_path), "error": str(e)})
+            log(f"WARNING: failed to extract PDF markdown from {pdf_path}: {e}")
+
+    report["errors"] = errors
+    report["ok"] = len(errors) == 0
+    return report
 
 
 def html_to_markdown(
@@ -218,23 +926,20 @@ def html_to_markdown(
             continue
         if src.startswith("http"):
             continue
-        # normalize ./ prefix
-        if src.startswith("./"):
-            src = src[2:]
-        src_path = (doc_dir / src).resolve()
-        try:
-            src_path.relative_to(doc_dir.resolve())
-        except Exception:
+        resolved = resolve_doc_image_src(src, doc_dir)
+        if resolved is None:
+            if src.startswith("file:"):
+                log(f"WARNING: missing file URI image in {doc_id}/{page_title}: {src}")
+            img.decompose()
             continue
-        if not src_path.exists() or not src_path.is_file():
-            continue
+        src_path, rel_src = resolved
 
-        out_path = (assets_out_dir / doc_id / src).resolve()
+        out_path = (assets_out_dir / doc_id / rel_src).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_path, out_path)
 
-        url = f"/assets/{version}/{doc_id}/{src}"
-        images.append({"original": src, "url": url, "alt": str(img.get("alt") or "").strip()})
+        url = f"/assets/{version}/{doc_id}/{rel_src}"
+        images.append({"original": rel_src, "url": url, "alt": str(img.get("alt") or "").strip()})
         img["src"] = url
 
     md_body = md(str(main), heading_style="ATX", bullets="*")
@@ -805,6 +1510,62 @@ def _chat_completion(base_url: str, model_id: str, text: str, max_tokens: int, t
     return content
 
 
+SUMMARY_MAX_INPUT_CHARS_MIN = 500
+SUMMARY_MAX_INPUT_CHARS_MAX = 8000
+SUMMARY_MAX_OUTPUT_TOKENS_MIN = 32
+SUMMARY_MAX_OUTPUT_TOKENS_MAX = 512
+SUMMARY_UNIT_MAX_TOKENS_MIN = 200
+SUMMARY_UNIT_MAX_TOKENS_MAX = 1600
+
+
+def _clamp_int(value: Any, default: int, min_value: int, max_value: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = int(default)
+    return max(min_value, min(max_value, n))
+
+
+def _clamp_summary_arg(name: str, value: int, default: int, min_value: int, max_value: int) -> int:
+    clamped = _clamp_int(value, default, min_value, max_value)
+    if clamped != int(value):
+        log(f"WARNING: {name} clamped from {value} to {clamped}")
+    return clamped
+
+
+def _extractive_summary_text(text: str, heading_path: list[str], max_chars: int) -> str:
+    """Deterministic page-router summary used when the LLM summarizer is unavailable."""
+    max_chars = max(200, int(max_chars or 1200))
+    lines = _strip_markdown_images(str(text or "").splitlines())
+    out: list[str] = []
+    heading = " > ".join(str(x).strip() for x in heading_path if str(x).strip())
+    if heading:
+        out.append(heading)
+
+    for raw in lines:
+        line = str(raw or "").strip()
+        if not line:
+            continue
+        line = re.sub(r"^#{1,6}\s+", "", line).strip()
+        line = re.sub(r"^>\s*", "", line).strip()
+        line = line.replace("**", "").replace("*", "")
+        line = re.sub(r"\s+", " ", line).strip()
+        if not line:
+            continue
+        if set(line) <= set("-:| "):
+            continue
+        if line not in out:
+            out.append(line)
+        if len(" ".join(out)) >= max_chars:
+            break
+
+    summary = " ".join(out).strip()
+    if len(summary) > max_chars:
+        cut = summary.rfind(" ", 0, max_chars)
+        summary = summary[: cut if cut > int(max_chars * 0.6) else max_chars].rstrip()
+    return summary
+
+
 def _token_count(text: str) -> int:
     return len(tokenize(text))
 
@@ -1142,6 +1903,9 @@ def main() -> int:
     ap.add_argument("--summary-max-input-chars", type=int, default=6000, help="Max chars per summary input")
     ap.add_argument("--summary-max-output-tokens", type=int, default=280, help="Max tokens per summary output")
     ap.add_argument("--summary-unit-max-tokens", type=int, default=900, help="Max tokens per summary unit (controls heading level)")
+    ap.add_argument("--summary-failure-limit", type=int, default=3, help="Disable LLM summaries after this many failures (0 = never disable)")
+    ap.add_argument("--summary-fallback-max-chars", type=int, default=1200, help="Max chars for extractive summary fallback")
+    ap.add_argument("--summary-no-fallback", action="store_true", help="Disable deterministic extractive summaries when LLM summaries fail")
     ap.add_argument("--chunk-max-chars-part", type=int, default=900, help="Max chars per fine-grained chunk (subsection)")
     ap.add_argument("--chunk-max-chars-section", type=int, default=2600, help="Max chars per section chunk")
     ap.add_argument("--chunk-max-chars-topic", type=int, default=5200, help="Max chars per topic chunk")
@@ -1156,6 +1920,30 @@ def main() -> int:
     ap.add_argument("--embedding-max-chars", type=int, default=448, help="Max characters per chunk sent for embedding")
     ap.add_argument("--embedding-batch-size", type=int, default=8, help="How many chunks to embed per request (lower = more stable)")
     ap.add_argument("--no-embeddings", action="store_true", help="Skip computing embeddings")
+    ap.add_argument("--audit", action="store_true", help="Run HTML export preflight audit before ingesting")
+    ap.add_argument("--audit-only", action="store_true", help="Run HTML export preflight audit and exit")
+    ap.add_argument("--audit-json", type=Path, default=None, help="Write full preflight audit report to this JSON file")
+    ap.add_argument("--broken-images-report", type=Path, default=None, help="Write broken image report as Markdown")
+    ap.add_argument("--strict-assets", action="store_true", help="Abort ingest when preflight audit finds missing/local file assets")
+    ap.add_argument(
+        "--repair-image-source",
+        type=Path,
+        action="append",
+        default=[],
+        help="Directory or image file to search when repairing missing HTML image refs (can be repeated)",
+    )
+    ap.add_argument("--repair-images", action="store_true", help="Repair missing HTML image refs before ingesting")
+    ap.add_argument("--repair-images-only", action="store_true", help="Repair missing HTML image refs and exit")
+    ap.add_argument("--repair-images-dry-run", action="store_true", help="Report image repairs without writing files")
+    ap.add_argument("--repair-allow-ambiguous", action="store_true", help="Allow basename-only repair when multiple candidates match")
+    ap.add_argument("--repair-report-json", type=Path, default=None, help="Write image repair report to this JSON file")
+    ap.add_argument(
+        "--pdf-md-dir",
+        type=Path,
+        default=None,
+        help="Write PDF->Markdown diagnostic sidecars to this directory (not indexed)",
+    )
+    ap.add_argument("--pdf-md-only", action="store_true", help="Write PDF->Markdown sidecars and exit")
     ap.add_argument("--clean", action="store_true", help="Delete existing out-dir before ingesting")
     args = ap.parse_args()
 
@@ -1175,12 +1963,37 @@ def main() -> int:
     md_conventions_hash: str | None = None
     summary_enabled: bool = bool(args.summary_enabled)
     summary_model: str = str(args.summary_model or "").strip()
-    summary_max_input_chars: int = int(args.summary_max_input_chars)
-    summary_max_output_tokens: int = int(args.summary_max_output_tokens)
-    summary_unit_max_tokens: int = int(args.summary_unit_max_tokens)
+    summary_max_input_chars: int = _clamp_summary_arg(
+        "--summary-max-input-chars",
+        int(args.summary_max_input_chars),
+        6000,
+        SUMMARY_MAX_INPUT_CHARS_MIN,
+        SUMMARY_MAX_INPUT_CHARS_MAX,
+    )
+    summary_max_output_tokens: int = _clamp_summary_arg(
+        "--summary-max-output-tokens",
+        int(args.summary_max_output_tokens),
+        280,
+        SUMMARY_MAX_OUTPUT_TOKENS_MIN,
+        SUMMARY_MAX_OUTPUT_TOKENS_MAX,
+    )
+    summary_unit_max_tokens: int = _clamp_summary_arg(
+        "--summary-unit-max-tokens",
+        int(args.summary_unit_max_tokens),
+        900,
+        SUMMARY_UNIT_MAX_TOKENS_MIN,
+        SUMMARY_UNIT_MAX_TOKENS_MAX,
+    )
+    summary_failure_limit: int = max(0, int(args.summary_failure_limit))
+    summary_fallback_max_chars: int = int(args.summary_fallback_max_chars)
+    summary_fallback_enabled: bool = bool(summary_enabled and not args.summary_no_fallback)
     chunk_max_chars_part: int = int(args.chunk_max_chars_part)
     chunk_max_chars_section: int = int(args.chunk_max_chars_section)
     chunk_max_chars_topic: int = int(args.chunk_max_chars_topic)
+    audit_json_path: Path | None = args.audit_json
+    broken_images_report_path: Path | None = args.broken_images_report
+    repair_report_json_path: Path | None = args.repair_report_json
+    pdf_md_dir: Path | None = args.pdf_md_dir
 
     if source_store is not None:
         source_store = source_store.expanduser()
@@ -1191,6 +2004,70 @@ def main() -> int:
         if not docs_dir.exists():
             log(f"ERROR: docs dir not found: {docs_dir}")
             return 2
+
+    repair_requested = bool(args.repair_images or args.repair_images_only or repair_report_json_path)
+    if repair_requested:
+        repair_sources = [Path(p).expanduser() for p in (args.repair_image_source or [])]
+        if not repair_sources:
+            log("ERROR: --repair-images requires at least one --repair-image-source")
+            return 2
+        if source_store is not None and not args.repair_images_only:
+            log("WARNING: image repair edits --docs-dir while ingest input comes from --from-datastore.")
+        repair_report = repair_missing_images(
+            docs_dir,
+            repair_sources,
+            dry_run=bool(args.repair_images_dry_run),
+            allow_ambiguous=bool(args.repair_allow_ambiguous),
+        )
+        print_repair_report(repair_report)
+        if repair_report_json_path is not None:
+            repair_report_json_path = repair_report_json_path.expanduser()
+            repair_report_json_path.parent.mkdir(parents=True, exist_ok=True)
+            repair_report_json_path.write_text(json.dumps(repair_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            log(f"Image repair JSON written to {repair_report_json_path}")
+        if args.repair_images_only:
+            return 0 if bool(repair_report.get("ok")) else 1
+
+    audit_requested = bool(
+        args.audit
+        or args.audit_only
+        or args.strict_assets
+        or audit_json_path
+        or broken_images_report_path
+    )
+    if audit_requested:
+        if not docs_dir.exists():
+            log(f"ERROR: docs dir not found for preflight audit: {docs_dir}")
+            return 2
+        if source_store is not None and not args.audit_only:
+            log("WARNING: HTML preflight audit uses --docs-dir while ingest input comes from --from-datastore.")
+        audit_report = audit_docs_dir(docs_dir)
+        print_audit_report(audit_report)
+        if audit_json_path is not None:
+            audit_json_path = audit_json_path.expanduser()
+            audit_json_path.parent.mkdir(parents=True, exist_ok=True)
+            audit_json_path.write_text(json.dumps(audit_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            log(f"Audit JSON written to {audit_json_path}")
+        if broken_images_report_path is not None:
+            write_broken_images_markdown_report(audit_report, broken_images_report_path)
+        audit_ok = bool(audit_report.get("ok"))
+        if args.audit_only:
+            return 0 if audit_ok else 1
+        if args.strict_assets and not audit_ok:
+            log("ERROR: preflight audit failed; fix missing/local file assets or rerun without --strict-assets.")
+            return 2
+
+    if args.pdf_md_only:
+        if not docs_dir.exists():
+            log(f"ERROR: docs dir not found for PDF markdown extraction: {docs_dir}")
+            return 2
+        pdf_sidecar_dir = pdf_md_dir or (out_dir / "pdf_markdown")
+        pdf_report = write_pdf_markdown_sidecars(docs_dir, pdf_sidecar_dir)
+        log(
+            f"PDF markdown sidecars: {pdf_report.get('written')}/{pdf_report.get('pdf_files')} "
+            f"written to {pdf_sidecar_dir}"
+        )
+        return 0 if bool(pdf_report.get("ok")) else 1
 
     if md_conventions_file is not None:
         md_conventions_file = md_conventions_file.expanduser()
@@ -1215,6 +2092,16 @@ def main() -> int:
     assets_out = out_dir / "assets"
     pages_out.mkdir(parents=True, exist_ok=True)
     assets_out.mkdir(parents=True, exist_ok=True)
+
+    if pdf_md_dir is not None:
+        if not docs_dir.exists():
+            log(f"ERROR: docs dir not found for PDF markdown extraction: {docs_dir}")
+            return 2
+        pdf_report = write_pdf_markdown_sidecars(docs_dir, pdf_md_dir)
+        log(
+            f"PDF markdown sidecars: {pdf_report.get('written')}/{pdf_report.get('pdf_files')} "
+            f"written to {pdf_md_dir}"
+        )
 
     index_path = out_dir / "index.sqlite"
     conn = init_index(index_path)
@@ -1249,17 +2136,125 @@ def main() -> int:
     summary_rows: list[tuple[str, str, str, str, str, str, str | None, int]] = []
     summary_units = 0
     summary_total_tokens = 0
-    summary_active = summary_enabled and bool(summary_model)
+    summary_active = summary_enabled and (bool(summary_model) or summary_fallback_enabled)
+    summary_llm_active = summary_enabled and bool(summary_model)
     summary_failed = False
+    summary_llm_units = 0
+    summary_fallback_units = 0
+    summary_failed_units = 0
     if summary_enabled and not summary_model:
-        log("WARNING: summary enabled but --summary-model is empty; skipping summary index.")
-        summary_active = False
+        if summary_fallback_enabled:
+            log("WARNING: summary enabled but --summary-model is empty; using extractive summaries.")
+        else:
+            log("WARNING: summary enabled but --summary-model is empty; skipping summary index.")
+            summary_active = False
 
     published_edits: dict[tuple[str, str], str] = {}
     custom_pages: list[dict[str, Any]] = []
     if include_edits:
         published_edits = _load_published_edits(app_db_path, version)
         custom_pages = _load_custom_pages(app_db_path, version)
+
+    def add_summary_entries(
+        *,
+        doc_id: str,
+        page_id: str,
+        doc_title: str,
+        page_title: str,
+        md_text: str,
+        default_heading_path: list[str],
+        source_path: str,
+        anchor: str | None,
+    ) -> None:
+        nonlocal summary_active
+        nonlocal summary_llm_active
+        nonlocal summary_failed
+        nonlocal summary_units
+        nonlocal summary_total_tokens
+        nonlocal summary_llm_units
+        nonlocal summary_fallback_units
+        nonlocal summary_failed_units
+
+        if not summary_active:
+            return
+
+        sections = split_markdown_for_summary(
+            md_text,
+            doc_title=doc_title,
+            page_title=page_title,
+            unit_max_tokens=summary_unit_max_tokens,
+        )
+        if sections:
+            mode = "llm" if summary_llm_active else "extractive"
+            log(f"  Summarizing {doc_id}/{page_id} ({len(sections)} sections, mode={mode})...")
+
+        for s_idx, sec in enumerate(sections):
+            raw_text = str(sec.get("text") or "").strip()
+            if not raw_text:
+                continue
+            sec_heading_path = sec.get("heading_path") or default_heading_path or [doc_title, page_title]
+            summary_text = ""
+            used_llm = False
+
+            if summary_llm_active:
+                summary_input = raw_text[:summary_max_input_chars] if summary_max_input_chars > 0 else raw_text
+                try:
+                    summary_text = _chat_completion(
+                        lmstudio_base_url,
+                        summary_model,
+                        summary_input,
+                        max_tokens=summary_max_output_tokens,
+                    ).strip()
+                    used_llm = True
+                except Exception as e:
+                    summary_failed = True
+                    summary_failed_units += 1
+                    log(f"WARNING: summary failed for {doc_id}/{page_id}: {e}")
+                    if summary_failure_limit > 0 and summary_failed_units >= summary_failure_limit:
+                        summary_llm_active = False
+                        log(
+                            "WARNING: LLM summaries disabled after "
+                            f"{summary_failed_units} failure(s); using extractive fallback."
+                        )
+
+            if not summary_text and summary_fallback_enabled:
+                summary_text = _extractive_summary_text(
+                    raw_text,
+                    [str(x) for x in sec_heading_path],
+                    summary_fallback_max_chars,
+                )
+                if summary_text:
+                    summary_fallback_units += 1
+            elif used_llm:
+                summary_llm_units += 1
+
+            if not summary_text:
+                continue
+
+            summary_id = f"{doc_id}:{page_id}:s{s_idx:03d}"
+            tokens = tokenize(summary_text)
+            dl = len(tokens)
+            if dl == 0:
+                continue
+            summary_units += 1
+            summary_total_tokens += dl
+            tf = Counter(tokens)
+            for term, term_tf in tf.items():
+                summary_postings_rows.append((term, summary_id, int(term_tf)))
+            for term in tf.keys():
+                summary_df_counter[term] += 1
+            summary_rows.append(
+                (
+                    summary_id,
+                    doc_id,
+                    page_id,
+                    json.dumps(sec_heading_path, ensure_ascii=False),
+                    summary_text,
+                    source_path,
+                    anchor,
+                    dl,
+                )
+            )
 
     seen_pages: set[tuple[str, str]] = set()
 
@@ -1300,61 +2295,16 @@ def main() -> int:
                     md_text = edit_text
                 images = markdown_images(md_text)
 
-                if summary_active:
-                    sections = split_markdown_for_summary(
-                        md_text,
-                        doc_title=doc_title,
-                        page_title=page_title,
-                        unit_max_tokens=summary_unit_max_tokens,
-                    )
-                    if sections:
-                        log(f"  Summarizing {doc_id}/{page_id} ({len(sections)} sections)...")
-                    for s_idx, sec in enumerate(sections):
-                        raw_text = str(sec.get("text") or "").strip()
-                        if not raw_text:
-                            continue
-                        summary_input = raw_text[:summary_max_input_chars] if summary_max_input_chars > 0 else raw_text
-                        try:
-                            summary_text = _chat_completion(
-                                lmstudio_base_url,
-                                summary_model,
-                                summary_input,
-                                max_tokens=summary_max_output_tokens,
-                            ).strip()
-                        except Exception as e:
-                            log(f"WARNING: summary failed for {doc_id}/{page_id}: {e}")
-                            summary_active = False
-                            summary_failed = True
-                            break
-                        if not summary_text:
-                            continue
-                        summary_id = f"{doc_id}:{page_id}:s{s_idx:03d}"
-                        sec_heading_path = sec.get("heading_path") or [doc_title, page_title]
-                        tokens = tokenize(summary_text)
-                        dl = len(tokens)
-                        if dl == 0:
-                            continue
-                        summary_units += 1
-                        summary_total_tokens += dl
-                        tf = Counter(tokens)
-                        for term, term_tf in tf.items():
-                            summary_postings_rows.append((term, summary_id, int(term_tf)))
-                        for term in tf.keys():
-                            summary_df_counter[term] += 1
-                        summary_rows.append(
-                            (
-                                summary_id,
-                                doc_id,
-                                page_id,
-                                json.dumps(sec_heading_path, ensure_ascii=False),
-                                summary_text,
-                                source_path,
-                                anchor,
-                                dl,
-                            )
-                        )
-                    if not summary_active:
-                        log("WARNING: summary disabled after failure; continuing without summary index.")
+                add_summary_entries(
+                    doc_id=doc_id,
+                    page_id=page_id,
+                    doc_title=doc_title,
+                    page_title=page_title,
+                    md_text=md_text,
+                    default_heading_path=list(heading_path or [doc_title, page_title]),
+                    source_path=source_path,
+                    anchor=anchor,
+                )
 
                 md_path = pages_out / doc_id / f"{page_id}.md"
                 md_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1463,61 +2413,16 @@ def main() -> int:
             if edit_text:
                 md_text = edit_text
 
-            if summary_active:
-                sections = split_markdown_for_summary(
-                    md_text,
-                    doc_title=doc_title,
-                    page_title=page_title,
-                    unit_max_tokens=summary_unit_max_tokens,
-                )
-                if sections:
-                    log(f"  Summarizing {doc_id}/{page_id} ({len(sections)} sections)...")
-                for s_idx, sec in enumerate(sections):
-                    raw_text = str(sec.get("text") or "").strip()
-                    if not raw_text:
-                        continue
-                    summary_input = raw_text[:summary_max_input_chars] if summary_max_input_chars > 0 else raw_text
-                    try:
-                        summary_text = _chat_completion(
-                            lmstudio_base_url,
-                            summary_model,
-                            summary_input,
-                            max_tokens=summary_max_output_tokens,
-                        ).strip()
-                    except Exception as e:
-                        log(f"WARNING: summary failed for {doc_id}/{page_id}: {e}")
-                        summary_active = False
-                        summary_failed = True
-                        break
-                    if not summary_text:
-                        continue
-                    summary_id = f"{doc_id}:{page_id}:s{s_idx:03d}"
-                    heading_path = sec.get("heading_path") or [doc_title, page_title]
-                    tokens = tokenize(summary_text)
-                    dl = len(tokens)
-                    if dl == 0:
-                        continue
-                    summary_units += 1
-                    summary_total_tokens += dl
-                    tf = Counter(tokens)
-                    for term, term_tf in tf.items():
-                        summary_postings_rows.append((term, summary_id, int(term_tf)))
-                    for term in tf.keys():
-                        summary_df_counter[term] += 1
-                    summary_rows.append(
-                        (
-                            summary_id,
-                            doc_id,
-                            page_id,
-                            json.dumps(heading_path, ensure_ascii=False),
-                            summary_text,
-                            html_rel,
-                            "pagetitle",
-                            dl,
-                        )
-                    )
-                if not summary_active:
-                    log("WARNING: summary disabled after failure; continuing without summary index.")
+            add_summary_entries(
+                doc_id=doc_id,
+                page_id=page_id,
+                doc_title=doc_title,
+                page_title=page_title,
+                md_text=md_text,
+                default_heading_path=list(heading_path or [doc_title, page_title]),
+                source_path=html_rel,
+                anchor="pagetitle",
+            )
 
             md_path = pages_out / doc_id / f"{page_id}.md"
             md_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1604,61 +2509,16 @@ def main() -> int:
         if not md_text.strip():
             md_text = f"# {page_title}\n\n"
 
-        if summary_active:
-            sections = split_markdown_for_summary(
-                md_text,
-                doc_title=doc_title,
-                page_title=page_title,
-                unit_max_tokens=summary_unit_max_tokens,
-            )
-            if sections:
-                log(f"  Summarizing {doc_id}/{page_id} ({len(sections)} sections)...")
-            for s_idx, sec in enumerate(sections):
-                raw_text = str(sec.get("text") or "").strip()
-                if not raw_text:
-                    continue
-                summary_input = raw_text[:summary_max_input_chars] if summary_max_input_chars > 0 else raw_text
-                try:
-                    summary_text = _chat_completion(
-                        lmstudio_base_url,
-                        summary_model,
-                        summary_input,
-                        max_tokens=summary_max_output_tokens,
-                    ).strip()
-                except Exception as e:
-                    log(f"WARNING: summary failed for {doc_id}/{page_id}: {e}")
-                    summary_active = False
-                    summary_failed = True
-                    break
-                if not summary_text:
-                    continue
-                summary_id = f"{doc_id}:{page_id}:s{s_idx:03d}"
-                sec_heading_path = sec.get("heading_path") or heading_path
-                tokens = tokenize(summary_text)
-                dl = len(tokens)
-                if dl == 0:
-                    continue
-                summary_units += 1
-                summary_total_tokens += dl
-                tf = Counter(tokens)
-                for term, term_tf in tf.items():
-                    summary_postings_rows.append((term, summary_id, int(term_tf)))
-                for term in tf.keys():
-                    summary_df_counter[term] += 1
-                summary_rows.append(
-                    (
-                        summary_id,
-                        doc_id,
-                        page_id,
-                        json.dumps(sec_heading_path, ensure_ascii=False),
-                        summary_text,
-                        source_path,
-                        anchor,
-                        dl,
-                    )
-                )
-            if not summary_active:
-                log("WARNING: summary disabled after failure; continuing without summary index.")
+        add_summary_entries(
+            doc_id=doc_id,
+            page_id=page_id,
+            doc_title=doc_title,
+            page_title=page_title,
+            md_text=md_text,
+            default_heading_path=list(heading_path or [doc_title, page_title]),
+            source_path=source_path,
+            anchor=anchor,
+        )
 
         chunks = semantic_chunk_markdown(
             md_text,
@@ -1707,12 +2567,15 @@ def main() -> int:
             )
         seen_pages.add((doc_id, page_id))
 
-    if summary_failed:
+    if summary_failed and not summary_fallback_enabled:
         summary_rows = []
         summary_postings_rows = []
         summary_df_counter = Counter()
         summary_units = 0
         summary_total_tokens = 0
+        summary_llm_units = 0
+        summary_fallback_units = 0
+        log("WARNING: summary index discarded after LLM failure because extractive fallback is disabled.")
 
     pages_jsonl.close()
 
@@ -1722,6 +2585,12 @@ def main() -> int:
 
     avgdl = total_tokens / n_chunks
     log(f"Indexing {n_chunks} chunks (avgdl={avgdl:.2f}) ...")
+    if summary_enabled:
+        log(
+            "Summary units: "
+            f"{summary_units} total, {summary_llm_units} llm, "
+            f"{summary_fallback_units} extractive, {summary_failed_units} llm failure(s)."
+        )
 
     embedding_model_id = None
     embedding_dim = None
@@ -1841,6 +2710,12 @@ def main() -> int:
                     ("summary_max_input_chars", str(int(summary_max_input_chars))),
                     ("summary_max_output_tokens", str(int(summary_max_output_tokens))),
                     ("summary_unit_max_tokens", str(int(summary_unit_max_tokens))),
+                    ("summary_failure_limit", str(int(summary_failure_limit))),
+                    ("summary_llm_failures", str(int(summary_failed_units))),
+                    ("summary_llm_units", str(int(summary_llm_units))),
+                    ("summary_fallback_enabled", "1" if summary_fallback_enabled else "0"),
+                    ("summary_fallback_units", str(int(summary_fallback_units))),
+                    ("summary_fallback_max_chars", str(int(summary_fallback_max_chars))),
                     ("chunk_max_chars_part", str(int(chunk_max_chars_part))),
                     ("chunk_max_chars_section", str(int(chunk_max_chars_section))),
                     ("chunk_max_chars_topic", str(int(chunk_max_chars_topic))),

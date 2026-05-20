@@ -54,6 +54,731 @@ _STOPWORDS = {
 }
 
 _GRANULARITY_WEIGHTS = {"p": 1.05, "s": 1.0, "t": 0.9}
+_DUPLICATE_GUIDE_DOCS = {
+    "luxriot-evo-global-administration-guide",
+    "luxriot-evo-standalone",
+}
+
+
+def _has_any(terms: set[str], candidates: set[str]) -> bool:
+    return bool(terms.intersection(candidates))
+
+
+def _text_has_any(text: str, candidates: tuple[str, ...]) -> bool:
+    hay = str(text or "").lower()
+    return any(candidate in hay for candidate in candidates)
+
+
+def expand_luxriot_query(query: str) -> str:
+    """Add Luxriot domain aliases for retrieval without changing the user prompt.
+
+    The manuals describe cameras primarily as devices/channels. Short support
+    questions often say "add camera", which otherwise ranks mobile "Stream camera"
+    pages above the actual Console device setup pages.
+    """
+    base = str(query or "").strip()
+    terms = set(tokenize(base))
+    additions: list[str] = []
+
+    camera_terms = {"camera", "cameras", "cam", "cams", "ipcamera", "webcam"}
+    device_action_terms = {
+        "add",
+        "adding",
+        "connect",
+        "connecting",
+        "configure",
+        "configuring",
+        "setup",
+        "set",
+        "install",
+        "register",
+        "attach",
+    }
+    license_terms = {
+        "activate",
+        "activation",
+        "deactivate",
+        "evaluation",
+        "license",
+        "licence",
+        "licensing",
+        "trial",
+    }
+    install_terms = {
+        "install",
+        "installation",
+        "initialize",
+        "initialization",
+        "migration",
+        "prerequisite",
+        "prerequisites",
+        "uninstall",
+        "update",
+        "upgrade",
+    }
+    storage_terms = {
+        "archive",
+        "backup",
+        "disk",
+        "drive",
+        "record",
+        "recording",
+        "recordings",
+        "retention",
+        "schedule",
+        "storage",
+    }
+    user_terms = {
+        "access",
+        "administrator",
+        "admin",
+        "ldap",
+        "oauth",
+        "permission",
+        "permissions",
+        "role",
+        "roles",
+        "user",
+        "users",
+    }
+    integration_terms = {
+        "gallagher",
+        "integriti",
+        "modbus",
+        "mqtt",
+        "opc",
+        "satel",
+    }
+    export_terms = {
+        "audit",
+        "bookmark",
+        "bookmarks",
+        "export",
+        "report",
+        "reports",
+        "snapshot",
+        "snapshots",
+        "vca",
+    }
+    layout_terms = {"layout", "layouts", "map", "maps", "videowall", "webpage", "webpages"}
+
+    if _has_any(terms, camera_terms):
+        additions.append("device devices channel channels video source IP camera network camera")
+    if _has_any(terms, camera_terms) and _has_any(terms, device_action_terms):
+        additions.append(
+            "Add Devices Manually Add Devices Using Autodiscovery Add single device "
+            "Device Autodiscovery + New device Configuration Devices"
+        )
+    if "onvif" in terms:
+        additions.append("ONVIF Compatible ONVIF driver device model generic autodiscovery")
+    if _has_any(terms, {"show", "view", "display", "live"}):
+        additions.append("Luxriot EVO Monitor Resources channels live view drag and drop")
+    if _has_any(terms, {"folder", "folders"}) or _text_has_any(
+        base,
+        ("папк", "фолдер", "магазин", "магазине", "админ", "администратор", "доступ"),
+    ):
+        additions.append(
+            "Purpose and Operation Description of Folders folder folders folder tree "
+            "Creating Folders Moving resources Granting access rights Folder access "
+            "User access Configuration Users parent folder subfolders Link folder"
+        )
+    if _text_has_any(base, ("лиценз", "активац", "пробн")):
+        additions.append(
+            "License Activation Online Activation Offline Activation Evaluation License "
+            "Trial License Activation Management license key activation file"
+        )
+    if _text_has_any(base, ("установ", "обнов", "миграц", "инициал", "предвар", "удал")):
+        additions.append(
+            "Getting Started Prerequisites installation initialization Console installation "
+            "software update uninstall remote upgrade migration database import"
+        )
+    if _has_any(terms, {"disk", "drive", "retention"}) or _text_has_any(
+        base,
+        ("диск", "хранилищ", "архив", "запис", "бэкап", "резерв", "retention"),
+    ):
+        additions.append(
+            "Prerequisites recording locations RAID free space system disk not recommended "
+            "indexing defragmentation Storage archive recording configurations retention disk space"
+        )
+    if _has_any(terms, storage_terms) and _has_any(
+        terms,
+        {"defragmentation", "disk", "free", "indexing", "minimum", "raid", "recommendations", "recommended", "space", "system"},
+    ):
+        additions.append(
+            "Prerequisites recording storage recommendations RAID free space recording location "
+            "system disk not recommended indexing defragmentation"
+        )
+    if "installation" in terms and "wizard" in terms and _has_any(terms, {"component", "optional"}):
+        additions.append("Standalone Installation installation wizard optional component Luxriot EVO Monitor")
+    if _has_any(terms, {"license", "licence", "licensing"}) and _has_any(
+        terms,
+        {"channel", "channels", "discontinued", "free", "type", "types"},
+    ):
+        additions.append(
+            "License Activation license channel types video channels VA CrossLink data channels "
+            "free Luxriot EVO license discontinued version 1.22.0"
+        )
+    if "offline" in terms and "activation" in terms:
+        additions.append("Offline Activation three steps system.bin license.dat activation file")
+    if _has_any(terms, {"upgrade", "upgrading", "uninstall"}) and _has_any(
+        terms,
+        {"files", "locked", "process", "retry", "use"},
+    ):
+        additions.append("Software Update and Uninstall files in use locked process Abort Retry Ignore")
+    if _has_any(terms, {"upgrade", "upgrading"}) and _has_any(terms, {"before", "checks", "recommended"}):
+        additions.append("Software Update and Uninstall before starting software upgrade checks Windows updates backup")
+    if _has_any(terms, {"administrator", "ldap", "oauth", "permission", "permissions", "role", "roles"}) or _text_has_any(
+        base,
+        ("пользоват", "админ", "доступ", "прав", "роль", "ldap", "oauth"),
+    ):
+        additions.append(
+            "User Management Permissions and Membership Active Directory LDAP "
+            "Anonymous User Two Factor Authentication OAuth Folder access Temporary Permissions"
+        )
+    if "modbus" in terms:
+        additions.append("Modbus setup Modbus functionality Modbus TCP register connection device data")
+    elif "mqtt" in terms:
+        additions.append("MQTT setup MQTT broker topic connection external services data source")
+    elif "opc" in terms:
+        additions.append("OPC Client OPC functionality OPC server connection external services data source")
+    elif "gallagher" in terms:
+        additions.append("Gallagher security system connection controller access control configuration")
+    elif "integriti" in terms:
+        additions.append("Inner Range Integriti security system access control configuration")
+    elif "satel" in terms:
+        additions.append("Satel INTEGRA security system integration configuration")
+    elif _has_any(terms, integration_terms) or _text_has_any(
+        base,
+        ("модбас", "интеграц", "сател", "охран", "безопасн"),
+    ):
+        additions.append(
+            "External Services Data Sources Security Systems Modbus MQTT OPC Gallagher "
+            "Inner Range Integriti Satel external metadata"
+        )
+    if _has_any(terms, export_terms) or _text_has_any(
+        base,
+        ("отчет", "отчёт", "экспорт", "снимок", "заклад", "аудит"),
+    ):
+        additions.append(
+            "Reports Audit VCA reports Video Snapshot Export Case Export Bookmarks "
+            "library export report generation"
+        )
+    if _has_any(terms, layout_terms) or _text_has_any(base, ("расклад", "карта", "видеостен", "веб-страниц")):
+        additions.append(
+            "Layouts layout templates manage layouts Maps manage maps Webpages Video Wall "
+            "visual groups user buttons live view"
+        )
+
+    if not additions:
+        return base
+
+    seen = set(terms)
+    extra_tokens: list[str] = []
+    for text in additions:
+        for token in tokenize(text):
+            if token in seen:
+                continue
+            seen.add(token)
+            extra_tokens.append(token)
+    if not extra_tokens:
+        return base
+    return f"{base}\nRelated Luxriot terms: {' '.join(extra_tokens)}"
+
+
+def luxriot_summary_queries(query: str, retrieval_query: str) -> list[str]:
+    """Build facet queries for the page-level summary router.
+
+    The summary index is useful as a coarse page gate, but a single short user
+    question can contain several workflow facets: add the camera in Console,
+    choose ONVIF/model settings, then view the channel in Monitor. Separate
+    queries keep one facet from crowding out the others before chunk retrieval.
+    """
+    base = str(retrieval_query or query or "").strip()
+    if not base:
+        return []
+
+    terms = set(tokenize(f"{query}\n{retrieval_query}"))
+    out: list[str] = [base]
+    camera_terms = {"camera", "cameras", "cam", "cams", "ipcamera", "webcam"}
+    device_action_terms = {
+        "add",
+        "adding",
+        "connect",
+        "connecting",
+        "configure",
+        "configuring",
+        "setup",
+        "set",
+        "install",
+        "register",
+        "attach",
+    }
+    monitor_terms = {"show", "view", "display", "live"}
+    license_terms = {
+        "activate",
+        "activation",
+        "deactivate",
+        "evaluation",
+        "license",
+        "licence",
+        "licensing",
+        "trial",
+    }
+    install_terms = {
+        "install",
+        "installation",
+        "initialize",
+        "initialization",
+        "migration",
+        "prerequisite",
+        "prerequisites",
+        "uninstall",
+        "update",
+        "upgrade",
+    }
+    storage_terms = {
+        "archive",
+        "backup",
+        "disk",
+        "drive",
+        "record",
+        "recording",
+        "recordings",
+        "retention",
+        "schedule",
+        "storage",
+    }
+    user_terms = {
+        "administrator",
+        "ldap",
+        "oauth",
+        "permission",
+        "permissions",
+        "role",
+        "roles",
+    }
+    integration_terms = {
+        "gallagher",
+        "integriti",
+        "modbus",
+        "mqtt",
+        "opc",
+        "satel",
+    }
+    export_terms = {
+        "audit",
+        "bookmark",
+        "bookmarks",
+        "export",
+        "report",
+        "reports",
+        "snapshot",
+        "snapshots",
+        "vca",
+    }
+    layout_terms = {"layout", "layouts", "map", "maps", "videowall", "webpage", "webpages"}
+
+    if _has_any(terms, camera_terms) and _has_any(terms, device_action_terms):
+        out.append(
+            "Luxriot EVO Console Add Devices Manually Add single device "
+            "Add Devices Using Autodiscovery Device Autodiscovery + New device "
+            "Configuration Devices channels"
+        )
+    if "onvif" in terms:
+        out.append("Manage Devices Device Drivers Models ONVIF Driver ONVIF Compatible")
+    if _has_any(terms, monitor_terms):
+        out.append(
+            "Luxriot EVO Monitor Live View Section Left Resources channels "
+            "layout templates drag and drop double-click connected servers"
+        )
+    if _has_any(terms, {"folder", "folders"}):
+        out.append(
+            "Purpose and Operation Description of Folders Creating Folders "
+            "Moving resources Granting access rights Folder access User access "
+            "Configuration Users folder tree subfolders link folder"
+        )
+    if _has_any(terms, license_terms):
+        out.append(
+            "License Activation Online Activation Offline Activation Evaluation License "
+            "Trial License Activation Management"
+        )
+    if _has_any(terms, install_terms):
+        out.append(
+            "Getting Started Prerequisites installation initialization Console installation "
+            "software update uninstall remote upgrade migration database import"
+        )
+    if _has_any(terms, storage_terms):
+        out.append(
+            "Storage archive recording profiles policies assign recording configurations "
+            "Archive Backup retention schedule disk space"
+        )
+    if _has_any(terms, user_terms):
+        out.append(
+            "User Management Permissions and Membership Active Directory LDAP "
+            "Anonymous User Two Factor Authentication OAuth Folder access Temporary Permissions"
+        )
+    if _has_any(terms, integration_terms):
+        out.append(
+            "External Services Data Sources Security Systems Modbus MQTT OPC Gallagher "
+            "Inner Range Integriti Satel external metadata"
+        )
+    if _has_any(terms, export_terms):
+        out.append(
+            "Reports Audit VCA reports Video Snapshot Export Case Export Bookmarks "
+            "library export report generation"
+        )
+    if _has_any(terms, layout_terms):
+        out.append(
+            "Layouts layout templates manage layouts Maps manage maps Webpages Video Wall "
+            "visual groups user buttons live view"
+        )
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for q in out:
+        key = " ".join(tokenize(q))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(q)
+    return deduped
+
+
+def _workflow_page_cap(query_terms: set[str], configured_max_per_page: int) -> int:
+    if _has_any(query_terms, {"folder", "folders"}):
+        return max(int(configured_max_per_page or 0), 12)
+
+    camera_terms = {"camera", "cameras", "cam", "cams", "ipcamera", "webcam"}
+    workflow_terms = {
+        "add",
+        "adding",
+        "connect",
+        "connecting",
+        "configure",
+        "configuring",
+        "setup",
+        "install",
+        "register",
+        "attach",
+        "monitor",
+        "show",
+        "view",
+        "display",
+        "live",
+    }
+    if not (_has_any(query_terms, camera_terms) and _has_any(query_terms, workflow_terms)):
+        return int(configured_max_per_page or 0)
+    if configured_max_per_page <= 0:
+        return 3
+    return min(int(configured_max_per_page), 3)
+
+
+def _intent_page_multiplier(page_id: str, heading_path: list[str], query_terms: set[str]) -> float:
+    camera_terms = {"camera", "cameras", "cam", "cams", "ipcamera", "webcam"}
+    device_action_terms = {
+        "add",
+        "adding",
+        "connect",
+        "connecting",
+        "configure",
+        "configuring",
+        "setup",
+        "install",
+        "register",
+        "attach",
+    }
+    mobile_terms = {"mobile", "phone", "ios", "android", "stream", "streaming"}
+    event_terms = {"event", "events", "rule", "rules", "trigger", "triggers", "analytics", "vca"}
+    monitor_terms = {"show", "view", "display", "live"}
+    folder_terms = {"folder", "folders"}
+    license_terms = {
+        "activate",
+        "activation",
+        "deactivate",
+        "evaluation",
+        "license",
+        "licence",
+        "licensing",
+        "trial",
+    }
+    install_terms = {
+        "credentials",
+        "initialized",
+        "install",
+        "installation",
+        "initialize",
+        "initialization",
+        "login",
+        "migration",
+        "port",
+        "prerequisite",
+        "prerequisites",
+        "server",
+        "uninstall",
+        "update",
+        "upgrade",
+        "wizard",
+    }
+    storage_terms = {
+        "archive",
+        "backup",
+        "disk",
+        "drive",
+        "record",
+        "recording",
+        "recordings",
+        "retention",
+        "schedule",
+        "storage",
+    }
+    user_terms = {
+        "administrator",
+        "ldap",
+        "oauth",
+        "permission",
+        "permissions",
+        "role",
+        "roles",
+    }
+    integration_terms = {
+        "gallagher",
+        "integriti",
+        "modbus",
+        "mqtt",
+        "opc",
+        "satel",
+    }
+    export_terms = {
+        "audit",
+        "bookmark",
+        "bookmarks",
+        "export",
+        "report",
+        "reports",
+        "snapshot",
+        "snapshots",
+        "vca",
+    }
+    layout_terms = {"layout", "layouts", "map", "maps", "videowall", "webpage", "webpages"}
+
+    wants_camera_setup = _has_any(query_terms, camera_terms) and _has_any(query_terms, device_action_terms)
+    wants_monitor_display = _has_any(query_terms, monitor_terms)
+    wants_folder_access = _has_any(query_terms, folder_terms)
+    wants_license = _has_any(query_terms, license_terms)
+    wants_install = _has_any(query_terms, install_terms)
+    wants_storage = _has_any(query_terms, storage_terms)
+    wants_users = _has_any(query_terms, user_terms)
+    wants_integration = _has_any(query_terms, integration_terms)
+    wants_export = _has_any(query_terms, export_terms)
+    wants_layout = _has_any(query_terms, layout_terms)
+    if not (
+        wants_camera_setup
+        or wants_monitor_display
+        or wants_folder_access
+        or wants_license
+        or wants_install
+        or wants_storage
+        or wants_users
+        or wants_integration
+        or wants_export
+        or wants_layout
+    ):
+        return 1.0
+
+    page = str(page_id or "").lower()
+    heading = " ".join(heading_path or []).lower()
+    mult = 1.0
+
+    if wants_camera_setup:
+        if page in {"adddevicesmanually", "adddevicesusingautodiscovery", "overviewofdevicesandchannels"}:
+            mult *= 1.45
+        elif page == "managedevices":
+            mult *= 1.25
+
+    if wants_monitor_display:
+        if page == "liveviewsection":
+            mult *= 1.8
+        elif page in {"interfaceoverview", "interfaceelements"}:
+            mult *= 1.6
+        elif page in {"layouts", "layouttemplates", "connections"}:
+            mult *= 1.3
+
+    if wants_folder_access:
+        if page == "wtffolders":
+            mult *= 2.5
+        elif page in {"modbus", "externalmetadata", "editionoverview", "prerequisites", "hardwarerequirements"}:
+            mult *= 0.25
+
+    if wants_license:
+        if page == "licenseactivation":
+            mult *= 1.75
+        if page == "offlineactivation" and "offline" in query_terms:
+            mult *= 2.2
+        if page == "onlineactivation" and "online" in query_terms:
+            mult *= 1.9
+        if page == "evaluationlicense" and _has_any(query_terms, {"evaluation", "trial"}):
+            mult *= 1.8
+        elif page == "evaluationlicense":
+            mult *= 0.55
+        if page == "evotriallicenseluxriot" and "trial" in query_terms:
+            mult *= 1.8
+        elif page == "evotriallicenseluxriot":
+            mult *= 0.7
+        if page == "activationmanagement" and _has_any(
+            query_terms,
+            {"manage", "management", "renew", "subscription", "upgrade", "wizard"},
+        ):
+            mult *= 1.45
+
+    if wants_install:
+        install_wizard_terms = {"component", "install", "installation", "optional", "path", "paths", "wizard"}
+        init_terms = {"credentials", "default", "initialized", "initialization", "login", "port", "server", "wizard"}
+        upgrade_terms = {"files", "renew", "subscription", "uninstall", "update", "upgrade"}
+        migration_terms = {"database", "db", "import", "migration", "vms", "xml"}
+        if page == "standaloneinstallation" and _has_any(query_terms, install_wizard_terms):
+            mult *= 2.0
+        elif page in {"globalinstallation", "recinstallation", "consoleinstallation"} and _has_any(
+            query_terms,
+            install_wizard_terms,
+        ):
+            mult *= 1.45
+        if page in {"standaloneinitialization", "globalinitialization", "recinitialization"} and _has_any(
+            query_terms,
+            init_terms,
+        ):
+            mult *= 1.65
+        if page == "softwareupdateuninstall" and _has_any(query_terms, upgrade_terms):
+            mult *= 1.8
+        if page == "remoteupgrade" and _has_any(query_terms, {"remote", "upgrade"}):
+            mult *= 1.9
+        if page in {"migrationfromvms", "dbimport"} and _has_any(query_terms, migration_terms):
+            mult *= 1.7
+        if page in {"gettingstarted", "prerequisites"} and _has_any(
+            query_terms,
+            {"getting", "prerequisite", "prerequisites", "requirements", "started"},
+        ):
+            mult *= 1.5
+
+    if wants_storage:
+        storage_recommendation_terms = {
+            "defrag",
+            "defragmentation",
+            "disk",
+            "free",
+            "indexing",
+            "minimum",
+            "raid",
+            "recommendation",
+            "recommendations",
+            "recommended",
+            "space",
+            "system",
+        }
+        wants_storage_recommendations = _has_any(query_terms, storage_recommendation_terms)
+        if page == "prerequisites" and wants_storage_recommendations:
+            mult *= 2.1
+        elif page in {
+            "storage",
+            "policies",
+            "freerecordingprofiles",
+            "assignrecordingconfigurations",
+            "archivebackup",
+            "create-schedules",
+        }:
+            mult *= 1.35
+            if wants_storage_recommendations:
+                mult *= 0.75
+
+    if wants_users:
+        if page in {
+            "standaloneusermanagement",
+            "usermanagement",
+            "activedirectory-ldap",
+            "permissionsandmembership",
+            "anonymoususer",
+            "2fauth",
+            "oauth",
+            "temporarypermissions",
+            "wtffolders",
+        }:
+            mult *= 1.75
+
+    if wants_integration:
+        exact_integration_pages = {"modbus", "mqtt", "opc", "gallagher", "inner-range-integriti"}
+        exact_page = None
+        for token, candidate_page in (
+            ("modbus", "modbus"),
+            ("mqtt", "mqtt"),
+            ("opc", "opc"),
+            ("gallagher", "gallagher"),
+            ("integriti", "inner-range-integriti"),
+        ):
+            if token in query_terms:
+                exact_page = candidate_page
+                break
+        if exact_page and page == exact_page:
+            mult *= 3.0
+        elif exact_page and page in exact_integration_pages:
+            mult *= 0.45
+        if page in {
+            "modbus",
+            "mqtt",
+            "opc",
+            "securitysystems",
+            "securitysystemsmonitor",
+            "gallagher",
+            "inner-range-integriti",
+            "externalservices",
+            "externalservicesoperation",
+            "externalmetadata",
+            "datasources",
+            "datasourcesdbs",
+            "camio",
+            "vcaevents",
+            "externalva",
+        }:
+            mult *= 1.8
+
+    if wants_export:
+        if page in {
+            "reports",
+            "audit",
+            "vcareports",
+            "vcareporting",
+            "videosnapshotexport",
+            "caseexport",
+            "bookmarks",
+            "librarysection",
+        }:
+            mult *= 1.75
+
+    if wants_layout:
+        if page in {
+            "layouts",
+            "layouttemplates",
+            "managelayouts",
+            "maps",
+            "managemaps",
+            "webpages",
+            "videowall",
+            "visual-groups",
+            "manageuserbuttons",
+            "userbuttons",
+            "liveviewsection",
+        }:
+            mult *= 1.6
+
+    if wants_camera_setup:
+        if page == "mobileapplicationforstreamingserver" and not _has_any(query_terms, mobile_terms):
+            mult *= 0.25
+        if page == "onvifgenericevents" and not _has_any(query_terms, event_terms):
+            mult *= 0.35
+        if page in {"add-events", "add-rules"} and not _has_any(query_terms, event_terms):
+            mult *= 0.4
+        if "external video analytics" in heading and not _has_any(query_terms, event_terms):
+            mult *= 0.5
+
+    return float(mult)
 
 
 def tokenize(text: str) -> list[str]:
@@ -487,6 +1212,50 @@ class SearchEngine:
             rank_factor = 1.0 - (idx / (len(priority) - 1))
         return 1.0 + boost * rank_factor
 
+    def _duplicate_guide_key(self, row: ChunkRow) -> tuple[str, str] | None:
+        if row.doc_id not in _DUPLICATE_GUIDE_DOCS:
+            return None
+        if not row.page_id:
+            return None
+        return ("evo-admin-vs-standalone", row.page_id)
+
+    def _duplicate_doc_preference(
+        self,
+        doc_id: str,
+        query_terms: set[str],
+        prio_map: dict[str, int],
+    ) -> float:
+        if "standalone" in query_terms and doc_id == "luxriot-evo-standalone":
+            return 1000.0
+        if "global" in query_terms and doc_id == "luxriot-evo-global-administration-guide":
+            return 1000.0
+        idx = prio_map.get(doc_id)
+        if idx is None:
+            return 0.0
+        return 100.0 - float(idx)
+
+    def _preferred_duplicate_docs(
+        self,
+        ranked: list[tuple[str, float]],
+        chunk_rows: dict[str, ChunkRow],
+        query_terms: set[str],
+        prio_map: dict[str, int],
+    ) -> dict[tuple[str, str], str]:
+        candidates: dict[tuple[str, str], tuple[float, float, str]] = {}
+        for cid, score in ranked:
+            row = chunk_rows.get(cid)
+            if not row:
+                continue
+            key = self._duplicate_guide_key(row)
+            if key is None:
+                continue
+            pref = self._duplicate_doc_preference(row.doc_id, query_terms, prio_map)
+            item = (pref, float(score), row.doc_id)
+            prev = candidates.get(key)
+            if prev is None or item > prev:
+                candidates[key] = item
+        return {key: doc_id for key, (_, _, doc_id) in candidates.items()}
+
     def _apply_dedupe(
         self,
         ranked: list[tuple[str, float]],
@@ -494,8 +1263,10 @@ class SearchEngine:
         k: int,
         max_per_page: int,
         max_per_doc: int,
+        preferred_duplicate_docs: dict[tuple[str, str], str] | None = None,
     ) -> list[tuple[str, float]]:
-        if max_per_page <= 0 and max_per_doc <= 0:
+        preferred_duplicate_docs = preferred_duplicate_docs or {}
+        if max_per_page <= 0 and max_per_doc <= 0 and not preferred_duplicate_docs:
             return ranked[:k]
         page_counts: Counter[tuple[str, str]] = Counter()
         doc_counts: Counter[str] = Counter()
@@ -504,6 +1275,11 @@ class SearchEngine:
             row = chunk_rows.get(cid)
             if not row:
                 continue
+            dup_key = self._duplicate_guide_key(row)
+            if dup_key is not None:
+                preferred_doc = preferred_duplicate_docs.get(dup_key)
+                if preferred_doc and row.doc_id != preferred_doc:
+                    continue
             page_key = (row.doc_id, row.page_id)
             if max_per_page > 0 and page_counts[page_key] >= max_per_page:
                 continue
@@ -643,6 +1419,7 @@ class SearchEngine:
         use_embeddings: bool,
         max_per_page: int,
         max_per_doc: int,
+        preferred_duplicate_docs: dict[tuple[str, str], str] | None = None,
         trace_out: list[dict[str, Any]] | None = None,
     ) -> list[tuple[str, float]]:
         if k <= 0:
@@ -697,11 +1474,17 @@ class SearchEngine:
         selected_ids: list[str] = []
         page_counts: Counter[tuple[str, str]] = Counter()
         doc_counts: Counter[str] = Counter()
+        preferred_duplicate_docs = preferred_duplicate_docs or {}
 
         def allowed(cid: str) -> bool:
             row = chunk_rows.get(cid)
             if not row:
                 return False
+            dup_key = self._duplicate_guide_key(row)
+            if dup_key is not None:
+                preferred_doc = preferred_duplicate_docs.get(dup_key)
+                if preferred_doc and row.doc_id != preferred_doc:
+                    return False
             page_key = (row.doc_id, row.page_id)
             if max_per_page > 0 and page_counts[page_key] >= max_per_page:
                 return False
@@ -959,6 +1742,7 @@ class SearchEngine:
         if mode not in ("bm25", "embedding", "hybrid"):
             raise ValueError(f"Unknown retrieval mode: {mode}")
 
+        retrieval_query = expand_luxriot_query(query)
         doc_priority = doc_priority or []
         prio_map = {d: i for i, d in enumerate(doc_priority)}
         mmr_enabled = bool(mmr_enabled)
@@ -967,7 +1751,10 @@ class SearchEngine:
         if cand_limit > 0:
             cand_limit = max(cand_limit, k)
         heading_boost = float(heading_boost or 0.0)
-        query_terms_for_heading = {t for t in tokenize(query) if t not in _STOPWORDS}
+        query_terms = set(tokenize(retrieval_query))
+        query_terms_for_heading = {t for t in query_terms if t not in _STOPWORDS}
+        configured_max_per_page = int(max_per_page or 0)
+        max_per_page = _workflow_page_cap(query_terms, configured_max_per_page)
         want_debug = debug_out is not None
         reranker_enabled = bool(reranker_enabled)
         reranker_top_k_val = int(reranker_top_k or 0) or 0
@@ -978,6 +1765,7 @@ class SearchEngine:
             debug_out.update(
                 {
                     "query": query,
+                    "retrieval_query": retrieval_query,
                     "mode": mode,
                     "k": int(k),
                     "doc_priority_boost": float(doc_priority_boost or 0.0),
@@ -990,7 +1778,11 @@ class SearchEngine:
                         "min_score": float(reranker_min_score_val),
                         "max_chars": int(reranker_max_chars_val),
                     },
-                    "dedupe": {"max_per_page": int(max_per_page or 0), "max_per_doc": int(max_per_doc or 0)},
+                    "dedupe": {
+                        "max_per_page": int(max_per_page or 0),
+                        "configured_max_per_page": int(configured_max_per_page or 0),
+                        "max_per_doc": int(max_per_doc or 0),
+                    },
                     "mmr": {
                         "enabled": bool(mmr_enabled),
                         "lambda": float(mmr_lambda),
@@ -1020,14 +1812,22 @@ class SearchEngine:
             summary_ready = self.summary_ready()
             if summary_ready:
                 summary_k_eff = summary_k_val if summary_k_val > 0 else max(k, 10)
-                summary_queries = [query] if query else []
+                summary_queries = luxriot_summary_queries(query, retrieval_query)
                 rrf_scores: dict[str, float] = {}
                 for q in summary_queries:
                     top, rows = self._summary_bm25_rank(q, summary_k_eff)
                     for sid, row in rows.items():
                         summary_rows.setdefault(sid, row)
                     for rank, (sid, _) in enumerate(top, start=1):
-                        rrf_scores[sid] = rrf_scores.get(sid, 0.0) + (1.0 / float(rrf_k + rank))
+                        row = rows.get(sid)
+                        intent_mult = (
+                            _intent_page_multiplier(row.page_id, row.heading_path, query_terms)
+                            if row is not None
+                            else 1.0
+                        )
+                        rrf_scores[sid] = rrf_scores.get(sid, 0.0) + (
+                            float(intent_mult) / float(rrf_k + rank)
+                        )
                 summary_top = sorted(rrf_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:summary_k_eff]
                 seen_pages: set[tuple[str, str]] = set()
                 for sid, score in summary_top:
@@ -1078,7 +1878,7 @@ class SearchEngine:
 
         if mode == "bm25":
             top, chunk_rows = self._bm25_rank(
-                query,
+                retrieval_query,
                 cand_limit if use_mmr and cand_limit else k,
                 allowed_pages=allowed_pages,
             )
@@ -1091,7 +1891,14 @@ class SearchEngine:
                 doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
                 heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
                 gran_mult = self._granularity_multiplier(cid)
-                score = float(bm25_score) * float(doc_mult) * float(heading_mult) * float(gran_mult)
+                intent_mult = _intent_page_multiplier(row.page_id, row.heading_path, query_terms)
+                score = (
+                    float(bm25_score)
+                    * float(doc_mult)
+                    * float(heading_mult)
+                    * float(gran_mult)
+                    * float(intent_mult)
+                )
                 adjusted.append((cid, float(score)))
                 if want_debug:
                     cand_debug[cid] = {
@@ -1103,13 +1910,14 @@ class SearchEngine:
                         "bm25": {"rank": int(rank), "score": float(bm25_score)},
                         "doc_priority_mult": float(doc_mult),
                         "heading_mult": float(heading_mult),
+                        "intent_mult": float(intent_mult),
                         "granularity": self._granularity_code(cid) or "legacy",
                         "granularity_mult": float(gran_mult),
                     }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
             if reranker_enabled:
                 adjusted = await self._rerank_candidates(
-                    query,
+                    retrieval_query,
                     adjusted,
                     chunk_rows,
                     model=str(reranker_model or ""),
@@ -1118,6 +1926,12 @@ class SearchEngine:
                     max_chars=reranker_max_chars_val or 0,
                     debug_out=debug_out if want_debug else None,
                 )
+            preferred_duplicate_docs = self._preferred_duplicate_docs(
+                adjusted,
+                chunk_rows,
+                query_terms,
+                prio_map,
+            )
             mmr_trace: list[dict[str, Any]] = []
             if use_mmr:
                 selected = self._mmr_select(
@@ -1128,10 +1942,18 @@ class SearchEngine:
                     use_embeddings=mmr_use_embeddings,
                     max_per_page=max_per_page,
                     max_per_doc=max_per_doc,
+                    preferred_duplicate_docs=preferred_duplicate_docs,
                     trace_out=mmr_trace if want_debug else None,
                 )
             else:
-                selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
+                selected = self._apply_dedupe(
+                    adjusted,
+                    chunk_rows,
+                    k,
+                    max_per_page,
+                    max_per_doc,
+                    preferred_duplicate_docs=preferred_duplicate_docs,
+                )
             results = self._rows_to_results(
                 selected,
                 chunk_rows,
@@ -1142,6 +1964,10 @@ class SearchEngine:
             if want_debug:
                 debug_out["candidates_count"] = int(len(adjusted))
                 debug_out["candidates_top"] = [cand_debug[cid] for cid, _ in adjusted[: min(50, len(adjusted))] if cid in cand_debug]
+                debug_out["duplicate_dedupe"] = [
+                    {"group": list(key), "preferred_doc_id": doc_id}
+                    for key, doc_id in sorted(preferred_duplicate_docs.items())
+                ][:50]
                 debug_out["mmr_trace"] = mmr_trace
                 debug_out["selected"] = []
                 for i, r in enumerate(results, start=1):
@@ -1163,7 +1989,7 @@ class SearchEngine:
                     "Embeddings mode requested but embeddings are not available. Re-run ingestion to build embeddings."
                 )
             top = await self._embedding_rank(
-                query,
+                retrieval_query,
                 k=max((cand_limit if use_mmr and cand_limit else k), 1),
                 allowed_pages=allowed_pages,
             )
@@ -1178,7 +2004,14 @@ class SearchEngine:
                 doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
                 heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
                 gran_mult = self._granularity_multiplier(cid)
-                score = float(emb_score) * float(doc_mult) * float(heading_mult) * float(gran_mult)
+                intent_mult = _intent_page_multiplier(row.page_id, row.heading_path, query_terms)
+                score = (
+                    float(emb_score)
+                    * float(doc_mult)
+                    * float(heading_mult)
+                    * float(gran_mult)
+                    * float(intent_mult)
+                )
                 adjusted.append((cid, float(score)))
                 if want_debug:
                     cand_debug[cid] = {
@@ -1190,13 +2023,14 @@ class SearchEngine:
                         "embedding": {"rank": int(rank), "score": float(emb_score)},
                         "doc_priority_mult": float(doc_mult),
                         "heading_mult": float(heading_mult),
+                        "intent_mult": float(intent_mult),
                         "granularity": self._granularity_code(cid) or "legacy",
                         "granularity_mult": float(gran_mult),
                     }
             adjusted.sort(key=lambda kv: (-kv[1], kv[0]))
             if reranker_enabled:
                 adjusted = await self._rerank_candidates(
-                    query,
+                    retrieval_query,
                     adjusted,
                     chunk_rows,
                     model=str(reranker_model or ""),
@@ -1205,6 +2039,12 @@ class SearchEngine:
                     max_chars=reranker_max_chars_val or 0,
                     debug_out=debug_out if want_debug else None,
                 )
+            preferred_duplicate_docs = self._preferred_duplicate_docs(
+                adjusted,
+                chunk_rows,
+                query_terms,
+                prio_map,
+            )
             mmr_trace: list[dict[str, Any]] = []
             if use_mmr:
                 selected = self._mmr_select(
@@ -1215,10 +2055,18 @@ class SearchEngine:
                     use_embeddings=mmr_use_embeddings,
                     max_per_page=max_per_page,
                     max_per_doc=max_per_doc,
+                    preferred_duplicate_docs=preferred_duplicate_docs,
                     trace_out=mmr_trace if want_debug else None,
                 )
             else:
-                selected = self._apply_dedupe(adjusted, chunk_rows, k, max_per_page, max_per_doc)
+                selected = self._apply_dedupe(
+                    adjusted,
+                    chunk_rows,
+                    k,
+                    max_per_page,
+                    max_per_doc,
+                    preferred_duplicate_docs=preferred_duplicate_docs,
+                )
             results = self._rows_to_results(
                 selected,
                 chunk_rows,
@@ -1229,6 +2077,10 @@ class SearchEngine:
             if want_debug:
                 debug_out["candidates_count"] = int(len(adjusted))
                 debug_out["candidates_top"] = [cand_debug[cid] for cid, _ in adjusted[: min(50, len(adjusted))] if cid in cand_debug]
+                debug_out["duplicate_dedupe"] = [
+                    {"group": list(key), "preferred_doc_id": doc_id}
+                    for key, doc_id in sorted(preferred_duplicate_docs.items())
+                ][:50]
                 debug_out["mmr_trace"] = mmr_trace
                 debug_out["selected"] = []
                 for i, r in enumerate(results, start=1):
@@ -1261,8 +2113,8 @@ class SearchEngine:
                 "embedding_candidates": int(embedding_candidates),
             }
 
-        bm25_top, _bm25_rows = self._bm25_rank(query, bm25_candidates, allowed_pages=allowed_pages)
-        emb_top = await self._embedding_rank(query, embedding_candidates, allowed_pages=allowed_pages)
+        bm25_top, _bm25_rows = self._bm25_rank(retrieval_query, bm25_candidates, allowed_pages=allowed_pages)
+        emb_top = await self._embedding_rank(retrieval_query, embedding_candidates, allowed_pages=allowed_pages)
 
         bm25_rank = {cid: i + 1 for i, (cid, _) in enumerate(bm25_top)}
         emb_rank = {cid: i + 1 for i, (cid, _) in enumerate(emb_top)}
@@ -1285,11 +2137,13 @@ class SearchEngine:
             row = chunk_rows.get(cid)
             doc_mult = 1.0
             heading_mult = 1.0
+            intent_mult = 1.0
             if row:
                 doc_mult = self._doc_priority_multiplier(row.doc_id, doc_priority, doc_priority_boost, prio_map)
                 heading_mult = self._heading_match_multiplier(row.heading_path, query_terms_for_heading, heading_boost)
+                intent_mult = _intent_page_multiplier(row.page_id, row.heading_path, query_terms)
             gran_mult = self._granularity_multiplier(cid)
-            score = float(base) * float(doc_mult) * float(heading_mult) * float(gran_mult)
+            score = float(base) * float(doc_mult) * float(heading_mult) * float(gran_mult) * float(intent_mult)
             combined.append((cid, float(score)))
             if want_debug and row:
                 cand_debug[cid] = {
@@ -1303,6 +2157,7 @@ class SearchEngine:
                     "embedding": {"rank": int(r_e) if r_e is not None else None, "score": emb_score.get(cid)},
                     "doc_priority_mult": float(doc_mult),
                     "heading_mult": float(heading_mult),
+                    "intent_mult": float(intent_mult),
                     "granularity": self._granularity_code(cid) or "legacy",
                     "granularity_mult": float(gran_mult),
                 }
@@ -1310,7 +2165,7 @@ class SearchEngine:
         combined.sort(key=lambda kv: (-kv[1], kv[0]))
         if reranker_enabled:
             combined = await self._rerank_candidates(
-                query,
+                retrieval_query,
                 combined,
                 chunk_rows,
                 model=str(reranker_model or ""),
@@ -1322,6 +2177,12 @@ class SearchEngine:
         mmr_trace: list[dict[str, Any]] = []
         if use_mmr:
             trimmed = combined[: (cand_limit if cand_limit else len(combined))]
+            preferred_duplicate_docs = self._preferred_duplicate_docs(
+                trimmed,
+                chunk_rows,
+                query_terms,
+                prio_map,
+            )
             selected = self._mmr_select(
                 trimmed,
                 chunk_rows,
@@ -1330,10 +2191,24 @@ class SearchEngine:
                 use_embeddings=mmr_use_embeddings,
                 max_per_page=max_per_page,
                 max_per_doc=max_per_doc,
+                preferred_duplicate_docs=preferred_duplicate_docs,
                 trace_out=mmr_trace if want_debug else None,
             )
         else:
-            selected = self._apply_dedupe(combined, chunk_rows, k, max_per_page, max_per_doc)
+            preferred_duplicate_docs = self._preferred_duplicate_docs(
+                combined,
+                chunk_rows,
+                query_terms,
+                prio_map,
+            )
+            selected = self._apply_dedupe(
+                combined,
+                chunk_rows,
+                k,
+                max_per_page,
+                max_per_doc,
+                preferred_duplicate_docs=preferred_duplicate_docs,
+            )
         results = self._rows_to_results(
             selected,
             chunk_rows,
@@ -1344,6 +2219,10 @@ class SearchEngine:
         if want_debug:
             debug_out["candidates_count"] = int(len(combined))
             debug_out["candidates_top"] = [cand_debug[cid] for cid, _ in combined[: min(50, len(combined))] if cid in cand_debug]
+            debug_out["duplicate_dedupe"] = [
+                {"group": list(key), "preferred_doc_id": doc_id}
+                for key, doc_id in sorted(preferred_duplicate_docs.items())
+            ][:50]
             debug_out["mmr_trace"] = mmr_trace
             debug_out["selected"] = []
             for i, r in enumerate(results, start=1):

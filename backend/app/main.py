@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -369,11 +370,84 @@ def auth_update_user(user_id: str, req: UserUpdateRequest, ctx: AuthContext = De
     )
 
 
+SUMMARY_MAX_INPUT_CHARS_MIN = 500
+SUMMARY_MAX_INPUT_CHARS_MAX = 8000
+SUMMARY_MAX_OUTPUT_TOKENS_MIN = 32
+SUMMARY_MAX_OUTPUT_TOKENS_MAX = 512
+SUMMARY_UNIT_MAX_TOKENS_MIN = 200
+SUMMARY_UNIT_MAX_TOKENS_MAX = 1600
+SUMMARY_K_MIN = 1
+SUMMARY_K_MAX = 50
+SUMMARY_MAX_PAGES_MIN = 1
+SUMMARY_MAX_PAGES_MAX = 100
+
+
+def _clamp_int(value: Any, default: int, min_value: int, max_value: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = int(default)
+    return max(min_value, min(max_value, n))
+
+
+def _normalize_summary_limits(summary: Any) -> dict[str, Any]:
+    if not isinstance(summary, dict):
+        return {}
+    out = dict(summary)
+    out["max_input_chars"] = _clamp_int(
+        out.get("max_input_chars"),
+        6000,
+        SUMMARY_MAX_INPUT_CHARS_MIN,
+        SUMMARY_MAX_INPUT_CHARS_MAX,
+    )
+    out["max_output_tokens"] = _clamp_int(
+        out.get("max_output_tokens"),
+        280,
+        SUMMARY_MAX_OUTPUT_TOKENS_MIN,
+        SUMMARY_MAX_OUTPUT_TOKENS_MAX,
+    )
+    out["unit_max_tokens"] = _clamp_int(
+        out.get("unit_max_tokens"),
+        900,
+        SUMMARY_UNIT_MAX_TOKENS_MIN,
+        SUMMARY_UNIT_MAX_TOKENS_MAX,
+    )
+    out["k"] = _clamp_int(out.get("k"), 12, SUMMARY_K_MIN, SUMMARY_K_MAX)
+    out["max_pages"] = _clamp_int(
+        out.get("max_pages"),
+        20,
+        SUMMARY_MAX_PAGES_MIN,
+        SUMMARY_MAX_PAGES_MAX,
+    )
+    return out
+
+
+def _normalize_retrieval_summary(settings: dict[str, Any]) -> dict[str, Any]:
+    out = dict(settings or {})
+    retrieval = out.get("retrieval")
+    if isinstance(retrieval, dict):
+        retrieval_out = dict(retrieval)
+        summary = retrieval_out.get("summary")
+        if isinstance(summary, dict):
+            retrieval_out["summary"] = _normalize_summary_limits(summary)
+            out["retrieval"] = retrieval_out
+    return out
+
+
+def _normalized_settings_bundle() -> dict[str, Any]:
+    bundle = get_settings_bundle()
+    return {
+        "defaults": _normalize_retrieval_summary(bundle.get("defaults", {})),
+        "settings": _normalize_retrieval_summary(bundle.get("settings", {})),
+        "effective": _normalize_retrieval_summary(bundle.get("effective", {})),
+    }
+
+
 def _job_defaults() -> dict[str, Any]:
     summary = {}
     embedding_model = ""
     try:
-        effective = get_settings_bundle()["effective"]
+        effective = _normalized_settings_bundle()["effective"]
         retrieval = effective.get("retrieval") if isinstance(effective.get("retrieval"), dict) else {}
         summary = retrieval.get("summary") if isinstance(retrieval.get("summary"), dict) else {}
         embedding_model = str(effective.get("embedding_model") or "")
@@ -390,9 +464,24 @@ def _job_defaults() -> dict[str, Any]:
         "include_edits": True,
         "summary_enabled": bool(summary.get("enabled", False)),
         "summary_model": str(summary.get("model") or "") or None,
-        "summary_max_input_chars": int(summary.get("max_input_chars", 6000) or 6000),
-        "summary_max_output_tokens": int(summary.get("max_output_tokens", 280) or 280),
-        "summary_unit_max_tokens": int(summary.get("unit_max_tokens", 900) or 900),
+        "summary_max_input_chars": _clamp_int(
+            summary.get("max_input_chars"),
+            6000,
+            SUMMARY_MAX_INPUT_CHARS_MIN,
+            SUMMARY_MAX_INPUT_CHARS_MAX,
+        ),
+        "summary_max_output_tokens": _clamp_int(
+            summary.get("max_output_tokens"),
+            280,
+            SUMMARY_MAX_OUTPUT_TOKENS_MIN,
+            SUMMARY_MAX_OUTPUT_TOKENS_MAX,
+        ),
+        "summary_unit_max_tokens": _clamp_int(
+            summary.get("unit_max_tokens"),
+            900,
+            SUMMARY_UNIT_MAX_TOKENS_MIN,
+            SUMMARY_UNIT_MAX_TOKENS_MAX,
+        ),
     }
 
 
@@ -665,7 +754,7 @@ async def _run_reindex_job(job: dict[str, Any]) -> None:
 @app.get("/health")
 def health() -> dict[str, Any]:
     try:
-        effective = get_settings_bundle()["effective"]
+        effective = _normalized_settings_bundle()["effective"]
         retrieval = effective.get("retrieval") if isinstance(effective.get("retrieval"), dict) else {}
         retrieval_mode = str(retrieval.get("mode", "bm25"))
     except Exception:
@@ -715,14 +804,23 @@ async def admin_reindex_start(req: ReindexRequest, ctx: AuthContext = Depends(re
             embedding_model = str(req.embedding_model).strip() or None
         else:
             embedding_model = str(defaults.get("embedding_model") or "").strip() or None
-        summary_max_input_chars = (
-            int(req.summary_max_input_chars) if req.summary_max_input_chars is not None else int(defaults.get("summary_max_input_chars") or 6000)
+        summary_max_input_chars = _clamp_int(
+            req.summary_max_input_chars if req.summary_max_input_chars is not None else defaults.get("summary_max_input_chars"),
+            6000,
+            SUMMARY_MAX_INPUT_CHARS_MIN,
+            SUMMARY_MAX_INPUT_CHARS_MAX,
         )
-        summary_max_output_tokens = (
-            int(req.summary_max_output_tokens) if req.summary_max_output_tokens is not None else int(defaults.get("summary_max_output_tokens") or 280)
+        summary_max_output_tokens = _clamp_int(
+            req.summary_max_output_tokens if req.summary_max_output_tokens is not None else defaults.get("summary_max_output_tokens"),
+            280,
+            SUMMARY_MAX_OUTPUT_TOKENS_MIN,
+            SUMMARY_MAX_OUTPUT_TOKENS_MAX,
         )
-        summary_unit_max_tokens = (
-            int(req.summary_unit_max_tokens) if req.summary_unit_max_tokens is not None else int(defaults.get("summary_unit_max_tokens") or 900)
+        summary_unit_max_tokens = _clamp_int(
+            req.summary_unit_max_tokens if req.summary_unit_max_tokens is not None else defaults.get("summary_unit_max_tokens"),
+            900,
+            SUMMARY_UNIT_MAX_TOKENS_MIN,
+            SUMMARY_UNIT_MAX_TOKENS_MAX,
         )
 
         job: dict[str, Any] = {
@@ -781,14 +879,23 @@ async def admin_refresh_start(req: ReindexRequest, ctx: AuthContext = Depends(re
             embedding_model = str(req.embedding_model).strip() or None
         else:
             embedding_model = str(defaults.get("embedding_model") or "").strip() or None
-        summary_max_input_chars = (
-            int(req.summary_max_input_chars) if req.summary_max_input_chars is not None else int(defaults.get("summary_max_input_chars") or 6000)
+        summary_max_input_chars = _clamp_int(
+            req.summary_max_input_chars if req.summary_max_input_chars is not None else defaults.get("summary_max_input_chars"),
+            6000,
+            SUMMARY_MAX_INPUT_CHARS_MIN,
+            SUMMARY_MAX_INPUT_CHARS_MAX,
         )
-        summary_max_output_tokens = (
-            int(req.summary_max_output_tokens) if req.summary_max_output_tokens is not None else int(defaults.get("summary_max_output_tokens") or 280)
+        summary_max_output_tokens = _clamp_int(
+            req.summary_max_output_tokens if req.summary_max_output_tokens is not None else defaults.get("summary_max_output_tokens"),
+            280,
+            SUMMARY_MAX_OUTPUT_TOKENS_MIN,
+            SUMMARY_MAX_OUTPUT_TOKENS_MAX,
         )
-        summary_unit_max_tokens = (
-            int(req.summary_unit_max_tokens) if req.summary_unit_max_tokens is not None else int(defaults.get("summary_unit_max_tokens") or 900)
+        summary_unit_max_tokens = _clamp_int(
+            req.summary_unit_max_tokens if req.summary_unit_max_tokens is not None else defaults.get("summary_unit_max_tokens"),
+            900,
+            SUMMARY_UNIT_MAX_TOKENS_MIN,
+            SUMMARY_UNIT_MAX_TOKENS_MAX,
         )
 
         job: dict[str, Any] = {
@@ -845,7 +952,7 @@ def ui_index(request: Request) -> FileResponse:
 def admin_get_settings(ctx: AuthContext = Depends(resolve_auth)) -> dict[str, Any]:
     require_role(ctx, {"admin"})
     try:
-        return get_settings_bundle()
+        return _normalized_settings_bundle()
     except SettingsError as e:
         log.exception("Settings error")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -901,7 +1008,9 @@ def admin_update_settings(req: AdminSettingsUpdateRequest, ctx: AuthContext = De
                 "hash": _hash_text(text),
                 "updated_at": _utc_now(),
             }
-        return update_settings(req.settings)
+        req.settings = _normalize_retrieval_summary(req.settings)
+        update_settings(req.settings)
+        return _normalized_settings_bundle()
     except SettingsError as e:
         log.exception("Settings error")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -975,7 +1084,7 @@ def _resolve_doc_page(version: str, doc_id: str, page_id: str) -> tuple[dict[str
     if store.is_ready():
         try:
             page = store.get_page(doc_id, page_id)
-            md_text = store.read_markdown(page)
+            md_text = _sanitize_local_file_refs(store.read_markdown(page))
             images: list[PageImage] = []
             for img in page.images:
                 if not isinstance(img, dict):
@@ -1371,7 +1480,7 @@ def home_cards(
         )
     apply_auth_cookies(response, ctx)
     role = str(ctx.principal.role or "anonymous")
-    settings = get_settings_bundle()["effective"]
+    settings = _normalized_settings_bundle()["effective"]
     enabled, max_cards, pinned, show_top_guides = _get_home_cards_config(settings, role)
     if not enabled or max_cards <= 0:
         return HomeCardsResponse(cards=[])
@@ -1905,6 +2014,7 @@ def docs_page(
     except Exception:
         log.exception("Failed to load published doc edit")
     _, md_text = _split_front_matter_text(md_text)
+    md_text = _sanitize_local_file_refs(md_text)
 
     return DocPageResponse(
         version=ver,
@@ -1931,7 +2041,7 @@ def _get_effective_markdown(version: str, doc_id: str, page_id: str) -> tuple[di
             md_text = str(published["content_md"])
     except Exception:
         log.exception("Failed to load published doc edit for PDF export")
-    return meta, md_text
+    return meta, _sanitize_local_file_refs(md_text)
 
 
 def _can_edit_docs(ctx: AuthContext) -> bool:
@@ -2631,10 +2741,52 @@ def _doc_source_path(version: str, doc_id: str, page_id: str, source_rel: str | 
     return f"/docs/page/{doc_id}/{page_id}?version={version}"
 
 
+_LOCAL_FILE_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(file://[^)]+\)")
+_LOCAL_FILE_URI_RE = re.compile(r"file:///[^\s)>\"']+")
+
+
+def _sanitize_local_file_refs(text: str) -> str:
+    value = str(text or "")
+    if "file:///" not in value:
+        return value
+    value = _LOCAL_FILE_MD_IMAGE_RE.sub("", value)
+    value = _LOCAL_FILE_URI_RE.sub("", value)
+    value = re.sub(r"[ \t]+\n", "\n", value)
+    value = re.sub(r"\n{3,}", "\n\n", value)
+    return value.strip()
+
+
+def _score_filtered_results(results: list[dict[str, Any]], *, min_ratio: float = 0.5) -> list[dict[str, Any]]:
+    scored: list[float] = []
+    for r in results:
+        try:
+            score = float(r.get("score"))
+        except Exception:
+            continue
+        if score > 0.0 and math.isfinite(score):
+            scored.append(score)
+    if not scored:
+        return results
+    top = max(scored)
+    if top <= 0.0:
+        return results
+    floor = top * float(min_ratio)
+    out: list[dict[str, Any]] = []
+    for r in results:
+        try:
+            score = float(r.get("score"))
+        except Exception:
+            out.append(r)
+            continue
+        if score >= floor:
+            out.append(r)
+    return out or results[:1]
+
+
 def _build_citations(results: list[dict[str, Any]], version: str, max_citations: int) -> list[Citation]:
     seen: set[tuple[str, str]] = set()
     citations: list[Citation] = []
-    for r in results:
+    for r in _score_filtered_results(results):
         key = (r["doc_id"], r["page_id"])
         if key in seen:
             continue
@@ -2655,21 +2807,118 @@ def _build_citations(results: list[dict[str, Any]], version: str, max_citations:
     return citations
 
 
-def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageResult]:
+_INLINE_IMAGE_PREFIXES = (
+    "btn",
+    "icon",
+    "icons",
+    "hs-",
+    "hs_",
+)
+
+
+def _image_basename(url: str) -> str:
+    return str(url or "").rsplit("/", 1)[-1].split("?", 1)[0].split("#", 1)[0].lower()
+
+
+def _is_inline_doc_image(url: str) -> bool:
+    name = _image_basename(url)
+    if not name:
+        return True
+    stem = name.rsplit(".", 1)[0]
+    return any(stem.startswith(prefix) for prefix in _INLINE_IMAGE_PREFIXES)
+
+
+def _is_placeholder_image_context(row: dict[str, Any]) -> bool:
+    text = re.sub(r"\s+", " ", str(row.get("text") or "")).strip()
+    if not text:
+        return True
+    heading = re.sub(r"\s+", " ", " > ".join(str(x) for x in (row.get("heading_path") or []))).strip()
+    if heading and text == heading:
+        return True
+    tokens = re.findall(r"[A-Za-z0-9]+", text)
+    return len(tokens) < 5
+
+
+def _page_image_meta(
+    version: str,
+    doc_id: str,
+    page_id: str,
+    cache: dict[tuple[str, str], dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    key = (doc_id, page_id)
+    if key in cache:
+        return cache[key]
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        page = _get_docs_store(version).get_page(doc_id, page_id)
+    except Exception:
+        cache[key] = out
+        return out
+    for img in page.images:
+        if not isinstance(img, dict):
+            continue
+        url = str(img.get("url") or "").strip()
+        if not url:
+            continue
+        out[url] = img
+    cache[key] = out
+    return out
+
+
+def _filtered_result_image_urls(
+    row: dict[str, Any],
+    version: str,
+    meta_cache: dict[tuple[str, str], dict[str, dict[str, Any]]] | None = None,
+) -> list[str]:
+    if _is_placeholder_image_context(row):
+        return []
+    doc_id = str(row.get("doc_id") or "")
+    page_id = str(row.get("page_id") or "")
+    cache = meta_cache if meta_cache is not None else {}
+    page_meta = _page_image_meta(version, doc_id, page_id, cache)
+    out: list[str] = []
+    for raw in row.get("images") or []:
+        url = str(raw or "").strip()
+        if not url or not url.startswith("/assets/"):
+            continue
+        if _is_inline_doc_image(url):
+            continue
+        meta = page_meta.get(url) or {}
+        alt = str(meta.get("alt") or "").strip()
+        original = str(meta.get("original") or "").strip()
+        if original and _is_inline_doc_image(original):
+            continue
+        # Prefer screenshots with either surrounding text or their own caption/alt.
+        if not alt and len(re.findall(r"[A-Za-z0-9]+", str(row.get("text") or ""))) < 8:
+            continue
+        out.append(url)
+    return out
+
+
+def _build_images(results: list[dict[str, Any]], version: str, max_images: int) -> list[ImageResult]:
     urls: list[ImageResult] = []
     seen: set[str] = set()
-    for r in results:
+    meta_cache: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for r in _score_filtered_results(results):
+        doc_id = str(r["doc_id"])
+        page_id = str(r["page_id"])
+        page_meta = _page_image_meta(version, doc_id, page_id, meta_cache)
         near = (r.get("heading_path") or [None])[-1]
-        for url in r.get("images") or []:
+        for url in _filtered_result_image_urls(r, version, meta_cache):
             if url in seen:
                 continue
+            meta = page_meta.get(url) or {}
+            alt = str(meta.get("alt") or "").strip() or None
             seen.add(url)
             urls.append(
                 ImageResult(
                     url=url,
-                    doc_id=r["doc_id"],
-                    page_id=r["page_id"],
+                    doc_id=doc_id,
+                    page_id=page_id,
                     near_heading=near,
+                    alt=alt,
+                    source_chunk_id=str(r.get("chunk_id") or "") or None,
+                    score=float(r["score"]) if r.get("score") is not None else None,
                 )
             )
             if len(urls) >= max_images:
@@ -2679,6 +2928,7 @@ def _build_images(results: list[dict[str, Any]], max_images: int) -> list[ImageR
 
 def _build_context_chunks(results: list[dict[str, Any]], version: str) -> list[ContextChunk]:
     out: list[ContextChunk] = []
+    meta_cache: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
     for idx, r in enumerate(results, start=1):
         out.append(
             ContextChunk(
@@ -2689,7 +2939,7 @@ def _build_context_chunks(results: list[dict[str, Any]], version: str) -> list[C
                 heading_path=list(r.get("heading_path") or []),
                 anchor=r.get("anchor"),
                 source_path=_doc_source_path(version, r["doc_id"], r["page_id"], r.get("source_path")),
-                images=list(r.get("images") or []),
+                images=_filtered_result_image_urls(r, version, meta_cache),
                 score=float(r["score"]) if r.get("score") is not None else None,
             )
         )
@@ -2776,11 +3026,149 @@ def _build_context_text(results: list[dict[str, Any]], web_context_blocks: list[
     for i, r in enumerate(results, start=1):
         hp = " > ".join(r.get("heading_path") or [])
         source = f"{r['doc_id']}/{r['page_id']}"
-        context_blocks.append(f"[{i}] {source} | {hp}\n{r['text']}")
+        text = _sanitize_local_file_refs(str(r.get("text") or ""))
+        context_blocks.append(f"[{i}] {source} | {hp}\n{text}")
     if web_context_blocks:
         context_blocks.append("EXTERNAL WEB CONTEXT (not Luxriot EVO docs):")
         context_blocks.extend(web_context_blocks)
     return "\n\n---\n\n".join(context_blocks) if context_blocks else "(no matches)"
+
+
+_SESSION_QUERY_TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
+_SESSION_FOLLOWUP_TOKENS = {
+    "also",
+    "then",
+    "next",
+    "same",
+    "this",
+    "that",
+    "these",
+    "those",
+    "it",
+    "them",
+    "there",
+    "too",
+    "after",
+    "again",
+    "это",
+    "эта",
+    "этот",
+    "эти",
+    "там",
+    "туда",
+    "дальше",
+    "потом",
+    "затем",
+    "также",
+    "тоже",
+    "еще",
+    "ещё",
+    "его",
+    "ее",
+    "её",
+    "их",
+}
+_SESSION_BRIDGE_TOKENS = {
+    "monitor",
+    "show",
+    "display",
+    "view",
+    "live",
+    "open",
+    "configure",
+    "settings",
+    "монитор",
+    "показать",
+    "вывести",
+    "отобразить",
+    "настроить",
+    "настройки",
+}
+_SESSION_DOMAIN_TOKENS = {
+    "activation",
+    "admin",
+    "archive",
+    "backup",
+    "camera",
+    "cameras",
+    "export",
+    "folder",
+    "folders",
+    "installation",
+    "install",
+    "layout",
+    "license",
+    "map",
+    "modbus",
+    "monitor",
+    "mqtt",
+    "onvif",
+    "opc",
+    "permission",
+    "recording",
+    "report",
+    "snapshot",
+    "storage",
+    "upgrade",
+    "user",
+    "активация",
+    "админ",
+    "архив",
+    "камера",
+    "камеры",
+    "лицензия",
+    "модбас",
+    "монитор",
+    "отчет",
+    "отчёт",
+    "папка",
+    "папки",
+    "пользователь",
+    "права",
+    "хранилище",
+    "экспорт",
+}
+
+
+def _session_query_tokens(text: str) -> list[str]:
+    return _SESSION_QUERY_TOKEN_RE.findall(str(text or "").lower())
+
+
+def _looks_like_session_followup(message: str) -> bool:
+    tokens = _session_query_tokens(message)
+    if not tokens:
+        return False
+    token_set = set(tokens)
+    if token_set.intersection(_SESSION_FOLLOWUP_TOKENS):
+        return True
+    if token_set.intersection(_SESSION_BRIDGE_TOKENS):
+        return True
+    return len(tokens) <= 6 and not token_set.intersection(_SESSION_DOMAIN_TOKENS)
+
+
+def _build_session_retrieval_query(message: str, history: list[dict[str, Any]]) -> str:
+    current = str(message or "").strip()
+    if not current or not history or not _looks_like_session_followup(current):
+        return current
+
+    recent_user_messages: list[str] = []
+    for item in reversed(history):
+        if str(item.get("role") or "") != "user":
+            continue
+        text = str(item.get("content") or "").strip()
+        if not text or text == current:
+            continue
+        recent_user_messages.append(text)
+        if len(recent_user_messages) >= 3:
+            break
+
+    if not recent_user_messages:
+        return current
+
+    context = "\n".join(reversed(recent_user_messages))
+    if len(context) > 1200:
+        context = context[-1200:]
+    return f"{current}\nRecent user context:\n{context}"
 
 
 @app.post("/docs/search", response_model=SearchResponse, response_model_exclude_none=True)
@@ -2794,7 +3182,7 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
             detail=f"Search index not found for version '{ver}'. Run the ingestion CLI first.",
         )
 
-    settings = get_settings_bundle()["effective"]
+    settings = _normalized_settings_bundle()["effective"]
     retrieval = settings.get("retrieval") if isinstance(settings.get("retrieval"), dict) else {}
     max_citations = int(retrieval.get("max_citations", 8))
     max_images = int(retrieval.get("max_images", 6))
@@ -2888,13 +3276,13 @@ async def docs_search(req: SearchRequest, ctx: AuthContext = Depends(resolve_aut
             "doc_id": r["doc_id"],
             "page_id": r["page_id"],
             "heading_path": r["heading_path"],
-            "text": r["text"],
+            "text": _sanitize_local_file_refs(str(r["text"])),
             "score": r["score"],
         }
         for r in results
     ]
     citations = _build_citations(results, ver, max_citations=max_citations)
-    images = _build_images(results, max_images=max_images)
+    images = _build_images(results, ver, max_images=max_images)
     return SearchResponse(chunks=chunks, citations=citations, images=images, debug=debug)
 
 
@@ -2930,7 +3318,7 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
         session = app_db.create_session(owner_id=ctx.principal.owner_id, title=req.message[:60])
         session_id = session["session_id"]
 
-    settings = get_settings_bundle()["effective"]
+    settings = _normalized_settings_bundle()["effective"]
     required_placeholders = settings.get("required_placeholders")
     if not isinstance(required_placeholders, list):
         required_placeholders = ["context"]
@@ -2992,6 +3380,7 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
     reranker_max_chars = int(reranker.get("max_chars", 0) or 0) or 0
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
+    excluded_docs = _doc_exclusions(DEFAULT_VERSION)
     search_k = int(req.k)
     tool_cfg = retrieval_cfg.get("tool_calls") if isinstance(retrieval_cfg.get("tool_calls"), dict) else {}
     tool_calls_enabled = bool(tool_cfg.get("enabled", False))
@@ -3119,7 +3508,7 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
     all_results: list[dict[str, Any]] = []
     seen_results: set[str] = set()
     tool_calls_used = 0
-    current_query = req.message
+    current_query = _build_session_retrieval_query(req.message, history)
     current_k = search_k
     current_doc_ids: list[str] | None = None
     current_page_ids: list[str] | None = None
@@ -3195,7 +3584,8 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
             request.get("doc_ids"),
             request.get("page_ids"),
         )
-        current_query = str(request.get("query") or req.message).strip() or req.message
+        requested_query = str(request.get("query") or req.message).strip() or req.message
+        current_query = _build_session_retrieval_query(requested_query, history)
         requested_k = int(request.get("k") or 0)
         if requested_k <= 0:
             current_k = search_k
@@ -3207,7 +3597,7 @@ async def chat(req: ChatRequest, response: Response, ctx: AuthContext = Depends(
     max_citations = int(retrieval_cfg.get("max_citations", 8))
     max_images = int(retrieval_cfg.get("max_images", 6))
     citations = _build_citations(all_results, DEFAULT_VERSION, max_citations=max_citations)
-    images = _build_images(all_results, max_images=max_images)
+    images = _build_images(all_results, DEFAULT_VERSION, max_images=max_images)
     context_chunks = _build_context_chunks(all_results, DEFAULT_VERSION)
 
     app_db.insert_message(session_id=session_id, role="assistant", content=answer)
@@ -3242,7 +3632,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
         session = app_db.create_session(owner_id=ctx.principal.owner_id, title=req.message[:60])
         session_id = session["session_id"]
 
-    settings = get_settings_bundle()["effective"]
+    settings = _normalized_settings_bundle()["effective"]
     required_placeholders = settings.get("required_placeholders")
     if not isinstance(required_placeholders, list):
         required_placeholders = ["context"]
@@ -3304,6 +3694,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
     reranker_max_chars = int(reranker.get("max_chars", 0) or 0) or 0
 
     allow, deny = docs_allowed_for_role(ctx.principal.role)
+    excluded_docs = _doc_exclusions(DEFAULT_VERSION)
     search_k = int(req.k)
     tool_cfg = retrieval_cfg.get("tool_calls") if isinstance(retrieval_cfg.get("tool_calls"), dict) else {}
     tool_calls_enabled = bool(tool_cfg.get("enabled", False))
@@ -3425,7 +3816,12 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                         max_per_page=max_per_page,
                         max_per_doc=max_per_doc,
                     )
-                rows = [r for r in rows if _doc_allowed(r.get("doc_id"), allow, deny)]
+                rows = [
+                    r
+                    for r in rows
+                    if _doc_allowed(r.get("doc_id"), allow, deny)
+                    and str(r.get("doc_id") or "") not in excluded_docs
+                ]
                 if doc_ids:
                     allowed_docs = {str(x) for x in doc_ids}
                     rows = [r for r in rows if str(r.get("doc_id") or "") in allowed_docs]
@@ -3437,7 +3833,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
             all_results: list[dict[str, Any]] = []
             seen_results: set[str] = set()
             tool_calls_used = 0
-            current_query = req.message
+            current_query = _build_session_retrieval_query(req.message, history)
             current_k = search_k
             current_doc_ids: list[str] | None = None
             current_page_ids: list[str] | None = None
@@ -3494,7 +3890,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                 max_citations = int(retrieval_cfg.get("max_citations", 8))
                 max_images = int(retrieval_cfg.get("max_images", 6))
                 citations = _build_citations(all_results, DEFAULT_VERSION, max_citations=max_citations)
-                images = _build_images(all_results, max_images=max_images)
+                images = _build_images(all_results, DEFAULT_VERSION, max_images=max_images)
                 context_chunks = _build_context_chunks(all_results, DEFAULT_VERSION)
 
                 retrieval_pack = SearchResponse(
@@ -3503,7 +3899,7 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                             "doc_id": r["doc_id"],
                             "page_id": r["page_id"],
                             "heading_path": r["heading_path"],
-                            "text": r["text"],
+                            "text": _sanitize_local_file_refs(str(r["text"])),
                             "score": r["score"],
                         }
                         for r in all_results
@@ -3516,6 +3912,8 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                     "docs_version": DEFAULT_VERSION,
                     "retrieval_mode": retrieval_mode,
                     "k": int(req.k),
+                    "user_query": str(req.message),
+                    "retrieval_query": str(current_query),
                     "web_enabled": bool(web_enabled),
                     "pass": int(pass_idx),
                     "tool_calls_used": int(tool_calls_used),
@@ -3605,7 +4003,8 @@ async def chat_stream(req: ChatRequest, request: Request, ctx: AuthContext = Dep
                             "tool_calls_used": int(tool_calls_used),
                         },
                     )
-                    current_query = str(request.get("query") or req.message).strip() or req.message
+                    requested_query = str(request.get("query") or req.message).strip() or req.message
+                    current_query = _build_session_retrieval_query(requested_query, history)
                     requested_k = int(request.get("k") or 0)
                     if requested_k <= 0:
                         current_k = search_k
