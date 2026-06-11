@@ -11,6 +11,7 @@ from typing import Literal
 from fastapi import HTTPException, Request, Response
 
 from . import app_db
+from .config import COOKIE_DOMAIN, COOKIE_SAMESITE, COOKIE_SECURE
 from .logging_utils import get_logger
 
 log = get_logger(__name__)
@@ -26,6 +27,29 @@ if not _AUTH_SECRET:
     log.warning("LUXRIOT_AUTH_SECRET is not set; using ephemeral secret (sessions reset on restart).")
 
 _SESSION_TTL_S = int(os.getenv("LUXRIOT_SESSION_TTL_S", "2592000"))  # 30 days
+
+
+def _cookie_kwargs(*, max_age: int | None = None) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "httponly": True,
+        "samesite": COOKIE_SAMESITE,
+        "secure": COOKIE_SECURE,
+    }
+    if COOKIE_DOMAIN:
+        kwargs["domain"] = COOKIE_DOMAIN
+    if max_age is not None:
+        kwargs["max_age"] = max_age
+    return kwargs
+
+
+def _delete_cookie_kwargs() -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "samesite": COOKIE_SAMESITE,
+        "secure": COOKIE_SECURE,
+    }
+    if COOKIE_DOMAIN:
+        kwargs["domain"] = COOKIE_DOMAIN
+    return kwargs
 
 
 @dataclass(frozen=True)
@@ -253,16 +277,21 @@ def _anonymous_principal(request: Request, *, new_cookie: bool) -> tuple[Princip
 
 def apply_auth_cookies(response: Response, ctx: AuthContext) -> None:
     if ctx.clear_auth_cookie:
-        response.delete_cookie(AUTH_COOKIE)
+        clear_auth_cookie(response)
     if ctx.set_anon_cookie:
         response.set_cookie(
             ANON_COOKIE,
             ctx.set_anon_cookie,
-            httponly=True,
-            samesite="lax",
-            secure=False,
-            max_age=60 * 60 * 24 * 365,
+            **_cookie_kwargs(max_age=60 * 60 * 24 * 365),
         )
+
+
+def set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(AUTH_COOKIE, token, **_cookie_kwargs(max_age=_SESSION_TTL_S))
+
+
+def clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(AUTH_COOKIE, **_delete_cookie_kwargs())
 
 
 def require_role(ctx: AuthContext, allowed: set[Role]) -> None:

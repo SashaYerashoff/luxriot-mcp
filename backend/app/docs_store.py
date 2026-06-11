@@ -33,6 +33,7 @@ class DocsStore:
         self._doc_titles: dict[str, str] = {}
         self._doc_pages: dict[str, list[PageRecord]] = {}
         self._pages: dict[tuple[str, str], PageRecord] = {}
+        self._source_pages: dict[str, PageRecord] = {}
 
     def is_ready(self) -> bool:
         return self.pages_jsonl_path.exists()
@@ -43,6 +44,11 @@ class DocsStore:
         self._doc_titles = {}
         self._doc_pages = {}
         self._pages = {}
+        self._source_pages = {}
+
+    @staticmethod
+    def _lookup_path(value: str) -> str:
+        return str(value or "").strip().replace("\\", "/").lstrip("/")
 
     def _safe_resolve(self, base: Path, rel: str) -> Path:
         candidate = (base / rel).resolve()
@@ -62,6 +68,7 @@ class DocsStore:
         doc_titles: dict[str, str] = {}
         doc_pages: dict[str, list[PageRecord]] = {}
         pages: dict[tuple[str, str], PageRecord] = {}
+        source_pages: dict[str, PageRecord] = {}
 
         with self.pages_jsonl_path.open("r", encoding="utf-8") as f:
             for line_no, line in enumerate(f, start=1):
@@ -119,12 +126,15 @@ class DocsStore:
                 )
                 doc_pages[doc_id].append(page)
                 pages[(doc_id, page_id)] = page
+                if page.source_path:
+                    source_pages[self._lookup_path(page.source_path)] = page
 
         self._mtime = mtime
         self._doc_order = doc_order
         self._doc_titles = doc_titles
         self._doc_pages = doc_pages
         self._pages = pages
+        self._source_pages = source_pages
 
     def list_docs(self) -> list[dict[str, Any]]:
         self._load_if_needed()
@@ -164,6 +174,13 @@ class DocsStore:
         if not page:
             raise KeyError(f"{key[0]}/{key[1]}")
         return page
+
+    def find_page_by_source_path(self, source_path: str) -> PageRecord | None:
+        self._load_if_needed()
+        key = self._lookup_path(source_path)
+        if not key:
+            return None
+        return self._source_pages.get(key)
 
     def read_markdown(self, page: PageRecord) -> str:
         md_path = self._safe_resolve(self.root, page.markdown_path)

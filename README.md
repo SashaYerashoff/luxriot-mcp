@@ -78,14 +78,93 @@ Auth endpoints:
 - Self: `POST /auth/password/change`
 - Publish requests: `GET /admin/publish-requests`, `POST /docs/page/{doc_id}/{page_id}/publish/request`, `POST /admin/publish-requests/{doc_id}/{page_id}/approve|reject`
 
+## Preview deployment: VPS gateway + office backend
+
+Recommended preview topology:
+
+- Put the public DNS name and TLS certificate on the VPS.
+- Serve `index.html` from the VPS or from the FastAPI app behind the VPS.
+- Reverse-proxy backend paths to the office backend through a private tunnel.
+- Keep LM Studio, `datastore/`, `docs/`, and `backend/data/app.sqlite` on the office server.
+- Add a customer IP allowlist on the VPS/firewall until OAuth is added.
+
+For the lowest-risk setup, keep the browser and API same-origin:
+
+```text
+https://assistant.example.com/          -> static UI
+https://assistant.example.com/auth/...  -> office backend through tunnel
+https://assistant.example.com/docs/...  -> office backend through tunnel
+https://assistant.example.com/chat/...  -> office backend through tunnel
+https://assistant.example.com/assets/... -> office backend through tunnel
+```
+
+If the static UI and API are intentionally split, define this before loading `index.html`:
+
+```html
+<script>
+  window.LUXRIOT_CONFIG = {
+    apiBase: "https://api.assistant.example.com",
+    apiCredentials: "include"
+  };
+</script>
+```
+
+The URL parameter `?api=https://...` still overrides the API base for quick debugging.
+
 ## Environment variables
 
 - `LMSTUDIO_BASE_URL` (default `http://localhost:1234`)
 - `LMSTUDIO_MODEL` (optional; auto-detected if unset)
 - `LUXRIOT_APP_VERSION` (overrides `VERSION`)
 - `LUXRIOT_DOCS_VERSION` (default `evo_1_32`)
+- `LUXRIOT_DOCS_DIR` (default `docs`)
+- `LUXRIOT_DATASTORE_DIR` (default `datastore`)
 - `LUXRIOT_APP_DB_PATH` (default `backend/data/app.sqlite`)
+- `LUXRIOT_AUTH_SECRET` (required for stable production sessions)
+- `LUXRIOT_ADMIN_USERNAME` / `LUXRIOT_ADMIN_PASSWORD` (bootstrap admin credentials)
+- `LUXRIOT_TRUSTED_HOSTS` (comma-separated hosts accepted by FastAPI, default `*`)
+- `LUXRIOT_CORS_ORIGINS` (comma-separated allowed origins, default `*`)
+- `LUXRIOT_CORS_ALLOW_CREDENTIALS` (`1` only for explicit cross-origin cookie use)
+- `LUXRIOT_COOKIE_SECURE` (`1` behind HTTPS)
+- `LUXRIOT_COOKIE_SAMESITE` (`lax`, `strict`, or `none`; use `none` only with HTTPS cross-origin)
+- `LUXRIOT_COOKIE_DOMAIN` (optional cookie domain)
+- `LUXRIOT_RAWDOCS_REQUIRE_AUTH` (default `1`)
+- `LUXRIOT_ASSETS_REQUIRE_AUTH` (default `1`)
+
+Example same-origin HTTPS preview:
+
+```bash
+export LUXRIOT_AUTH_SECRET='replace-with-long-random-value'
+export LUXRIOT_TRUSTED_HOSTS='assistant.example.com,127.0.0.1,localhost'
+export LUXRIOT_COOKIE_SECURE=1
+export LUXRIOT_COOKIE_SAMESITE=lax
+export LUXRIOT_RAWDOCS_REQUIRE_AUTH=1
+export LUXRIOT_ASSETS_REQUIRE_AUTH=1
+uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+Example split-origin preview:
+
+```bash
+export LUXRIOT_AUTH_SECRET='replace-with-long-random-value'
+export LUXRIOT_TRUSTED_HOSTS='api.assistant.example.com,127.0.0.1,localhost'
+export LUXRIOT_CORS_ORIGINS='https://assistant.example.com'
+export LUXRIOT_CORS_ALLOW_CREDENTIALS=1
+export LUXRIOT_COOKIE_SECURE=1
+export LUXRIOT_COOKIE_SAMESITE=none
+uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
 
 ## MCP server
 
 See `mcp-server/README.md` and `mcp-server/mcp.sample.json`.
+
+## Docker preview deployment
+
+Two-container preview deployment files are available:
+
+- `docker-compose.cloud.yml` - cloud face container with Caddy, static UI, HTTPS, and reverse proxy.
+- `docker-compose.cloud.selfsigned.yml` - self-signed/internal TLS override for lab demos.
+- `docker-compose.office.yml` - office backend container with mounted docs/datastore/app DB.
+
+See `deploy/README.md` for tunnel and startup commands.

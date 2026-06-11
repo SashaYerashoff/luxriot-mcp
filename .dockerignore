@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.sqlite
+*.sqlite-*
+backend/data/*.sqlite
+backend/data/*.sqlite-*
+datastore
+docs
+node_modules
+.pytest_cache
+.mypy_cache
+.ruff_cache

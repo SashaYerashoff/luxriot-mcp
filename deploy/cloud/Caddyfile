@@ -1,0 +1,14 @@
+{$SITE_ADDRESS:localhost} {
+	root * /srv
+	encode zstd gzip
+
+	@backend {
+		path /auth /auth/* /admin /admin/* /docs /docs/* /chat /chat/* /sessions /sessions/* /home /home/* /health /ops /ops/* /telemetry /telemetry/* /assets /assets/* /rawdocs /rawdocs/*
+	}
+
+	reverse_proxy @backend {$BACKEND_UPSTREAM:http://host.docker.internal:18080} {
+		header_up Host localhost
+	}
+
+	file_server
+}

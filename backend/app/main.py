@@ -20,21 +20,36 @@ from urllib.parse import quote_plus
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
 from . import app_db
 from .auth import (
-    AUTH_COOKIE,
     AuthContext,
     apply_auth_cookies,
+    clear_auth_cookie,
     create_login_session,
     docs_allowed_for_role,
     ensure_bootstrap_admin,
     logout_session,
     resolve_auth,
     require_role,
+    set_auth_cookie,
 )
-from .config import APP_DB_PATH, APP_VERSION, DATASTORE_DIR, DEFAULT_VERSION, DOCS_DIR, LMSTUDIO_BASE_URL, REPO_ROOT
+from .config import (
+    APP_DB_PATH,
+    APP_VERSION,
+    ASSETS_REQUIRE_AUTH,
+    CORS_ALLOW_CREDENTIALS,
+    CORS_ORIGINS,
+    DATASTORE_DIR,
+    DEFAULT_VERSION,
+    DOCS_DIR,
+    LMSTUDIO_BASE_URL,
+    RAWDOCS_REQUIRE_AUTH,
+    REPO_ROOT,
+    TRUSTED_HOSTS,
+)
 from .datastore_search import SearchEngine
 from .docs_store import DocsStore
 from .lmstudio import LMStudioError, chat_completion, chat_completion_stream
@@ -103,10 +118,15 @@ from .schemas import (
 log = get_logger(__name__)
 
 app = FastAPI(title="luxriot-mcp-backend")
+
+if TRUSTED_HOSTS and TRUSTED_HOSTS != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
+
+_cors_origins = [] if CORS_ALLOW_CREDENTIALS and "*" in CORS_ORIGINS else CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=_cors_origins,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -199,14 +219,7 @@ def auth_me(response: Response, ctx: AuthContext = Depends(resolve_auth)) -> Aut
 @app.post("/auth/login", response_model=LoginResponse)
 def auth_login(req: LoginRequest, response: Response) -> LoginResponse:
     principal, token = create_login_session(username=req.username, password=req.password)
-    response.set_cookie(
-        AUTH_COOKIE,
-        token,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=int(60 * 60 * 24 * 30),
-    )
+    set_auth_cookie(response, token)
     return LoginResponse(
         user=AuthMeResponse(
             authenticated=True,
@@ -225,7 +238,7 @@ def auth_login(req: LoginRequest, response: Response) -> LoginResponse:
 def auth_logout(request: Request, response: Response, ctx: AuthContext = Depends(resolve_auth)) -> AuthMeResponse:
     if ctx.principal.authenticated:
         logout_session(request)
-    response.delete_cookie(AUTH_COOKIE)
+    clear_auth_cookie(response)
     anon_ctx = resolve_auth(request)
     apply_auth_cookies(response, anon_ctx)
     p = anon_ctx.principal
@@ -1016,30 +1029,6 @@ def admin_update_settings(req: AdminSettingsUpdateRequest, ctx: AuthContext = De
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.get("/assets/{version}/{path:path}")
-def assets(version: str, path: str) -> FileResponse:
-    base = DATASTORE_DIR / version / "assets"
-    if not base.exists():
-        raise HTTPException(status_code=404, detail=f"Assets not found for version '{version}'")
-    file_path = _safe_resolve(base, path)
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Asset not found")
-    return FileResponse(str(file_path))
-
-
-@app.get("/rawdocs/{version}/{path:path}")
-def rawdocs(version: str, path: str) -> FileResponse:
-    if version != DEFAULT_VERSION:
-        raise HTTPException(status_code=404, detail=f"Unknown version '{version}'")
-    base = DOCS_DIR
-    if not base.exists():
-        raise HTTPException(status_code=404, detail="Docs directory not found")
-    file_path = _safe_resolve(base, path)
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Doc file not found")
-    return FileResponse(str(file_path))
-
-
 def _doc_allowed(doc_id: str, allow: set[str] | None, deny: set[str]) -> bool:
     did = str(doc_id or "").strip()
     if not did:
@@ -1049,6 +1038,70 @@ def _doc_allowed(doc_id: str, allow: set[str] | None, deny: set[str]) -> bool:
     if did in deny:
         return False
     return True
+
+
+def _require_doc_read_access(version: str, doc_id: str, ctx: AuthContext) -> None:
+    allow, deny = docs_allowed_for_role(ctx.principal.role)
+    if not _doc_allowed(doc_id, allow, deny):
+        raise HTTPException(status_code=403, detail="Doc is not available for this user")
+
+
+def _doc_id_from_asset_path(path: str) -> str | None:
+    parts = [p for p in str(path or "").replace("\\", "/").split("/") if p]
+    if not parts:
+        return None
+    if parts[0] == "user":
+        return parts[1] if len(parts) > 1 else None
+    return parts[0]
+
+
+def _require_asset_read_access(version: str, path: str, ctx: AuthContext) -> None:
+    doc_id = _doc_id_from_asset_path(path)
+    if not doc_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if _doc_exists(version, doc_id):
+        _require_doc_read_access(version, doc_id, ctx)
+        return
+    require_role(ctx, {"admin", "redactor", "support"})
+
+
+@app.get("/assets/{version}/{path:path}")
+def assets(version: str, path: str, ctx: AuthContext = Depends(resolve_auth)) -> FileResponse:
+    ver = _require_version(version)
+    base = DATASTORE_DIR / ver / "assets"
+    if not base.exists():
+        raise HTTPException(status_code=404, detail=f"Assets not found for version '{ver}'")
+    file_path = _safe_resolve(base, path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if ASSETS_REQUIRE_AUTH:
+        _require_asset_read_access(ver, path, ctx)
+    response = FileResponse(str(file_path))
+    apply_auth_cookies(response, ctx)
+    return response
+
+
+@app.get("/rawdocs/{version}/{path:path}")
+def rawdocs(version: str, path: str, ctx: AuthContext = Depends(resolve_auth)) -> FileResponse:
+    if version != DEFAULT_VERSION:
+        raise HTTPException(status_code=404, detail=f"Unknown version '{version}'")
+    if RAWDOCS_REQUIRE_AUTH:
+        store = _get_docs_store(version)
+        if not store.is_ready():
+            raise HTTPException(status_code=503, detail=f"Docs catalog not found for version '{version}'")
+        page = store.find_page_by_source_path(path)
+        if not page:
+            raise HTTPException(status_code=404, detail="Doc file not found")
+        _require_doc_read_access(version, page.doc_id, ctx)
+    base = DOCS_DIR
+    if not base.exists():
+        raise HTTPException(status_code=404, detail="Docs directory not found")
+    file_path = _safe_resolve(base, path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Doc file not found")
+    response = FileResponse(str(file_path))
+    apply_auth_cookies(response, ctx)
+    return response
 
 
 def _get_doc_title(version: str, doc_id: str) -> str | None:

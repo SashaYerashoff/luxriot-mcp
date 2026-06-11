@@ -1,0 +1,22 @@
+services:
+  face:
+    build:
+      context: .
+      dockerfile: deploy/cloud/Dockerfile
+    image: luxriot-assistant-face:0.2.6
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://host.docker.internal:18080}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  caddy_data:
+  caddy_config:

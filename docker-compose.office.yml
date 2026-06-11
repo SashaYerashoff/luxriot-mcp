@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/office/Dockerfile
+    image: luxriot-assistant-back:0.2.6
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234}
+      LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-}
+      LUXRIOT_DOCS_DIR: /data/docs
+      LUXRIOT_DATASTORE_DIR: /data/datastore
+      LUXRIOT_APP_DB_PATH: /data/app.sqlite
+      LUXRIOT_DOCS_VERSION: ${LUXRIOT_DOCS_VERSION:-evo_1_32}
+      LUXRIOT_AUTH_SECRET: ${LUXRIOT_AUTH_SECRET:?set LUXRIOT_AUTH_SECRET}
+      LUXRIOT_TRUSTED_HOSTS: ${LUXRIOT_TRUSTED_HOSTS:-localhost,127.0.0.1}
+      LUXRIOT_COOKIE_SECURE: ${LUXRIOT_COOKIE_SECURE:-1}
+      LUXRIOT_COOKIE_SAMESITE: ${LUXRIOT_COOKIE_SAMESITE:-lax}
+      LUXRIOT_RAWDOCS_REQUIRE_AUTH: ${LUXRIOT_RAWDOCS_REQUIRE_AUTH:-1}
+      LUXRIOT_ASSETS_REQUIRE_AUTH: ${LUXRIOT_ASSETS_REQUIRE_AUTH:-1}
+    volumes:
+      - ./backend/data:/data
+      - ./docs:/data/docs:ro
+      - ./datastore:/data/datastore
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

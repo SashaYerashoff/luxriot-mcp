@@ -2252,9 +2252,12 @@
   window.addEventListener('resize', setVhUnit);
 
   // ---------- Backend wiring ----------
+  const runtimeConfig = window.LUXRIOT_CONFIG || {};
   const apiParam = new URLSearchParams(location.search).get('api');
+  const runtimeApiBase = runtimeConfig.apiBase || runtimeConfig.api_base || '';
   const defaultApiBase = (location.protocol === 'file:' ? 'http://localhost:8000' : location.origin);
-  const apiBase = (apiParam || defaultApiBase).replace(/\/$/, '');
+  const apiBase = (apiParam || runtimeApiBase || defaultApiBase).replace(/\/$/, '');
+  const apiCredentials = runtimeConfig.apiCredentials || runtimeConfig.api_credentials || (apiParam ? 'include' : 'same-origin');
 
   // "conversation" state (also used by the redactor UI)
   const session = {
@@ -5071,7 +5074,7 @@
 	  }
 
   async function apiJson(path, { method = 'GET', body = undefined } = {}) {
-    const opts = { method, headers: {} };
+    const opts = { method, headers: {}, credentials: apiCredentials };
     if (body !== undefined) {
       if (body instanceof FormData) {
         opts.body = body;
@@ -5092,7 +5095,7 @@
   }
 
   async function apiBlob(path, { method = 'GET', body = undefined } = {}) {
-    const opts = { method, headers: {} };
+    const opts = { method, headers: {}, credentials: apiCredentials };
     if (body !== undefined) {
       if (body instanceof FormData) {
         opts.body = body;
@@ -5130,8 +5133,8 @@
     return cleaned || 'document';
   }
 
-	  async function apiSse(path, { body, onEvent, signal } = {}) {
-    const opts = { method: 'POST', headers: { accept: 'text/event-stream' } };
+  async function apiSse(path, { body, onEvent, signal } = {}) {
+    const opts = { method: 'POST', headers: { accept: 'text/event-stream' }, credentials: apiCredentials };
     if (body !== undefined) {
       opts.headers['content-type'] = 'application/json';
       opts.body = JSON.stringify(body);

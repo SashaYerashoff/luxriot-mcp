@@ -1,0 +1,19 @@
+[Unit]
+Description=Luxriot assistant reverse tunnel to cloud face
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_OFFICE_USER
+ExecStart=/usr/bin/ssh -NT \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -R 127.0.0.1:18080:127.0.0.1:8000 \
+  REPLACE_WITH_TUNNEL_USER@REPLACE_WITH_VPS_HOST
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

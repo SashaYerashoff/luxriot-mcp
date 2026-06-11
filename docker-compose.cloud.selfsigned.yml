@@ -1,0 +1,3 @@
+services:
+  face:
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.selfsigned", "--adapter", "caddyfile"]
