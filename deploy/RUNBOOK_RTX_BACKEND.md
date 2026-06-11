@@ -128,6 +128,31 @@ docker compose -f docker-compose.office.yml ps
 docker compose -f docker-compose.office.yml logs --tail=120 backend
 ```
 
+Если нужно сбросить пароль admin без удаления БД, временно добавить в `.env`:
+
+```bash
+LUXRIOT_ADMIN_USERNAME=admin
+LUXRIOT_ADMIN_PASSWORD=replace-with-new-strong-password
+LUXRIOT_ADMIN_PASSWORD_RESET=1
+```
+
+Затем перезапустить backend:
+
+```bash
+docker compose -f docker-compose.office.yml up -d --force-recreate
+docker compose -f docker-compose.office.yml logs --tail=80 backend
+```
+
+После успешного входа удалить или очистить reset flag:
+
+```bash
+sed -i '/^LUXRIOT_ADMIN_PASSWORD_RESET=/d' .env
+docker compose -f docker-compose.office.yml up -d --force-recreate
+```
+
+Важно: `docker-compose.office.yml` должен пробрасывать `LUXRIOT_ADMIN_USERNAME`,
+`LUXRIOT_ADMIN_PASSWORD` и `LUXRIOT_ADMIN_PASSWORD_RESET` в container environment.
+
 Проверка health локально на RTX:
 
 ```bash
@@ -212,6 +237,36 @@ echo
 ```bash
 curl http://127.0.0.1:18080/health
 docker compose -f /opt/luxriot-mcp/docker-compose.cloud.yml logs --tail=120 face
+```
+
+Если `curl http://127.0.0.1:18080/health` на VPS работает, но Caddy container
+все равно отдает `502`, значит tunnel слушает только loopback VPS, а Caddy
+container не может подключиться к нему напрямую. В таком случае на VPS нужен
+локальный bridge через `socat` на gateway docker-сети:
+
+```bash
+cd /opt/luxriot-mcp
+
+GATEWAY=$(docker network inspect luxriot-mcp_default --format '{{(index .IPAM.Config 0).Gateway}}')
+SUBNET=$(docker network inspect luxriot-mcp_default --format '{{(index .IPAM.Config 0).Subnet}}')
+echo "gateway=$GATEWAY subnet=$SUBNET"
+
+ufw allow from "$SUBNET" to "$GATEWAY" port 18080 proto tcp
+
+pgrep -fa 'socat.*18080' || \
+  nohup socat TCP-LISTEN:18080,bind="$GATEWAY",fork,reuseaddr TCP:127.0.0.1:18080 \
+    >/var/log/luxriot-socat-18080.log 2>&1 &
+
+cat > .env <<EOF
+SITE_ADDRESS=llm.luxriot.systems
+BACKEND_UPSTREAM=http://$GATEWAY:18080
+EOF
+
+docker compose -f docker-compose.cloud.yml up -d --force-recreate
+
+docker compose -f docker-compose.cloud.yml exec -T face sh -lc \
+  "wget -S -O- -T 5 http://$GATEWAY:18080/health"
+curl -sS https://llm.luxriot.systems/health
 ```
 
 ## Минимальные порты для админа
